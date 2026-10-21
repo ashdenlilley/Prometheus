@@ -11,15 +11,43 @@ export const STATUSES: { id: Status; label: string; color: string }[] = [
 // Index is the stored priority value (0 = none, 1 = urgent ... 4 = low)
 export const PRIORITIES = ['No priority', 'Urgent', 'High', 'Medium', 'Low']
 
-export type ColumnType = 'text' | 'number' | 'date' | 'checkbox' | 'select'
+export type ColumnType =
+  | 'text'
+  | 'long_text'
+  | 'number'
+  | 'status'
+  | 'dropdown'
+  | 'people'
+  | 'date'
+  | 'timeline'
+  | 'checkbox'
+  | 'tags'
+  | 'link'
+  | 'email'
+  | 'phone'
+  | 'rating'
+  | 'progress'
+  | 'created'
+  | 'updated'
 
-export type CellValue = string | number | boolean
+export interface SelectOption {
+  id: string
+  label: string
+  color: string
+}
+
+export interface DateRange {
+  start?: string
+  end?: string
+}
+
+export type CellValue = string | number | boolean | string[] | DateRange
 
 export interface Column {
   id: string
   name: string
   type: ColumnType
-  options?: string[]
+  options?: SelectOption[]
 }
 
 export interface Project {
@@ -30,6 +58,10 @@ export interface Project {
   startDate?: string
   targetDate?: string
   columns: Column[]
+  // Column widths in px, keyed by fixed column key or custom column id
+  widths: Record<string, number>
+  // Table column order, by fixed key or custom column id. 'name' always leads.
+  order?: string[]
 }
 
 export interface Issue {
@@ -59,7 +91,7 @@ export interface Cycle {
 }
 
 export interface AppData {
-  version: 1
+  version: 2
   projects: Project[]
   issues: Issue[]
   cycles: Cycle[]

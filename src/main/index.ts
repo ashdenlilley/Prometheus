@@ -1,8 +1,9 @@
-import { app, BrowserWindow, ipcMain } from 'electron'
+import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import { join } from 'path'
 import { promises as fs } from 'fs'
 import type { AppData } from '../shared/types'
 
+const isMac = process.platform === 'darwin'
 const dataFile = () => join(app.getPath('userData'), 'prometheus-data.json')
 
 // Writes run one at a time so overlapping saves cannot interleave.
@@ -27,13 +28,24 @@ ipcMain.handle('data:save', (_event, data: AppData) => {
   return writeQueue
 })
 
+// Only web links leave the app; anything else is ignored.
+ipcMain.handle('shell:open', (_event, url: string) => {
+  if (/^https?:\/\//i.test(url)) return shell.openExternal(url)
+})
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1280,
     height: 820,
-    minWidth: 900,
-    minHeight: 600,
+    minWidth: 960,
+    minHeight: 620,
     title: 'Prometheus',
+    backgroundColor: isMac ? '#00000000' : '#16171b',
+    // macOS: full-size content with translucent sidebar; traffic lights sit over the sidebar.
+    titleBarStyle: isMac ? 'hiddenInset' : 'default',
+    trafficLightPosition: isMac ? { x: 18, y: 18 } : undefined,
+    vibrancy: isMac ? 'sidebar' : undefined,
+    visualEffectState: 'active',
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false
@@ -48,6 +60,8 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  // Packaged builds take the icon from the bundle; dev runs need it set explicitly.
+  if (isMac && !app.isPackaged) app.dock?.setIcon(join(__dirname, '../../build/icon.png'))
   createWindow()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
@@ -55,5 +69,5 @@ app.whenReady().then(() => {
 })
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit()
+  if (!isMac) app.quit()
 })
