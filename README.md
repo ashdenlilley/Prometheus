@@ -1,6 +1,6 @@
 # Prometheus
 
-Local-first project management. Linear-style issues, cycles and roadmap. Monday-style boards with custom columns and timeline. Single user, no sync. Runs on macOS and Windows.
+Local-first project management. Linear-style issues, cycles and roadmap. Monday-style boards with custom columns and timeline. Single user. Optional folder sync across devices (see docs/sync.md). Runs on macOS and Windows.
 
 ## Views
 

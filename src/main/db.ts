@@ -73,6 +73,58 @@ export class Store {
       if (parent) this.db.run(`CREATE INDEX IF NOT EXISTS idx_${t}_${parent} ON ${t} (${parent})`)
     }
     this.db.run('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)')
+    // Sync bookkeeping: winning hlc per row (tombstones included) and sync files already applied.
+    this.db.run('CREATE TABLE IF NOT EXISTS sync_clock (key TEXT PRIMARY KEY, hlc TEXT NOT NULL)')
+    this.db.run('CREATE TABLE IF NOT EXISTS sync_applied (name TEXT PRIMARY KEY)')
+  }
+
+  clocks(): Map<string, string> {
+    const out = new Map<string, string>()
+    if (!this.db) return out
+    const res = this.db.exec('SELECT key, hlc FROM sync_clock')
+    for (const r of res[0]?.values ?? []) out.set(String(r[0]), String(r[1]))
+    return out
+  }
+
+  async setClocks(entries: [string, string][]): Promise<void> {
+    if (!this.db || entries.length === 0) return
+    this.db.run('BEGIN')
+    try {
+      for (const [key, hlc] of entries) this.db.run('INSERT OR REPLACE INTO sync_clock (key, hlc) VALUES (?, ?)', [key, hlc])
+      this.db.run('COMMIT')
+    } catch (err) {
+      this.db.run('ROLLBACK')
+      throw err
+    }
+    return this.flush()
+  }
+
+  appliedNames(): Set<string> {
+    const out = new Set<string>()
+    if (!this.db) return out
+    const res = this.db.exec('SELECT name FROM sync_applied')
+    for (const r of res[0]?.values ?? []) out.add(String(r[0]))
+    return out
+  }
+
+  async markApplied(names: string[]): Promise<void> {
+    if (!this.db || names.length === 0) return
+    this.db.run('BEGIN')
+    try {
+      for (const n of names) this.db.run('INSERT OR IGNORE INTO sync_applied (name) VALUES (?)', [n])
+      this.db.run('COMMIT')
+    } catch (err) {
+      this.db.run('ROLLBACK')
+      throw err
+    }
+    return this.flush()
+  }
+
+  // Wipes sync bookkeeping. Used when joining a folder and replaying it from scratch.
+  resetSync() {
+    if (!this.db) return
+    this.db.run('DELETE FROM sync_clock')
+    this.db.run('DELETE FROM sync_applied')
   }
 
   // True once a snapshot has been written. An empty workspace after deleting everything still counts.
