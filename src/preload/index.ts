@@ -14,6 +14,15 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.removeListener('data:external', listener)
     }
   },
+  sync: {
+    status: () => ipcRenderer.invoke('sync:status') as Promise<SyncStatus | null>,
+    defaultFolder: () => ipcRenderer.invoke('sync:defaultFolder') as Promise<string>,
+    chooseFolder: () => ipcRenderer.invoke('sync:chooseFolder') as Promise<string | null>,
+    inspect: (folder: string) => ipcRenderer.invoke('sync:inspect', folder) as Promise<{ devices: number; segments: number }>,
+    join: (folder: string, mode: 'push' | 'adopt') => ipcRenderer.invoke('sync:join', folder, mode) as Promise<SyncStatus>,
+    disable: () => ipcRenderer.invoke('sync:disable') as Promise<void>,
+    now: () => ipcRenderer.invoke('sync:now') as Promise<void>
+  },
   mcp: {
     status: () => ipcRenderer.invoke('mcp:status') as Promise<McpStatus>,
     setEnabled: (enabled: boolean) => ipcRenderer.invoke('mcp:setEnabled', enabled) as Promise<McpStatus>,
@@ -27,4 +36,14 @@ export interface McpStatus {
   url: string
   token: string
   port: number
+}
+
+export interface SyncStatus {
+  enabled: boolean
+  folder: string | null
+  deviceId: string
+  deviceName: string
+  pending: number
+  lastSync: number | null
+  error: string | null
 }
