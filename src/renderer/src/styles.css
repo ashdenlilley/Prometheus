@@ -151,6 +151,30 @@ textarea {
   box-shadow: var(--shadow-sm);
 }
 
+.wordmark {
+  display: inline-flex;
+  align-items: center;
+}
+
+.wordmark-img {
+  display: block;
+  width: auto;
+}
+
+.wordmark-img.on-light {
+  display: none;
+}
+
+@media (prefers-color-scheme: light) {
+  .wordmark-img.on-dark {
+    display: none;
+  }
+
+  .wordmark-img.on-light {
+    display: block;
+  }
+}
+
 .section-label {
   display: flex;
   justify-content: space-between;
