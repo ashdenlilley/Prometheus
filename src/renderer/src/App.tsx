@@ -3,6 +3,7 @@ import logo from './assets/logo.png'
 import { useStore } from './store'
 import { clsx } from './util'
 import { ICONS } from './components/icons'
+import { Wordmark } from './components/Wordmark'
 import { IssueDetail } from './components/IssueDetail'
 import { NewProjectModal } from './components/NewProjectModal'
 import { IssuesView } from './views/IssuesView'
@@ -45,6 +46,7 @@ export default function App() {
       return (
         <div className="empty">
           <img src={logo} alt="" className="empty-logo" />
+          <Wordmark height={28} />
           <p>No projects yet</p>
           <button className="btn primary" onClick={() => setCreating(true)}>New project</button>
         </div>
@@ -71,7 +73,7 @@ export default function App() {
       <aside className="sidebar">
         <div className="brand drag">
           <img src={logo} alt="" className="brand-logo" />
-          <span>Prometheus</span>
+          <Wordmark height={13} />
         </div>
 
         <div className="section-label">Views</div>
