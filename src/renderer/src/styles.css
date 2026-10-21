@@ -3117,3 +3117,14 @@ select.field-input:focus {
 .pick-row.fav-host {
   align-items: center;
 }
+
+/* Sync settings */
+.settings-field {
+  display: grid;
+  gap: 4px;
+  margin: 8px 0;
+}
+.sync-error {
+  color: #e5484d;
+  margin: 8px 0 0;
+}

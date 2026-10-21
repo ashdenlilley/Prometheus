@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, safeStorage, shell } from 'electron'
 import { join } from 'path'
 import { homedir } from 'os'
 import { promises as fs } from 'fs'
@@ -33,7 +33,18 @@ async function openStore(): Promise<Store> {
   store = next
   sync = new SyncEngine(dataDir(), next, {
     read: () => state!,
-    write: applyRemote
+    write: applyRemote,
+    keys: {
+      // The derived sync key is stored encrypted by the OS keychain (DPAPI / Keychain), never in plain text.
+      seal: key => safeStorage.encryptString(key.toString('base64')).toString('base64'),
+      open: sealed => {
+        try {
+          return Buffer.from(safeStorage.decryptString(Buffer.from(sealed, 'base64')), 'base64')
+        } catch {
+          return null
+        }
+      }
+    }
   })
   return next
 }
@@ -111,7 +122,7 @@ ipcMain.handle('data:save', (_event, incoming: AppData) => {
     return
   }
   sync.record(ops)
-  const merged = applyOps(state, ops)
+  const merged = applyOps(state, ops).data
   const remoteAhead = JSON.stringify(merged) !== JSON.stringify(incoming)
   state = merged
   void persist(merged)
@@ -143,7 +154,14 @@ ipcMain.handle('sync:chooseFolder', async () => {
   return res.canceled ? null : res.filePaths[0]
 })
 ipcMain.handle('sync:inspect', (_event, folder: string) => sync!.inspect(folder))
-ipcMain.handle('sync:join', (_event, folder: string, mode: 'push' | 'adopt') => sync!.join(folder, mode).then(() => sync!.getStatus()))
+ipcMain.handle('sync:join', async (_event, folder: string, mode: 'push' | 'adopt', passphrase: string) => {
+  await sync!.join(folder, mode, passphrase)
+  return sync!.getStatus()
+})
+ipcMain.handle('sync:unlock', async (_event, passphrase: string) => {
+  await sync!.unlock(passphrase)
+  return sync!.getStatus()
+})
 ipcMain.handle('sync:disable', () => sync!.disable())
 ipcMain.handle('sync:now', () => sync!.syncNow())
 
