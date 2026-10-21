@@ -21,10 +21,16 @@ jobs:
         include:
           - os: macos-14
             script: dist:mac
-            artifacts: 'dist/*.dmg dist/*.dmg.blockmap dist/latest-mac.yml'
+            artifacts: |
+              dist/*.dmg
+              dist/*.dmg.blockmap
+              dist/latest-mac.yml
           - os: windows-latest
             script: dist:win
-            artifacts: 'dist/*.exe dist/*.exe.blockmap dist/latest.yml'
+            artifacts: |
+              dist/*.exe
+              dist/*.exe.blockmap
+              dist/latest.yml
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
