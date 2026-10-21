@@ -1,127 +1,30 @@
 import { createContext, useContext, useEffect, useReducer, useRef, useState, type Dispatch, type ReactNode } from 'react'
-import type { AppData, CellValue, Column, Cycle, Issue, Project, Status } from '@shared/types'
+import type { AppData, CellValue, Column, Status } from '@shared/types'
+import { createIssue, reducer, type Action } from '@shared/model'
 import { addDays, todayISO, uid } from './util'
 
-export type Action =
-  | { type: 'load'; data: AppData }
-  | { type: 'addProject'; project: Project }
-  | { type: 'patchProject'; id: string; patch: Partial<Project> }
-  | { type: 'deleteProject'; id: string }
-  | { type: 'addColumn'; projectId: string; column: Column }
-  | { type: 'patchColumn'; projectId: string; columnId: string; patch: Partial<Column> }
-  | { type: 'deleteColumn'; projectId: string; columnId: string }
-  | { type: 'addIssue'; issue: Issue }
-  | { type: 'patchIssue'; id: string; patch: Partial<Issue> }
-  | { type: 'deleteIssue'; id: string }
-  | { type: 'addCycle'; cycle: Cycle }
-  | { type: 'patchCycle'; id: string; patch: Partial<Cycle> }
-  | { type: 'deleteCycle'; id: string }
+export { createIssue, issueKey, withValue, type Action } from '@shared/model'
 
-const mapProject = (s: AppData, id: string, fn: (p: Project) => Project): AppData => ({
-  ...s,
-  projects: s.projects.map(p => (p.id === id ? fn(p) : p))
-})
+const DEFAULT_SPACE_COLOR = '#5e6ad2'
 
-export function reducer(s: AppData, a: Action): AppData {
-  switch (a.type) {
-    case 'load':
-      return a.data
-    case 'addProject':
-      return { ...s, projects: [...s.projects, a.project] }
-    case 'patchProject':
-      return mapProject(s, a.id, p => ({ ...p, ...a.patch }))
-    case 'deleteProject':
-      return {
-        ...s,
-        projects: s.projects.filter(p => p.id !== a.id),
-        issues: s.issues.filter(i => i.projectId !== a.id),
-        cycles: s.cycles.filter(c => c.projectId !== a.id)
-      }
-    case 'addColumn':
-      return mapProject(s, a.projectId, p => ({ ...p, columns: [...p.columns, a.column] }))
-    case 'patchColumn':
-      return mapProject(s, a.projectId, p => ({
-        ...p,
-        columns: p.columns.map(c => (c.id === a.columnId ? { ...c, ...a.patch } : c))
-      }))
-    case 'deleteColumn':
-      return {
-        ...mapProject(s, a.projectId, p => ({ ...p, columns: p.columns.filter(c => c.id !== a.columnId) })),
-        issues: s.issues.map(i => {
-          if (i.projectId !== a.projectId) return i
-          return { ...i, values: withValue(i.values, a.columnId, undefined) }
-        })
-      }
-    case 'addIssue':
-      return { ...s, issues: [...s.issues, a.issue] }
-    case 'patchIssue':
-      return {
-        ...s,
-        issues: s.issues.map(i =>
-          i.id === a.id ? { ...i, ...a.patch, updatedAt: new Date().toISOString() } : i
-        )
-      }
-    case 'deleteIssue':
-      return { ...s, issues: s.issues.filter(i => i.id !== a.id) }
-    case 'addCycle':
-      return { ...s, cycles: [...s.cycles, a.cycle] }
-    case 'patchCycle':
-      return { ...s, cycles: s.cycles.map(c => (c.id === a.id ? { ...c, ...a.patch } : c)) }
-    case 'deleteCycle':
-      return {
-        ...s,
-        cycles: s.cycles.filter(c => c.id !== a.id),
-        issues: s.issues.map(i => (i.cycleId === a.id ? { ...i, cycleId: undefined } : i))
-      }
-  }
-}
-
-export function createIssue(data: AppData, projectId: string, title: string, patch: Partial<Issue> = {}): Issue {
-  const now = new Date().toISOString()
-  const number = data.issues.filter(i => i.projectId === projectId).reduce((m, i) => Math.max(m, i.number), 0) + 1
-  return {
-    id: uid(),
-    projectId,
-    number,
-    title,
-    description: '',
-    status: 'backlog',
-    priority: 0,
-    assignee: '',
-    labels: [],
-    values: {},
-    createdAt: now,
-    updatedAt: now,
-    ...patch
-  }
-}
-
-export function issueKey(data: AppData, issue: Issue) {
-  const project = data.projects.find(p => p.id === issue.projectId)
-  return `${project?.key ?? 'ISS'}-${issue.number}`
-}
-
-export function withValue(values: Issue['values'], id: string, v: CellValue | undefined): Issue['values'] {
-  const next = { ...values }
-  if (v === undefined) delete next[id]
-  else next[id] = v
-  return next
-}
-
-// Upgrades data written by earlier versions: old 'select' columns became
-// dropdown/status options with ids, and projects gained column widths.
+// Upgrades older files. v2 had no spaces: wrap every project in a default space.
 function migrate(raw: AppData): AppData {
-  const projects = raw.projects.map(p => ({
-    ...p,
-    widths: p.widths ?? {},
-    columns: p.columns.map(c => {
-      const legacy = c as unknown as { type: string; options?: unknown }
-      if (legacy.type !== 'select') return c
-      const labels = Array.isArray(legacy.options) ? (legacy.options as string[]) : []
+  if (raw.version === 3) return raw
+
+  const legacy = raw as unknown as AppData & { version: number }
+  const spaces = legacy.spaces ?? [{ id: uid(), name: 'Workspace', color: DEFAULT_SPACE_COLOR }]
+  const defaultSpaceId = spaces[0].id
+
+  const projects = raw.projects.map(p => {
+    const columns: Column[] = p.columns.map(c => {
+      const old = c as unknown as { type: string; options?: unknown }
+      if (old.type !== 'select') return c
+      const labels = Array.isArray(old.options) ? (old.options as string[]) : []
       const options = labels.map((label, n) => ({ id: `opt${n}-${label}`, label, color: '#579bfc' }))
       return { ...c, type: 'dropdown' as const, options }
     })
-  }))
+    return { ...p, spaceId: p.spaceId ?? defaultSpaceId, widths: p.widths ?? {}, columns }
+  })
 
   // Legacy select values stored the label; dropdown values now store the option id.
   const issues = raw.issues.map(i => {
@@ -139,20 +42,23 @@ function migrate(raw: AppData): AppData {
     return { ...i, values }
   })
 
-  return { version: 2, projects, issues, cycles: raw.cycles }
+  return { version: 3, spaces, projects, issues, cycles: raw.cycles }
 }
 
 function seed(): AppData {
   const today = todayISO()
+  const spaceId = uid()
   const projectId = uid()
   const estimate = uid()
   const cycleId = uid()
   const base: AppData = {
-    version: 2,
+    version: 3,
+    spaces: [{ id: spaceId, name: 'Prometheus', color: DEFAULT_SPACE_COLOR }],
     projects: [
       {
         id: projectId,
-        name: 'Prometheus',
+        spaceId,
+        name: 'Core app',
         key: 'PRM',
         color: '#5e6ad2',
         startDate: today,
@@ -189,7 +95,7 @@ function seed(): AppData {
   )
 }
 
-const EMPTY: AppData = { version: 2, projects: [], issues: [], cycles: [] }
+const EMPTY: AppData = { version: 3, spaces: [], projects: [], issues: [], cycles: [] }
 
 const StoreContext = createContext<{ data: AppData; dispatch: Dispatch<Action> } | null>(null)
 
@@ -204,6 +110,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       dispatch({ type: 'load', data: loaded ? migrate(loaded) : seed() })
       setReady(true)
     })
+    // Changes made outside the UI (MCP tools) replace the local copy.
+    return window.api.onExternal(next => dispatch({ type: 'load', data: next }))
   }, [])
 
   useEffect(() => {

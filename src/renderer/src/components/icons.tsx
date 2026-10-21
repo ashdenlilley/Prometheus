@@ -20,5 +20,9 @@ export const ICONS = {
   close: <Svg><path d="M4 4l8 8M12 4l-8 8" /></Svg>,
   more: <Svg><circle cx="3.5" cy="8" r="0.9" fill="currentColor" /><circle cx="8" cy="8" r="0.9" fill="currentColor" /><circle cx="12.5" cy="8" r="0.9" fill="currentColor" /></Svg>,
   trash: <Svg><path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5" /></Svg>,
+  home: <Svg><path d="M2.5 7.25L8 2.75l5.5 4.5v5.75a.5.5 0 0 1-.5.5h-3.25v-3.5h-3.5v3.5H3a.5.5 0 0 1-.5-.5z" /></Svg>,
+  pin: <Svg><path d="M5.25 2.25h5.5l-.75 3.5 1.75 2v1.25h-3.25v4.25L8 14.25l-.5-1.25V8.999H4.25V7.75L6 5.75z" /></Svg>,
+  settings: <Svg><circle cx="8" cy="8" r="2.25" /><path d="M8 1.75v1.5M8 12.75v1.5M1.75 8h1.5M12.75 8h1.5M3.4 3.4l1.05 1.05M11.55 11.55l1.05 1.05M3.4 12.6l1.05-1.05M11.55 4.45l1.05-1.05" /></Svg>,
+  chevron: <Svg><path d="M6 4l4 4-4 4" /></Svg>,
   external: <Svg><path d="M9 3h4v4M13 3L7.5 8.5M11 9.5V13H3V5h3.5" /></Svg>
 }

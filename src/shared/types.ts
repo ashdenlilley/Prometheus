@@ -50,8 +50,15 @@ export interface Column {
   options?: SelectOption[]
 }
 
+export interface Space {
+  id: string
+  name: string
+  color: string
+}
+
 export interface Project {
   id: string
+  spaceId: string
   name: string
   key: string
   color: string
@@ -91,7 +98,8 @@ export interface Cycle {
 }
 
 export interface AppData {
-  version: 2
+  version: 3
+  spaces: Space[]
   projects: Project[]
   issues: Issue[]
   cycles: Cycle[]

@@ -1,3 +1,4 @@
+import type { Project } from '@shared/types'
 import { useStore } from '../store'
 import { Row } from './TimelineView'
 import { addDays, dayDiff, parseISO, progress, todayISO, toISO } from '../util'
@@ -10,11 +11,11 @@ const monthOf = (s: string, add = 0) => {
   return toISO(new Date(d.getFullYear(), d.getMonth() + add, 1))
 }
 
-export function RoadmapView() {
+export function RoadmapView({ projects }: { projects: Project[] }) {
   const { data, dispatch } = useStore()
   const today = todayISO()
 
-  const rows = data.projects.map(p => ({
+  const rows = projects.map(p => ({
     project: p,
     start: p.startDate ?? today,
     end: p.targetDate ?? addDays(today, 90),
