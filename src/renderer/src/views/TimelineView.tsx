@@ -1,11 +1,13 @@
 import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
-import { STATUSES, type Issue, type Project } from '@shared/types'
+import type { Issue, Project } from '@shared/types'
 import { issueKey, useStore } from '../store'
+import { PRIORITY_COLORS } from '../columns'
 import { addDays, clsx, dayDiff, fmtDate, parseISO, todayISO } from '../util'
 
 export const LABEL_W = 260
 const DAY = 28
 const DRAG_SLOP = 3
+const ROW_H = 36
 
 type Mode = 'start' | 'end' | 'move'
 
@@ -63,7 +65,7 @@ export function TimelineView({ project, onOpen }: { project: Project; onOpen: (i
   const dragging = drag !== null
   const today = todayISO()
 
-  const issues = data.issues.filter(i => i.projectId === project.id)
+  const issues = data.issues.filter(i => i.projectId === project.id && !i.triage)
   const dated = issues.filter(
     (i): i is Issue & { startDate: string; dueDate: string } => !!i.startDate && !!i.dueDate
   )
@@ -84,6 +86,24 @@ export function TimelineView({ project, onOpen }: { project: Project; onOpen: (i
   const span = (a: string, b: string) => (dayDiff(a, b) + 1) * DAY
   const todayX = x(today) + DAY / 2
   const dayCells = Array.from({ length: days }, (_, n) => addDays(origin, n))
+
+  // Row order matches render order: header, cycles, then dated issues.
+  const rowIndex = new Map<string, number>()
+  let row = 1
+  for (const c of cycles) rowIndex.set(`cycle:${c.id}`, row++)
+  for (const i of dated) rowIndex.set(i.id, row++)
+  const arrows = dated.flatMap(src =>
+    src.relations.flatMap((r, n) => {
+      if (r.type !== 'blocks') return []
+      const target = dated.find(t => t.id === r.targetId)
+      const from = rowIndex.get(src.id)
+      const to = target ? rowIndex.get(target.id) : undefined
+      if (!target || from === undefined || to === undefined) return []
+      const [s0, e0] = rangeOf(src)
+      const [s1] = rangeOf(target)
+      return [{ key: `${src.id}-${n}`, x1: LABEL_W + x(e0) + DAY, y1: from * ROW_H + ROW_H / 2, x2: LABEL_W + x(s1), y2: to * ROW_H + ROW_H / 2 }]
+    })
+  )
 
   useLayoutEffect(() => {
     scroller.current?.scrollTo({ left: Math.max(0, LABEL_W + todayX - 400) })
@@ -133,7 +153,25 @@ export function TimelineView({ project, onOpen }: { project: Project; onOpen: (i
   }
 
   return (
-    <div className="timeline" ref={scroller}>
+    <div className="timeline" ref={scroller} style={{ position: 'relative' }}>
+      {/* Dependency arrows: an issue that blocks another points at it. */}
+      <svg className="tl-deps" width={LABEL_W + width} height={(rowIndex.size + 1) * ROW_H} aria-hidden="true">
+        <defs>
+          <marker id="tl-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto">
+            <path d="M0,0 L8,4 L0,8 z" fill="currentColor" />
+          </marker>
+        </defs>
+        {arrows.map(a => (
+          <path
+            key={a.key}
+            d={`M${a.x1},${a.y1} C${a.x1 + 16},${a.y1} ${a.x2 - 16},${a.y2} ${a.x2},${a.y2}`}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={1.25}
+            markerEnd="url(#tl-arrow)"
+          />
+        ))}
+      </svg>
       <Row label="Item" width={width} className="tl-head">
         {dayCells.map((d, n) => {
           const d0 = parseISO(d)
@@ -154,7 +192,7 @@ export function TimelineView({ project, onOpen }: { project: Project; onOpen: (i
       ))}
 
       {dated.map(i => {
-        const color = STATUSES.find(s => s.id === i.status)!.color
+        const color = project.statuses.find(s => s.id === i.status)?.color ?? PRIORITY_COLORS[0]
         const [s, e] = rangeOf(i)
         const active = drag?.id === i.id
         return (

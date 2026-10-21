@@ -1,0 +1,178 @@
+import { dirname, join } from 'path'
+import { promises as fs } from 'fs'
+import initSqlJs, { type Database, type SqlJsStatic } from 'sql.js'
+import type { AppData } from '../shared/types'
+
+// Local SQLite database (sql.js, in-process wasm). One table per entity kind, each row holding
+// the entity as JSON with its parent id indexed. Saves diff against the last write, so only
+// changed rows are rewritten.
+
+type Table = 'spaces' | 'initiatives' | 'projects' | 'issues' | 'cycles' | 'automations' | 'triage_rules' | 'templates' | 'dashboards' | 'notifications'
+
+const TABLES: Table[] = ['spaces', 'initiatives', 'projects', 'issues', 'cycles', 'automations', 'triage_rules', 'templates', 'dashboards', 'notifications']
+
+// AppData key for each table.
+const KEY: Record<Table, keyof AppData> = {
+  spaces: 'spaces',
+  initiatives: 'initiatives',
+  projects: 'projects',
+  issues: 'issues',
+  cycles: 'cycles',
+  automations: 'automations',
+  triage_rules: 'triageRules',
+  templates: 'templates',
+  dashboards: 'dashboards',
+  notifications: 'notifications'
+}
+
+// Parent column per table, used to index child lookups.
+const PARENT: Partial<Record<Table, string>> = {
+  initiatives: 'space_id',
+  projects: 'space_id',
+  issues: 'project_id',
+  cycles: 'project_id',
+  automations: 'project_id',
+  triage_rules: 'project_id',
+  templates: 'project_id',
+  dashboards: 'space_id'
+}
+
+let sqlPromise: Promise<SqlJsStatic> | null = null
+
+// The wasm file ships inside node_modules. Resolve it from the module itself: app.getAppPath()
+// points at out/main in dev, so it cannot be used to find node_modules.
+function sql() {
+  sqlPromise ??= initSqlJs({
+    locateFile: file => join(dirname(require.resolve('sql.js/dist/sql-wasm.js')), file)
+  })
+  return sqlPromise
+}
+
+export class Store {
+  private db: Database | null = null
+  // Last written JSON per table and id, so unchanged rows are skipped.
+  private cache = new Map<Table, Map<string, string>>()
+  private queue: Promise<void> = Promise.resolve()
+
+  constructor(private file: string) {}
+
+  async open(): Promise<void> {
+    const SQL = await sql()
+    let bytes: Uint8Array | null = null
+    try {
+      bytes = new Uint8Array(await fs.readFile(this.file))
+    } catch {
+      bytes = null
+    }
+    this.db = bytes ? new SQL.Database(bytes) : new SQL.Database()
+    for (const t of TABLES) {
+      const parent = PARENT[t]
+      this.db.run(
+        `CREATE TABLE IF NOT EXISTS ${t} (id TEXT PRIMARY KEY, ${parent ? `${parent} TEXT NOT NULL, ` : ''}data TEXT NOT NULL)`
+      )
+      if (parent) this.db.run(`CREATE INDEX IF NOT EXISTS idx_${t}_${parent} ON ${t} (${parent})`)
+    }
+    this.db.run('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)')
+  }
+
+  // True once a snapshot has been written. An empty workspace after deleting everything still counts.
+  get initialized(): boolean {
+    if (!this.db) return false
+    const res = this.db.exec("SELECT value FROM meta WHERE key = 'initialized'")
+    return res.length > 0
+  }
+
+  // Reads every table back into the AppData shape, or null when nothing was ever saved.
+  read(): AppData | null {
+    if (!this.db || !this.initialized) return null
+    const all = (t: Table): unknown[] => {
+      const res = this.db!.exec(`SELECT data FROM ${t} ORDER BY rowid`)
+      return res[0] ? res[0].values.map(r => JSON.parse(String(r[0]))) : []
+    }
+    const meta = this.db.exec("SELECT value FROM meta WHERE key = 'me'")
+    const me = meta[0] ? String(meta[0].values[0][0]) : 'You'
+    const data: AppData = {
+      version: 4,
+      spaces: all('spaces') as AppData['spaces'],
+      initiatives: all('initiatives') as AppData['initiatives'],
+      projects: all('projects') as AppData['projects'],
+      issues: all('issues') as AppData['issues'],
+      cycles: all('cycles') as AppData['cycles'],
+      automations: all('automations') as AppData['automations'],
+      triageRules: all('triage_rules') as AppData['triageRules'],
+      templates: all('templates') as AppData['templates'],
+      dashboards: all('dashboards') as AppData['dashboards'],
+      notifications: all('notifications') as AppData['notifications'],
+      me
+    }
+    this.primeCache(data)
+    return data
+  }
+
+  // Writes the snapshot. Serialised so overlapping saves never interleave.
+  save(data: AppData): Promise<void> {
+    this.queue = this.queue.then(() => this.write(data)).catch(err => console.error('save failed', err))
+    return this.queue
+  }
+
+  private primeCache(data: AppData) {
+    for (const t of TABLES) {
+      const rows = new Map<string, string>()
+      for (const row of data[KEY[t]] as { id: string }[]) rows.set(row.id, JSON.stringify(row))
+      this.cache.set(t, rows)
+    }
+  }
+
+  private write(data: AppData) {
+    if (!this.db) return
+    const db = this.db
+    const groups: Record<Table, { id: string; parent?: string; json: string }[]> = {
+      spaces: data.spaces.map(r => ({ id: r.id, json: JSON.stringify(r) })),
+      initiatives: data.initiatives.map(r => ({ id: r.id, parent: r.spaceId, json: JSON.stringify(r) })),
+      projects: data.projects.map(r => ({ id: r.id, parent: r.spaceId, json: JSON.stringify(r) })),
+      issues: data.issues.map(r => ({ id: r.id, parent: r.projectId, json: JSON.stringify(r) })),
+      cycles: data.cycles.map(r => ({ id: r.id, parent: r.projectId, json: JSON.stringify(r) })),
+      automations: data.automations.map(r => ({ id: r.id, parent: r.projectId, json: JSON.stringify(r) })),
+      triage_rules: data.triageRules.map(r => ({ id: r.id, parent: r.projectId, json: JSON.stringify(r) })),
+      templates: data.templates.map(r => ({ id: r.id, parent: r.projectId, json: JSON.stringify(r) })),
+      dashboards: data.dashboards.map(r => ({ id: r.id, parent: r.spaceId, json: JSON.stringify(r) })),
+      notifications: data.notifications.map(r => ({ id: r.id, json: JSON.stringify(r) }))
+    }
+
+    db.run('BEGIN')
+    try {
+      for (const t of TABLES) {
+        const prev = this.cache.get(t) ?? new Map<string, string>()
+        const next = new Map<string, string>()
+        const parent = PARENT[t]
+        for (const row of groups[t]) {
+          next.set(row.id, row.json)
+          if (prev.get(row.id) === row.json) continue
+          if (parent) {
+            db.run(`INSERT OR REPLACE INTO ${t} (id, ${parent}, data) VALUES (?, ?, ?)`, [row.id, row.parent ?? '', row.json])
+          } else {
+            db.run(`INSERT OR REPLACE INTO ${t} (id, data) VALUES (?, ?)`, [row.id, row.json])
+          }
+        }
+        for (const id of prev.keys()) {
+          if (!next.has(id)) db.run(`DELETE FROM ${t} WHERE id = ?`, [id])
+        }
+        this.cache.set(t, next)
+      }
+      db.run("INSERT OR REPLACE INTO meta (key, value) VALUES ('me', ?)", [data.me])
+      db.run("INSERT OR REPLACE INTO meta (key, value) VALUES ('initialized', '1')")
+      db.run('COMMIT')
+    } catch (err) {
+      db.run('ROLLBACK')
+      throw err
+    }
+    return this.flush()
+  }
+
+  private async flush() {
+    if (!this.db) return
+    const tmp = `${this.file}.tmp`
+    await fs.writeFile(tmp, Buffer.from(this.db.export()))
+    await fs.rename(tmp, this.file)
+  }
+}
