@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useReducer, useRef, useState, type Dispatch, type ReactNode } from 'react'
-import type { AppData, CellValue, Cycle, Issue, Project, Status } from '@shared/types'
+import type { AppData, CellValue, Column, Cycle, Issue, Project, Status } from '@shared/types'
 import { addDays, todayISO, uid } from './util'
 
 export type Action =
@@ -7,6 +7,8 @@ export type Action =
   | { type: 'addProject'; project: Project }
   | { type: 'patchProject'; id: string; patch: Partial<Project> }
   | { type: 'deleteProject'; id: string }
+  | { type: 'addColumn'; projectId: string; column: Column }
+  | { type: 'patchColumn'; projectId: string; columnId: string; patch: Partial<Column> }
   | { type: 'deleteColumn'; projectId: string; columnId: string }
   | { type: 'addIssue'; issue: Issue }
   | { type: 'patchIssue'; id: string; patch: Partial<Issue> }
@@ -15,6 +17,11 @@ export type Action =
   | { type: 'patchCycle'; id: string; patch: Partial<Cycle> }
   | { type: 'deleteCycle'; id: string }
 
+const mapProject = (s: AppData, id: string, fn: (p: Project) => Project): AppData => ({
+  ...s,
+  projects: s.projects.map(p => (p.id === id ? fn(p) : p))
+})
+
 export function reducer(s: AppData, a: Action): AppData {
   switch (a.type) {
     case 'load':
@@ -22,7 +29,7 @@ export function reducer(s: AppData, a: Action): AppData {
     case 'addProject':
       return { ...s, projects: [...s.projects, a.project] }
     case 'patchProject':
-      return { ...s, projects: s.projects.map(p => (p.id === a.id ? { ...p, ...a.patch } : p)) }
+      return mapProject(s, a.id, p => ({ ...p, ...a.patch }))
     case 'deleteProject':
       return {
         ...s,
@@ -30,17 +37,19 @@ export function reducer(s: AppData, a: Action): AppData {
         issues: s.issues.filter(i => i.projectId !== a.id),
         cycles: s.cycles.filter(c => c.projectId !== a.id)
       }
+    case 'addColumn':
+      return mapProject(s, a.projectId, p => ({ ...p, columns: [...p.columns, a.column] }))
+    case 'patchColumn':
+      return mapProject(s, a.projectId, p => ({
+        ...p,
+        columns: p.columns.map(c => (c.id === a.columnId ? { ...c, ...a.patch } : c))
+      }))
     case 'deleteColumn':
       return {
-        ...s,
-        projects: s.projects.map(p =>
-          p.id === a.projectId ? { ...p, columns: p.columns.filter(c => c.id !== a.columnId) } : p
-        ),
+        ...mapProject(s, a.projectId, p => ({ ...p, columns: p.columns.filter(c => c.id !== a.columnId) })),
         issues: s.issues.map(i => {
           if (i.projectId !== a.projectId) return i
-          const values = { ...i.values }
-          delete values[a.columnId]
-          return { ...i, values }
+          return { ...i, values: withValue(i.values, a.columnId, undefined) }
         })
       }
     case 'addIssue':
@@ -99,13 +108,47 @@ export function withValue(values: Issue['values'], id: string, v: CellValue | un
   return next
 }
 
+// Upgrades data written by earlier versions: old 'select' columns became
+// dropdown/status options with ids, and projects gained column widths.
+function migrate(raw: AppData): AppData {
+  const projects = raw.projects.map(p => ({
+    ...p,
+    widths: p.widths ?? {},
+    columns: p.columns.map(c => {
+      const legacy = c as unknown as { type: string; options?: unknown }
+      if (legacy.type !== 'select') return c
+      const labels = Array.isArray(legacy.options) ? (legacy.options as string[]) : []
+      const options = labels.map((label, n) => ({ id: `opt${n}-${label}`, label, color: '#579bfc' }))
+      return { ...c, type: 'dropdown' as const, options }
+    })
+  }))
+
+  // Legacy select values stored the label; dropdown values now store the option id.
+  const issues = raw.issues.map(i => {
+    const project = projects.find(p => p.id === i.projectId)
+    if (!project) return i
+    const values = Object.fromEntries(
+      Object.entries(i.values).map(([colId, v]) => {
+        const col = project.columns.find(c => c.id === colId)
+        if (col?.type === 'dropdown' && typeof v === 'string') {
+          return [colId, col.options?.find(o => o.label === v)?.id ?? v]
+        }
+        return [colId, v]
+      })
+    )
+    return { ...i, values }
+  })
+
+  return { version: 2, projects, issues, cycles: raw.cycles }
+}
+
 function seed(): AppData {
   const today = todayISO()
   const projectId = uid()
   const estimate = uid()
   const cycleId = uid()
   const base: AppData = {
-    version: 1,
+    version: 2,
     projects: [
       {
         id: projectId,
@@ -114,7 +157,8 @@ function seed(): AppData {
         color: '#5e6ad2',
         startDate: today,
         targetDate: addDays(today, 60),
-        columns: [{ id: estimate, name: 'Estimate', type: 'number' }]
+        columns: [{ id: estimate, name: 'Estimate', type: 'number' }],
+        widths: {}
       }
     ],
     issues: [],
@@ -145,7 +189,7 @@ function seed(): AppData {
   )
 }
 
-const EMPTY: AppData = { version: 1, projects: [], issues: [], cycles: [] }
+const EMPTY: AppData = { version: 2, projects: [], issues: [], cycles: [] }
 
 const StoreContext = createContext<{ data: AppData; dispatch: Dispatch<Action> } | null>(null)
 
@@ -157,7 +201,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     window.api.load().then(loaded => {
-      dispatch({ type: 'load', data: loaded ?? seed() })
+      dispatch({ type: 'load', data: loaded ? migrate(loaded) : seed() })
       setReady(true)
     })
   }, [])

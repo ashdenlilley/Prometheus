@@ -15,7 +15,7 @@ export function NewProjectModal({ onClose, onCreated }: { onClose: () => void; o
     const id = uid()
     dispatch({
       type: 'addProject',
-      project: { id, name: name.trim(), key: projectKey(name), color, startDate, targetDate, columns: [] }
+      project: { id, name: name.trim(), key: projectKey(name), color, startDate, targetDate, columns: [], widths: {} }
     })
     onCreated(id)
   }
