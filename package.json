@@ -1,6 +1,6 @@
 {
   "name": "prometheus",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Local-first project management: Linear-style issues and cycles, Monday-style boards and timelines",
   "author": "Olympus Studios",
   "private": true,
@@ -37,6 +37,7 @@
       "icon": "build/icon.icns",
       "identity": null
     },
+    "afterPack": "scripts/adhoc-sign.mjs",
     "win": {
       "target": [
         "nsis"
