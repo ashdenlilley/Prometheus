@@ -3,7 +3,15 @@ import { useStore } from '../store'
 import { addDays, projectKey, todayISO, uid } from '../util'
 import { Modal } from './ui'
 
-export function NewProjectModal({ onClose, onCreated }: { onClose: () => void; onCreated: (id: string) => void }) {
+export function NewProjectModal({
+  spaceId,
+  onClose,
+  onCreated
+}: {
+  spaceId: string
+  onClose: () => void
+  onCreated: (id: string) => void
+}) {
   const { dispatch } = useStore()
   const [name, setName] = useState('')
   const [color, setColor] = useState('#5e6ad2')
@@ -15,7 +23,17 @@ export function NewProjectModal({ onClose, onCreated }: { onClose: () => void; o
     const id = uid()
     dispatch({
       type: 'addProject',
-      project: { id, name: name.trim(), key: projectKey(name), color, startDate, targetDate, columns: [], widths: {} }
+      project: {
+        id,
+        spaceId,
+        name: name.trim(),
+        key: projectKey(name),
+        color,
+        startDate,
+        targetDate,
+        columns: [],
+        widths: {}
+      }
     })
     onCreated(id)
   }
