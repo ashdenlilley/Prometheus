@@ -2388,3 +2388,26 @@ select.field-input:focus {
   height: 18px;
   border-radius: 5px;
 }
+
+/* Colour picker: the input is exactly its swatch, so only the colour box is clickable. */
+.color-field {
+  -webkit-appearance: none;
+  appearance: none;
+  flex: none;
+  width: 44px;
+  height: 28px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: default;
+}
+
+.color-field::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.color-field::-webkit-color-swatch {
+  border: 1px solid var(--line);
+  border-radius: 7px;
+}

@@ -44,10 +44,16 @@ export function NewProjectModal({
         Name
         <input autoFocus value={name} onChange={e => setName(e.target.value)} onKeyDown={e => e.key === 'Enter' && create()} />
       </label>
-      <label className="field">
-        Color
-        <input type="color" value={color} onChange={e => setColor(e.target.value)} />
-      </label>
+      <div className="field">
+        <span>Color</span>
+        <input
+          className="color-field"
+          type="color"
+          value={color}
+          onChange={e => setColor(e.target.value)}
+          aria-label="Project colour"
+        />
+      </div>
       <label className="field">
         Start
         <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} />
