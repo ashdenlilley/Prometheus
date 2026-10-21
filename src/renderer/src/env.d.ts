@@ -9,6 +9,13 @@ export interface SyncStatus {
   pending: number
   lastSync: number | null
   error: string | null
+  needsPassphrase: boolean
+}
+
+export interface SyncInspect {
+  devices: number
+  segments: number
+  encrypted: boolean
 }
 
 export interface McpStatus {
@@ -31,8 +38,9 @@ declare global {
         status: () => Promise<SyncStatus | null>
         defaultFolder: () => Promise<string>
         chooseFolder: () => Promise<string | null>
-        inspect: (folder: string) => Promise<{ devices: number; segments: number }>
-        join: (folder: string, mode: 'push' | 'adopt') => Promise<SyncStatus>
+        inspect: (folder: string) => Promise<SyncInspect>
+        join: (folder: string, mode: 'push' | 'adopt', passphrase: string) => Promise<SyncStatus>
+        unlock: (passphrase: string) => Promise<SyncStatus>
         disable: () => Promise<void>
         now: () => Promise<void>
       }

@@ -18,8 +18,10 @@ contextBridge.exposeInMainWorld('api', {
     status: () => ipcRenderer.invoke('sync:status') as Promise<SyncStatus | null>,
     defaultFolder: () => ipcRenderer.invoke('sync:defaultFolder') as Promise<string>,
     chooseFolder: () => ipcRenderer.invoke('sync:chooseFolder') as Promise<string | null>,
-    inspect: (folder: string) => ipcRenderer.invoke('sync:inspect', folder) as Promise<{ devices: number; segments: number }>,
-    join: (folder: string, mode: 'push' | 'adopt') => ipcRenderer.invoke('sync:join', folder, mode) as Promise<SyncStatus>,
+    inspect: (folder: string) => ipcRenderer.invoke('sync:inspect', folder) as Promise<SyncInspect>,
+    join: (folder: string, mode: 'push' | 'adopt', passphrase: string) =>
+      ipcRenderer.invoke('sync:join', folder, mode, passphrase) as Promise<SyncStatus>,
+    unlock: (passphrase: string) => ipcRenderer.invoke('sync:unlock', passphrase) as Promise<SyncStatus>,
     disable: () => ipcRenderer.invoke('sync:disable') as Promise<void>,
     now: () => ipcRenderer.invoke('sync:now') as Promise<void>
   },
@@ -46,4 +48,11 @@ export interface SyncStatus {
   pending: number
   lastSync: number | null
   error: string | null
+  needsPassphrase: boolean
+}
+
+export interface SyncInspect {
+  devices: number
+  segments: number
+  encrypted: boolean
 }

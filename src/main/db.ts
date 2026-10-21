@@ -53,6 +53,7 @@ export class Store {
   // Last written JSON per table and id, so unchanged rows are skipped.
   private cache = new Map<Table, Map<string, string>>()
   private queue: Promise<void> = Promise.resolve()
+  private flushing: Promise<void> = Promise.resolve()
 
   constructor(private file: string) {}
 
@@ -221,7 +222,15 @@ export class Store {
     return this.flush()
   }
 
-  private async flush() {
+  // Writes the database file. Calls are serialised: concurrent writers would share one temp file and
+  // the second rename would fail with ENOENT.
+  private flush(): Promise<void> {
+    const run = this.flushing.then(() => this.writeFile())
+    this.flushing = run.catch(() => undefined)
+    return run
+  }
+
+  private async writeFile() {
     if (!this.db) return
     const tmp = `${this.file}.tmp`
     await fs.writeFile(tmp, Buffer.from(this.db.export()))
