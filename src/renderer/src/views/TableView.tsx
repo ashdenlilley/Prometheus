@@ -1,19 +1,16 @@
-import { useState, type MouseEvent as ReactMouseEvent } from 'react'
-import { STATUSES, type Column, type Issue, type Project } from '@shared/types'
+import { useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
+import type { Column, Issue, Project } from '@shared/types'
+import { applyFilter, childrenOf, groupIssues, issuesToCSV, parseCSV, summarize, type FixedField } from '@shared/query'
 import { createIssue, issueKey, useStore, withValue } from '../store'
 import { CellEditor } from '../components/cells'
 import { PrioritySelect, StatusDot, StatusSelect } from '../components/fields'
 import { ICONS } from '../components/icons'
 import { ColumnModal } from '../components/ColumnModal'
+import { FilterBar, useViewQuery } from '../components/FilterBar'
+import { BulkBar } from '../components/BulkBar'
+import { FavGutter } from '../components/FavGutter'
 import { Menu, QuickAdd, type MenuItem } from '../components/ui'
-import {
-  customSortValue,
-  defaultWidth,
-  fixedSortValue,
-  FIXED_COLUMNS,
-  summarize,
-  type FixedKey
-} from '../columns'
+import { customSortValue, defaultWidth, fixedSortValue, FIXED_COLUMNS, type FixedKey } from '../columns'
 import { clsx } from '../util'
 
 interface ColumnRef {
@@ -24,12 +21,9 @@ interface ColumnRef {
   column: Column | null
 }
 
-interface Sort {
-  key: string
-  dir: 'asc' | 'desc'
-}
-
 const MIN_WIDTH = 80
+const FAV_WIDTH = 18
+const SELECT_WIDTH = 40
 const ACTIONS_WIDTH = 48
 
 // Saved order first (unknown keys dropped, new columns appended), with 'name' always leading.
@@ -42,20 +36,26 @@ function orderColumns(cols: ColumnRef[], order: string[] | undefined): ColumnRef
 
 export function TableView({ project, onOpen }: { project: Project; onOpen: (id: string) => void }) {
   const { data, dispatch } = useStore()
+  const query = useViewQuery(project, 'table')
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
-  const [sort, setSort] = useState<Sort | null>(null)
   const [liveWidths, setLiveWidths] = useState<Record<string, number>>({})
   const [editing, setEditing] = useState<Column | 'new' | null>(null)
   const [dragKey, setDragKey] = useState<string | null>(null)
   const [overKey, setOverKey] = useState<string | null>(null)
-  const issues = data.issues.filter(i => i.projectId === project.id)
+  const [picked, setPicked] = useState<Set<string>>(new Set())
+  const [templateId, setTemplateId] = useState('')
+  const fileInput = useRef<HTMLInputElement>(null)
+
+  const all = data.issues.filter(i => i.projectId === project.id && !i.triage)
+  const visible = applyFilter(all, query.filter, project)
+  const visibleIds = new Set(visible.map(i => i.id))
 
   const baseCols: ColumnRef[] = [
     ...FIXED_COLUMNS.map(f => ({
       key: f.key,
       label: f.label,
       width: project.widths[f.key] ?? f.width,
-      fixed: f.key,
+      fixed: f.key as FixedKey,
       column: null
     })),
     ...project.columns.map(c => ({
@@ -65,19 +65,21 @@ export function TableView({ project, onOpen }: { project: Project; onOpen: (id: 
       fixed: null,
       column: c
     }))
-  ].map(c => ({ ...c, width: liveWidths[c.key] ?? c.width }))
+  ]
+    .filter(c => !query.hidden.includes(c.key) && !project.hiddenColumns.includes(c.key))
+    .map(c => ({ ...c, width: liveWidths[c.key] ?? c.width }))
   const cols = orderColumns(baseCols, project.order)
 
-  const template = `${cols.map(c => `${c.width}px`).join(' ')} ${ACTIONS_WIDTH}px`
+  const template = `${FAV_WIDTH}px ${SELECT_WIDTH}px ${cols.map(c => `${c.width}px`).join(' ')} ${ACTIONS_WIDTH}px`
   const rowStyle = { gridTemplateColumns: template, width: 'max-content' }
   const update = (id: string, patch: Partial<Issue>) => dispatch({ type: 'patchIssue', id, patch })
 
-  const sortRef = sort ? cols.find(c => c.key === sort.key) : undefined
+  const sortRef = query.sort ? cols.find(c => c.key === query.sort!.key) : undefined
   const sortItems = (items: Issue[]) => {
-    if (!sort || !sortRef) return items
+    if (!query.sort || !sortRef) return items
     const value = (i: Issue) =>
-      sortRef.fixed ? fixedSortValue(sortRef.fixed, i) : customSortValue(sortRef.column!, i)
-    const sign = sort.dir === 'asc' ? 1 : -1
+      sortRef.fixed ? fixedSortValue(sortRef.fixed, i, project) : customSortValue(sortRef.column!, i, project)
+    const sign = query.sort.dir === 'asc' ? 1 : -1
     return [...items].sort((a, b) => {
       const x = value(a)
       const y = value(b)
@@ -119,6 +121,8 @@ export function TableView({ project, onOpen }: { project: Project; onOpen: (id: 
     dispatch({ type: 'patchProject', id: project.id, patch: { order: keys } })
   }
 
+  const hideColumn = (key: string) => query.setHidden([...query.hidden, key])
+
   const deleteColumn = (c: Column) => {
     if (window.confirm(`Delete column "${c.name}"? Its values are removed.`)) {
       dispatch({ type: 'deleteColumn', projectId: project.id, columnId: c.id })
@@ -128,9 +132,10 @@ export function TableView({ project, onOpen }: { project: Project; onOpen: (id: 
   const headerMenu = (c: ColumnRef): MenuItem[] => {
     const items: MenuItem[] = []
     if (c.column) items.push({ label: 'Edit column', onSelect: () => setEditing(c.column) })
-    items.push({ label: 'Sort ascending', onSelect: () => setSort({ key: c.key, dir: 'asc' }) })
-    items.push({ label: 'Sort descending', onSelect: () => setSort({ key: c.key, dir: 'desc' }) })
-    if (sort) items.push({ label: 'Clear sort', onSelect: () => setSort(null) })
+    items.push({ label: 'Sort ascending', onSelect: () => query.setSort({ key: c.key, dir: 'asc' }) })
+    items.push({ label: 'Sort descending', onSelect: () => query.setSort({ key: c.key, dir: 'desc' }) })
+    if (query.sort) items.push({ label: 'Clear sort', onSelect: () => query.setSort(null) })
+    items.push({ label: 'Hide column', onSelect: () => hideColumn(c.key) })
     if (c.column) {
       items.push({ label: 'Delete column', danger: true, icon: ICONS.trash, onSelect: () => deleteColumn(c.column!) })
     }
@@ -142,6 +147,7 @@ export function TableView({ project, onOpen }: { project: Project; onOpen: (id: 
       return (
         <CellEditor
           column={c.column}
+          project={project}
           issue={i}
           variant="cell"
           value={i.values[c.key]}
@@ -152,28 +158,164 @@ export function TableView({ project, onOpen }: { project: Project; onOpen: (id: 
     switch (c.fixed) {
       case 'name':
         return (
-          <div className="t-name">
+          <div className="t-name" style={{ paddingLeft: i.parentId ? 18 : 0 }}>
             <button className="key-btn" onClick={() => onOpen(i.id)}>{issueKey(data, i)}</button>
             <input className="cell-input name" value={i.title} onChange={e => update(i.id, { title: e.target.value })} />
           </div>
         )
       case 'status':
-        return <StatusSelect value={i.status} onChange={status => update(i.id, { status })} />
+        return <StatusSelect value={i.status} statuses={project.statuses} onChange={status => update(i.id, { status })} />
       case 'priority':
         return <PrioritySelect value={i.priority} onChange={priority => update(i.id, { priority })} />
       case 'assignee':
         return <input className="cell-input" value={i.assignee} placeholder="Unassigned" onChange={e => update(i.id, { assignee: e.target.value })} />
       case 'due':
         return <input className="cell-input" type="date" value={i.dueDate ?? ''} onChange={e => update(i.id, { dueDate: e.target.value || undefined })} />
+      case 'start':
+        return <input className="cell-input" type="date" value={i.startDate ?? ''} onChange={e => update(i.id, { startDate: e.target.value || undefined })} />
+      case 'estimate':
+        return <input className="cell-input num" type="number" value={i.estimate ?? ''} onChange={e => update(i.id, { estimate: e.target.value === '' ? undefined : Number(e.target.value) })} />
+      case 'labels':
+        return <input className="cell-input" value={i.labels.join(', ')} placeholder="Add labels" onChange={e => update(i.id, { labels: e.target.value.split(',').map(s => s.trim()).filter(Boolean) })} />
+      case 'cycle':
+        return (
+          <select className="cell-input" value={i.cycleId ?? ''} onChange={e => update(i.id, { cycleId: e.target.value || undefined })}>
+            <option value="">None</option>
+            {data.cycles.filter(c => c.projectId === project.id).map(c => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
+        )
+      case 'milestone':
+        return (
+          <select className="cell-input" value={i.milestoneId ?? ''} onChange={e => update(i.id, { milestoneId: e.target.value || undefined })}>
+            <option value="">None</option>
+            {project.milestones.map(m => (
+              <option key={m.id} value={m.id}>{m.name}</option>
+            ))}
+          </select>
+        )
       default:
         return null
     }
   }
 
+  const togglePick = (id: string) =>
+    setPicked(p => {
+      const next = new Set(p)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+
+  const bulkSet = (patch: Partial<Issue>) => {
+    dispatch({ type: 'patchIssues', ids: pickedVisible, patch })
+    setPicked(new Set())
+  }
+
+  const bulkDelete = () => {
+    if (!window.confirm(`Delete ${pickedVisible.length} issues?`)) return
+    dispatch({ type: 'deleteIssues', ids: pickedVisible })
+    setPicked(new Set())
+  }
+
+  const exportCSV = () => {
+    const blob = new Blob([issuesToCSV(data, project, visible)], { type: 'text/csv' })
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = `${project.key}-issues.csv`
+    a.click()
+    URL.revokeObjectURL(a.href)
+  }
+
+  // Import: first row is the header. Title is required; status and priority match labels.
+  const importCSV = async (file: File) => {
+    const rows = parseCSV(await file.text())
+    const [header, ...body] = rows
+    if (!header) return
+    const col = (name: string) => header.findIndex(h => h.trim().toLowerCase() === name.toLowerCase())
+    const titleAt = col('Title')
+    if (titleAt < 0) return window.alert('CSV needs a Title column.')
+    const statusAt = col('Status')
+    const priorityAt = col('Priority')
+    const assigneeAt = col('Assignee')
+    const dueAt = col('Due')
+    const issues = body
+      .filter(r => r[titleAt]?.trim())
+      .map(r => {
+        const statusLabel = statusAt >= 0 ? r[statusAt] : ''
+        const status = project.statuses.find(s => s.label.toLowerCase() === statusLabel.toLowerCase())?.id ?? project.statuses[0].id
+        const pri = priorityAt >= 0 ? ['No priority', 'Urgent', 'High', 'Medium', 'Low'].indexOf(r[priorityAt]) : -1
+        return createIssue(data, project.id, r[titleAt].trim(), {
+          status,
+          priority: pri > 0 ? pri : 0,
+          assignee: assigneeAt >= 0 ? r[assigneeAt] : '',
+          dueDate: dueAt >= 0 && r[dueAt] ? r[dueAt] : undefined
+        })
+      })
+    if (issues.length) dispatch({ type: 'addIssues', issues: issues.reduce<Issue[]>((acc, i) => [...acc, { ...i, number: i.number + acc.length }], []) })
+  }
+
+  const tpl = data.templates.find(t => t.id === templateId && t.projectId === project.id)
+  const addItem = (title: string, status: string) => {
+    const base = tpl
+    dispatch({
+      type: 'addIssue',
+      issue: createIssue(data, project.id, base?.title ?? title, {
+        status: base?.status ?? status,
+        description: base?.description ?? '',
+        priority: base?.priority ?? 0,
+        labels: base?.labels ?? [],
+        estimate: base?.estimate
+      })
+    })
+  }
+
+  const groups = groupIssues(
+    query.sort ? sortItems(visible) : visible,
+    project,
+    query.groupBy,
+    id => data.cycles.find(c => c.id === id)?.name ?? '',
+    id => project.milestones.find(m => m.id === id)?.name ?? ''
+  )
+
+  const pickedVisible = [...picked].filter(id => visibleIds.has(id))
+
   return (
     <div className="view table-view">
+      <div className="toolbar">
+        <FilterBar project={project} kind="table" query={query} />
+        <span className="grow" />
+        <select className="input-sm" value={templateId} onChange={e => setTemplateId(e.target.value)} aria-label="Template for new items">
+          <option value="">No template</option>
+          {data.templates.filter(t => t.projectId === project.id).map(t => (
+            <option key={t.id} value={t.id}>{t.name}</option>
+          ))}
+        </select>
+        <button className="btn" onClick={exportCSV}>Export CSV</button>
+        <button className="btn" onClick={() => fileInput.current?.click()}>Import CSV</button>
+        <input ref={fileInput} type="file" accept=".csv,text/csv" hidden onChange={e => e.target.files?.[0] && importCSV(e.target.files[0])} />
+      </div>
+
+      <BulkBar
+        project={project}
+        count={pickedVisible.length}
+        onPatch={bulkSet}
+        onDelete={bulkDelete}
+        onClear={() => setPicked(new Set())}
+      />
+
       <div className="table-wrap">
         <div className="t-row t-head" style={rowStyle}>
+          <div className="t-cell t-fav" />
+          <div className="t-cell t-select">
+            <input
+              type="checkbox"
+              aria-label="Select all"
+              checked={visible.length > 0 && visible.every(i => picked.has(i.id))}
+              onChange={e => setPicked(e.target.checked ? new Set(visible.map(i => i.id)) : new Set())}
+            />
+          </div>
           {cols.map(c => (
             <div
               key={c.key}
@@ -211,21 +353,32 @@ export function TableView({ project, onOpen }: { project: Project; onOpen: (id: 
           </div>
         </div>
 
-        {STATUSES.map(s => {
-          const items = sortItems(issues.filter(i => i.status === s.id))
-          const open = !collapsed[s.id]
+        {groups.map(g => {
+          const items = g.items
+          const open = !collapsed[g.key]
+          // Sub-issues sit under their parent when both are in the group; orphans show as top level.
+          const ids = new Set(items.map(i => i.id))
+          const roots = items.filter(i => !i.parentId || !ids.has(i.parentId))
+          const ordered = roots.flatMap(r => [r, ...childrenOf(items, r.id)])
+          const status = query.groupBy === 'status' ? project.statuses.find(s => s.id === g.key) : undefined
           return (
-            <div key={s.id} className="t-group">
-              <button className="t-group-head" onClick={() => setCollapsed(c => ({ ...c, [s.id]: open }))}>
+            <div key={g.key} className="t-group">
+              <button className="t-group-head" onClick={() => setCollapsed(c => ({ ...c, [g.key]: open }))}>
                 <span className={clsx('caret', !open && 'closed')}>▾</span>
-                <StatusDot status={s.id} />
-                <span className="t-group-title" style={{ color: s.color }}>{s.label}</span>
+                {status && <StatusDot status={status} />}
+                <span className="t-group-title" style={{ color: g.color ?? 'inherit' }}>{g.label || 'All items'}</span>
                 <span className="count">{items.length}</span>
               </button>
 
               {open &&
-                items.map(i => (
-                  <div key={i.id} className="t-row" style={rowStyle}>
+                ordered.map(i => (
+                  <div key={i.id} className={clsx('t-row fav-host', picked.has(i.id) && 'picked')} style={rowStyle}>
+                    <div className="t-cell t-fav">
+                      <FavGutter issue={i} />
+                    </div>
+                    <div className="t-cell t-select">
+                      <input type="checkbox" checked={picked.has(i.id)} onChange={() => togglePick(i.id)} aria-label={`Select ${issueKey(data, i)}`} />
+                    </div>
                     {cols.map(c => (
                       <div key={c.key} className="t-cell">{renderCell(c, i)}</div>
                     ))}
@@ -235,6 +388,8 @@ export function TableView({ project, onOpen }: { project: Project; onOpen: (id: 
 
               {open && items.length > 0 && (
                 <div className="t-row t-summary" style={rowStyle}>
+                  <div className="t-cell t-fav" />
+                  <div className="t-cell" />
                   {cols.map(c => (
                     <div key={c.key} className="t-cell">
                       {c.column ? summarize(c.column, items) : ''}
@@ -248,9 +403,7 @@ export function TableView({ project, onOpen }: { project: Project; onOpen: (id: 
                 <div className="t-add">
                   <QuickAdd
                     placeholder="+ Add item"
-                    onAdd={title =>
-                      dispatch({ type: 'addIssue', issue: createIssue(data, project.id, title, { status: s.id }) })
-                    }
+                    onAdd={title => addItem(title, g.key === 'all' || query.groupBy !== 'status' ? project.statuses[0].id : g.key)}
                   />
                 </div>
               )}
@@ -258,6 +411,20 @@ export function TableView({ project, onOpen }: { project: Project; onOpen: (id: 
           )
         })}
       </div>
+
+      {query.hidden.length > 0 && (
+        <div className="hidden-cols muted small">
+          Hidden:{' '}
+          {query.hidden.map(k => {
+            const label = FIXED_COLUMNS.find(f => f.key === (k as FixedField))?.label ?? project.columns.find(c => c.id === k)?.name ?? k
+            return (
+              <button key={k} className="chip neutral" onClick={() => query.setHidden(query.hidden.filter(x => x !== k))}>
+                {label} +
+              </button>
+            )
+          })}
+        </div>
+      )}
 
       {editing && (
         <ColumnModal project={project} column={editing === 'new' ? undefined : editing} onClose={() => setEditing(null)} />

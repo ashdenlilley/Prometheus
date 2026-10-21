@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useStore } from '../store'
+import { blankProject } from '@shared/seed'
 import { addDays, projectKey, todayISO, uid } from '../util'
 import { Modal } from './ui'
 
@@ -12,28 +13,32 @@ export function NewProjectModal({
   onClose: () => void
   onCreated: (id: string) => void
 }) {
-  const { dispatch } = useStore()
+  const { data, dispatch } = useStore()
   const [name, setName] = useState('')
   const [color, setColor] = useState('#5e6ad2')
+  const [lead, setLead] = useState('')
+  const [initiativeId, setInitiativeId] = useState('')
   const [startDate, setStartDate] = useState(todayISO())
   const [targetDate, setTargetDate] = useState(addDays(todayISO(), 90))
+  const initiatives = data.initiatives.filter(i => i.spaceId === spaceId)
 
   const create = () => {
     if (!name.trim()) return
     const id = uid()
     dispatch({
       type: 'addProject',
-      project: {
+      project: blankProject({
         id,
         spaceId,
         name: name.trim(),
         key: projectKey(name),
         color,
+        lead,
+        initiativeId: initiativeId || undefined,
+        status: 'planned',
         startDate,
-        targetDate,
-        columns: [],
-        widths: {}
-      }
+        targetDate
+      })
     })
     onCreated(id)
   }
@@ -44,6 +49,21 @@ export function NewProjectModal({
         Name
         <input autoFocus value={name} onChange={e => setName(e.target.value)} onKeyDown={e => e.key === 'Enter' && create()} />
       </label>
+      <label className="field">
+        Lead
+        <input value={lead} onChange={e => setLead(e.target.value)} />
+      </label>
+      {initiatives.length > 0 && (
+        <label className="field">
+          Initiative
+          <select value={initiativeId} onChange={e => setInitiativeId(e.target.value)}>
+            <option value="">None</option>
+            {initiatives.map(i => (
+              <option key={i.id} value={i.id}>{i.name}</option>
+            ))}
+          </select>
+        </label>
+      )}
       <div className="field">
         <span>Color</span>
         <input

@@ -44,6 +44,7 @@ export function Sidebar(props: SidebarProps) {
               onToggle={() => setCollapsedSpaces(c => ({ ...c, [space.id]: !c[space.id] }))}
               onOverview={() => go(space.id, null, 'overview')}
               onRoadmap={() => go(space.id, null, 'roadmap')}
+              onDashboard={() => go(space.id, null, 'dashboard')}
               onProject={projectId => go(space.id, projectId, 'issues')}
               onView={view => go(space.id, route.projectId, view)}
               onNewProject={() => props.onNewProject(space.id)}
@@ -80,6 +81,7 @@ interface SpaceNodeProps {
   onToggle: () => void
   onOverview: () => void
   onRoadmap: () => void
+  onDashboard: () => void
   onProject: (projectId: string) => void
   onView: (view: ViewId) => void
   onNewProject: () => void
@@ -88,7 +90,7 @@ interface SpaceNodeProps {
 function SpaceNode(p: SpaceNodeProps) {
   const { data } = useStore()
   const projects = data.projects.filter(pr => pr.spaceId === p.space.id)
-  const overviewActive = p.active && p.route.projectId === null && p.route.view !== 'roadmap'
+  const overviewActive = p.active && p.route.projectId === null && p.route.view !== 'roadmap' && p.route.view !== 'dashboard'
 
   return (
     <div className="tree-group">
@@ -116,9 +118,17 @@ function SpaceNode(p: SpaceNodeProps) {
             <span className="nav-icon">{ICONS.roadmap}</span>
             <span className="lbl grow ellipsis">Roadmap</span>
           </button>
+          <button
+            className={clsx('tree-row sub', p.active && p.route.projectId === null && p.route.view === 'dashboard' && 'active')}
+            onClick={p.onDashboard}
+          >
+            <span className="nav-icon">{ICONS.dashboard}</span>
+            <span className="lbl grow ellipsis">Dashboard</span>
+          </button>
 
           {projects.map(pr => {
             const selected = pr.id === p.route.projectId
+            const triageCount = data.issues.filter(i => i.projectId === pr.id && i.triage).length
             return (
               <div key={pr.id} className="project-block">
                 <button className={clsx('tree-row sub', selected && 'active')} onClick={() => p.onProject(pr.id)}>
@@ -134,6 +144,7 @@ function SpaceNode(p: SpaceNodeProps) {
                     >
                       <span className="nav-icon">{ICONS[v.id as keyof typeof ICONS]}</span>
                       <span className="lbl grow ellipsis">{v.label}</span>
+                      {v.id === 'triage' && triageCount > 0 && <span className="badge">{triageCount}</span>}
                     </button>
                   ))}
               </div>

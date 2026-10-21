@@ -1,15 +1,14 @@
-import { PRIORITIES, STATUSES } from '@shared/types'
+import { PRIORITIES, type StatusDef } from '@shared/types'
 import { clsx } from '../util'
+import { PRIORITY_COLORS } from '../columns'
 
-const PRIORITY_COLORS = ['#8a8f98', '#e2445c', '#fdab3d', '#ffcb00', '#579bfc']
-
-export function StatusDot({ status }: { status: (typeof STATUSES)[number]['id'] }) {
-  const s = STATUSES.find(x => x.id === status)!
+export function StatusDot({ status }: { status: StatusDef }) {
+  const done = status.category === 'completed'
   return (
     <span
       className="status-dot"
-      title={s.label}
-      style={{ borderColor: s.color, background: status === 'done' ? s.color : 'transparent' }}
+      title={status.label}
+      style={{ borderColor: status.color, background: done ? status.color : 'transparent' }}
     />
   )
 }
@@ -39,12 +38,12 @@ export function PillSelect({
   )
 }
 
-export function StatusSelect({ value, onChange }: { value: (typeof STATUSES)[number]['id']; onChange: (s: (typeof STATUSES)[number]['id']) => void }) {
+export function StatusSelect({ value, statuses, onChange }: { value: string; statuses: StatusDef[]; onChange: (s: string) => void }) {
   return (
     <PillSelect
       value={value}
-      options={STATUSES.map(s => ({ value: s.id, label: s.label, color: s.color }))}
-      onChange={v => onChange(v as (typeof STATUSES)[number]['id'])}
+      options={statuses.map(s => ({ value: s.id, label: s.label, color: s.color }))}
+      onChange={onChange}
     />
   )
 }

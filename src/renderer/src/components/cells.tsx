@@ -1,12 +1,15 @@
 import { useRef, useState } from 'react'
-import type { CellValue, Column, DateRange, Issue, SelectOption } from '@shared/types'
-import { PillSelect } from './fields'
+import type { CellValue, Column, DateRange, FileRef, Issue, Project, SelectOption } from '@shared/types'
+import { evaluateFormula, fieldValue, formatNumber } from '@shared/query'
+import { useStore } from '../store'
+import { PillSelect, PrioritySelect } from './fields'
 import { ICONS } from './icons'
 import { useOutside } from './ui'
 import { clsx, fmtDate } from '../util'
 
 interface CellEditorProps {
   column: Column
+  project: Project
   value: CellValue | undefined
   issue?: Issue
   onChange: (v: CellValue | undefined) => void
@@ -17,10 +20,12 @@ const isRange = (v: CellValue | undefined): v is DateRange =>
   typeof v === 'object' && v !== null && !Array.isArray(v)
 
 const asIds = (v: CellValue | undefined): string[] =>
-  Array.isArray(v) ? v : typeof v === 'string' && v ? [v] : []
+  Array.isArray(v) ? (v as string[]) : typeof v === 'string' && v ? [v] : []
+
+const MAX_FILE = 5 * 1024 * 1024
 
 // One editor per column type. variant 'cell' is the compact in-table look; 'field' is the drawer look.
-export function CellEditor({ column, value, issue, onChange, variant = 'field' }: CellEditorProps) {
+export function CellEditor({ column, project, value, issue, onChange, variant = 'field' }: CellEditorProps) {
   const cls = variant === 'cell' ? 'cell-input' : 'field-input'
   const str = typeof value === 'string' ? value : ''
   const num = typeof value === 'number' ? value : undefined
@@ -28,15 +33,18 @@ export function CellEditor({ column, value, issue, onChange, variant = 'field' }
 
   switch (column.type) {
     case 'text':
-    case 'people':
+    case 'location':
       return (
         <input
           className={cls}
           value={str}
-          placeholder={column.type === 'people' ? 'Unassigned' : ''}
+          placeholder={column.type === 'location' ? 'Address or place' : ''}
           onChange={e => onChange(e.target.value || undefined)}
         />
       )
+
+    case 'people':
+      return <TagsInput value={Array.isArray(value) ? (value as string[]) : []} suggestions={project.members} onChange={onChange} placeholder="Add person" />
 
     case 'long_text':
       return variant === 'field' ? (
@@ -51,11 +59,13 @@ export function CellEditor({ column, value, issue, onChange, variant = 'field' }
           className={clsx(cls, 'num')}
           type="number"
           value={num ?? ''}
+          title={num !== undefined ? formatNumber(num, column) : undefined}
           onChange={e => onChange(e.target.value === '' ? undefined : Number(e.target.value))}
         />
       )
 
     case 'status':
+    case 'label':
       return (
         <PillSelect
           value={str}
@@ -64,17 +74,42 @@ export function CellEditor({ column, value, issue, onChange, variant = 'field' }
         />
       )
 
-    case 'dropdown':
+    case 'color':
       return (
-        <ChipPicker
-          options={options}
-          selected={asIds(value)}
-          onChange={ids => onChange(ids)}
-        />
+        <div className="color-cell">
+          <PillSelect
+            value={str}
+            options={options.map(o => ({ value: o.id, label: o.label, color: o.color }))}
+            onChange={v => onChange(v || undefined)}
+          />
+        </div>
       )
+
+    case 'priority':
+      return <PrioritySelect value={num ?? 0} onChange={p => onChange(p || undefined)} />
+
+    case 'dropdown':
+      return <ChipPicker options={options} selected={asIds(value)} onChange={ids => onChange(ids)} />
 
     case 'date':
       return <input className={cls} type="date" value={str} onChange={e => onChange(e.target.value || undefined)} />
+
+    case 'week':
+      return <input className={cls} type="week" value={str} onChange={e => onChange(e.target.value || undefined)} />
+
+    case 'hour':
+      return <input className={cls} type="time" value={str} onChange={e => onChange(e.target.value || undefined)} />
+
+    case 'time_tracking':
+      return (
+        <div className="range-edit">
+          <input className={clsx(cls, 'num')} type="number" min={0} step={0.25} value={num ?? ''} placeholder="0" onChange={e => onChange(e.target.value === '' ? undefined : Number(e.target.value))} />
+          <span className="muted">h</span>
+        </div>
+      )
+
+    case 'world_clock':
+      return <WorldClock zone={str} onChange={v => onChange(v)} cls={cls} />
 
     case 'timeline': {
       const r = isRange(value) ? value : {}
@@ -95,7 +130,7 @@ export function CellEditor({ column, value, issue, onChange, variant = 'field' }
       )
 
     case 'tags':
-      return <TagsInput value={Array.isArray(value) ? value : []} onChange={onChange} />
+      return <TagsInput value={Array.isArray(value) ? (value as string[]) : []} onChange={onChange} />
 
     case 'link':
       return (
@@ -120,6 +155,43 @@ export function CellEditor({ column, value, issue, onChange, variant = 'field' }
 
     case 'progress':
       return <ProgressEdit value={num ?? 0} onChange={onChange} />
+
+    case 'vote': {
+      const count = num ?? 0
+      return (
+        <button type="button" className="vote-btn" onClick={() => onChange(count + 1)} title="Vote">
+          👍 {count}
+        </button>
+      )
+    }
+
+    case 'button': {
+      const count = num ?? 0
+      return (
+        <button type="button" className="btn subtle" onClick={() => onChange(count + 1)} title="Click count">
+          {column.name} {count ? `(${count})` : ''}
+        </button>
+      )
+    }
+
+    case 'board_relation':
+    case 'dependency':
+      return <IssuePicker column={column} project={project} selected={asIds(value)} onChange={onChange} currentId={issue?.id} />
+
+    case 'mirror':
+      return <MirrorValue column={column} project={project} issue={issue} />
+
+    case 'formula':
+      return <FormulaValue column={column} project={project} issue={issue} />
+
+    case 'files':
+      return <FilesEdit value={Array.isArray(value) ? (value as unknown as FileRef[]) : []} onChange={onChange} />
+
+    case 'auto_number':
+      return <span className="muted">{issue ? issue.number : ''}</span>
+
+    case 'item_id':
+      return <span className="muted">{issue && project ? `${project.key}-${issue.number}` : ''}</span>
 
     case 'created':
       return <span className="muted">{issue ? new Date(issue.createdAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : ''}</span>
@@ -178,12 +250,24 @@ export function ChipPicker({
   )
 }
 
-function TagsInput({ value, onChange }: { value: string[]; onChange: (v: string[]) => void }) {
+// Free-text chips with optional suggestions (people, tags).
+export function TagsInput({
+  value,
+  onChange,
+  suggestions = [],
+  placeholder = 'Add tag'
+}: {
+  value: string[]
+  onChange: (v: string[]) => void
+  suggestions?: string[]
+  placeholder?: string
+}) {
   const [draft, setDraft] = useState('')
+  const matches = suggestions.filter(s => !value.includes(s) && s.toLowerCase().includes(draft.toLowerCase())).slice(0, 5)
 
-  const add = () => {
-    const t = draft.trim()
-    if (t && !value.includes(t)) onChange([...value, t])
+  const add = (t: string) => {
+    const v = t.trim()
+    if (v && !value.includes(v)) onChange([...value, v])
     setDraft('')
   }
 
@@ -198,16 +282,124 @@ function TagsInput({ value, onChange }: { value: string[]; onChange: (v: string[
       <input
         className="tag-draft"
         value={draft}
-        placeholder={value.length ? '' : 'Add tag'}
+        placeholder={value.length ? '' : placeholder}
         onChange={e => setDraft(e.target.value)}
         onKeyDown={e => {
           if (e.key === 'Enter') {
             e.preventDefault()
-            add()
+            add(draft)
           }
           if (e.key === 'Backspace' && !draft && value.length) onChange(value.slice(0, -1))
         }}
       />
+      {draft && matches.length > 0 && (
+        <div className="suggest">
+          {matches.map(m => (
+            <button key={m} type="button" className="popover-item" onMouseDown={e => { e.preventDefault(); add(m) }}>{m}</button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+const ZONES = ['UTC', 'Europe/London', 'Europe/Paris', 'America/New_York', 'America/Los_Angeles', 'Asia/Tokyo', 'Australia/Sydney']
+
+function WorldClock({ zone, onChange, cls }: { zone: string; onChange: (v: string | undefined) => void; cls: string }) {
+  const time = zone ? new Date().toLocaleTimeString(undefined, { timeZone: zone, hour: '2-digit', minute: '2-digit' }) : ''
+  return (
+    <div className="range-edit">
+      <select className={cls} value={zone} onChange={e => onChange(e.target.value || undefined)}>
+        <option value="">Pick zone</option>
+        {ZONES.map(z => (
+          <option key={z} value={z}>{z}</option>
+        ))}
+      </select>
+      <span className="muted">{time}</span>
+    </div>
+  )
+}
+
+// Pick issues from a project (connect boards and dependencies).
+function IssuePicker({
+  column,
+  project,
+  selected,
+  onChange,
+  currentId
+}: {
+  column: Column
+  project: Project
+  selected: string[]
+  onChange: (v: CellValue | undefined) => void
+  currentId?: string
+}) {
+  const { data } = useStore()
+  const targetProject = column.type === 'board_relation' && column.linkProjectId ? data.projects.find(p => p.id === column.linkProjectId) : project
+  const pool = data.issues.filter(i => i.projectId === targetProject?.id && i.id !== currentId)
+  const options: SelectOption[] = pool.map(i => ({
+    id: i.id,
+    label: `${targetProject ? `${targetProject.key}-${i.number}` : ''} ${i.title}`,
+    color: '#579bfc'
+  }))
+  if (column.type === 'board_relation' && !targetProject) return <span className="muted">Pick a project in column settings</span>
+  return (
+    <ChipPicker
+      options={options}
+      selected={selected}
+      onChange={ids => onChange(ids.length ? ids : undefined)}
+    />
+  )
+}
+
+// Reads the linked issues' value for a relation column. Mirror columns are read-only.
+function MirrorValue({ column, project, issue }: { column: Column; project: Project; issue?: Issue }) {
+  const { data } = useStore()
+  if (!issue || !column.relationColumnId) return <span className="muted">—</span>
+  const relation = project.columns.find(c => c.id === column.relationColumnId)
+  const ids = relation ? asIds(issue.values[relation.id]) : []
+  const linked = ids.map(id => data.issues.find(i => i.id === id)).filter((i): i is Issue => !!i)
+  const target = data.projects.find(p => p.id === relation?.linkProjectId)
+  const text = linked.map(l => {
+    if (!column.mirrorField || column.mirrorField === 'title') return l.title
+    if (column.mirrorField === 'status') return target?.statuses.find(s => s.id === l.status)?.label ?? l.status
+    const v = target ? fieldValue(l, column.mirrorField, target) : undefined
+    return Array.isArray(v) ? v.join(', ') : String(v ?? '')
+  })
+  return <span className="mirror-text">{text.join(', ') || '—'}</span>
+}
+
+function FormulaValue({ column, project, issue }: { column: Column; project: Project; issue?: Issue }) {
+  if (!issue || !column.formula) return <span className="muted">—</span>
+  const n = evaluateFormula(column.formula, issue, project)
+  return <span className="formula-text">{n === undefined ? 'Error' : formatNumber(n, column)}</span>
+}
+
+function FilesEdit({ value, onChange }: { value: FileRef[]; onChange: (v: CellValue | undefined) => void }) {
+  const [error, setError] = useState('')
+  const add = (list: FileList | null) => {
+    if (!list) return
+    setError('')
+    Array.from(list).forEach(f => {
+      if (f.size > MAX_FILE) return setError(`${f.name} is over 5 MB`)
+      const reader = new FileReader()
+      reader.onload = () => onChange([...value, { name: f.name, size: f.size, dataUrl: String(reader.result) }] as unknown as CellValue)
+      reader.readAsDataURL(f)
+    })
+  }
+  return (
+    <div className="files-edit">
+      {value.map((f, n) => (
+        <span key={`${f.name}-${n}`} className="chip neutral">
+          <a href={f.dataUrl} download={f.name}>{f.name}</a>
+          <button type="button" className="chip-x" onClick={() => onChange(value.filter((_, x) => x !== n) as unknown as CellValue)}>×</button>
+        </span>
+      ))}
+      <label className="btn subtle">
+        Attach
+        <input type="file" multiple hidden onChange={e => add(e.target.files)} />
+      </label>
+      {error && <span className="error small">{error}</span>}
     </div>
   )
 }

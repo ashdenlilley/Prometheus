@@ -24,5 +24,11 @@ export const ICONS = {
   pin: <Svg><path d="M5.25 2.25h5.5l-.75 3.5 1.75 2v1.25h-3.25v4.25L8 14.25l-.5-1.25V8.999H4.25V7.75L6 5.75z" /></Svg>,
   settings: <Svg><circle cx="8" cy="8" r="2.25" /><path d="M8 1.75v1.5M8 12.75v1.5M1.75 8h1.5M12.75 8h1.5M3.4 3.4l1.05 1.05M11.55 11.55l1.05 1.05M3.4 12.6l1.05-1.05M11.55 4.45l1.05-1.05" /></Svg>,
   chevron: <Svg><path d="M6 4l4 4-4 4" /></Svg>,
-  external: <Svg><path d="M9 3h4v4M13 3L7.5 8.5M11 9.5V13H3V5h3.5" /></Svg>
+  external: <Svg><path d="M9 3h4v4M13 3L7.5 8.5M11 9.5V13H3V5h3.5" /></Svg>,
+  triage: <Svg><path d="M2.5 9.5l1.5-5h8l1.5 5v3h-11z" /><path d="M2.5 9.5h3l1 1.5h3l1-1.5h3" /></Svg>,
+  chart: <Svg><path d="M3 13.5h10.5" /><rect x="4" y="8" width="2" height="5" rx=".5" /><rect x="7.5" y="5" width="2" height="8" rx=".5" /><rect x="11" y="3" width="2" height="10" rx=".5" /></Svg>,
+  calendar: <Svg><rect x="2.5" y="3.5" width="11" height="10" rx="2" /><path d="M2.5 6.5h11M5.5 2v2.5M10.5 2v2.5" /></Svg>,
+  dashboard: <Svg><rect x="2.5" y="2.5" width="4.5" height="6" rx="1" /><rect x="9" y="2.5" width="4.5" height="3" rx="1" /><rect x="9" y="7.5" width="4.5" height="6" rx="1" /><rect x="2.5" y="10" width="4.5" height="3.5" rx="1" /></Svg>,
+  bell: <Svg><path d="M4 11V7.5a4 4 0 0 1 8 0V11l1 1.5H3z" /><path d="M6.5 13.5a1.5 1.5 0 0 0 3 0" /></Svg>,
+  search: <Svg><circle cx="7" cy="7" r="4.25" /><path d="M10.25 10.25L13.5 13.5" /></Svg>
 }

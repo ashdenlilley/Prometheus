@@ -3,30 +3,49 @@ import { join } from 'path'
 import { promises as fs } from 'fs'
 import type { AppData } from '../shared/types'
 import { reducer, type Action } from '../shared/model'
+import { migrate } from '../shared/migrate'
+import { seed } from '../shared/seed'
 import { McpController } from './mcp'
+import { Store } from './db'
 
 // Live UI testing only: expose Chrome DevTools on localhost when PROMETHEUS_DEBUG_PORT is set.
 if (process.env.PROMETHEUS_DEBUG_PORT) app.commandLine.appendSwitch('remote-debugging-port', process.env.PROMETHEUS_DEBUG_PORT)
 
 const isMac = process.platform === 'darwin'
 const dataDir = () => app.getPath('userData')
-const dataFile = () => join(dataDir(), 'prometheus-data.json')
+const legacyFile = () => join(dataDir(), 'prometheus-data.json')
 
 // Latest data known to the main process. The renderer saves here; MCP writes go through here.
 let state: AppData | null = null
+let store: Store | null = null
 
-// Writes run one at a time so overlapping saves cannot interleave.
-let writeQueue: Promise<void> = Promise.resolve()
+async function openStore(): Promise<Store> {
+  if (store) return store
+  const next = new Store(join(dataDir(), 'prometheus.db'))
+  await next.open()
+  store = next
+  return next
+}
+
+// First run: import the v2/v3 JSON file if present, otherwise seed sample content.
+async function loadInitial(db: Store): Promise<AppData> {
+  const existing = db.read()
+  if (existing) return existing
+  try {
+    const legacy = migrate(JSON.parse(await fs.readFile(legacyFile(), 'utf8')))
+    await db.save(legacy)
+    await fs.rename(legacyFile(), `${legacyFile()}.bak`)
+    return legacy
+  } catch {
+    const fresh = seed()
+    await db.save(fresh)
+    return fresh
+  }
+}
 
 function persist(data: AppData) {
-  writeQueue = writeQueue
-    .then(async () => {
-      const tmp = `${dataFile()}.tmp`
-      await fs.writeFile(tmp, JSON.stringify(data, null, 2), 'utf8')
-      await fs.rename(tmp, dataFile())
-    })
-    .catch(err => console.error('save failed', err))
-  return writeQueue
+  if (!store) return Promise.resolve()
+  return store.save(data)
 }
 
 function broadcast(data: AppData) {
@@ -40,7 +59,7 @@ const host = {
   apply(action: Action) {
     if (!state) throw new Error('Prometheus has not loaded its data yet')
     state = reducer(state, action)
-    persist(state)
+    void persist(state)
     broadcast(state)
   }
 }
@@ -48,14 +67,9 @@ const host = {
 const mcp = new McpController(dataDir(), host)
 
 ipcMain.handle('data:load', async () => {
-  try {
-    const loaded = JSON.parse(await fs.readFile(dataFile(), 'utf8')) as AppData
-    // Only v3 data is usable by MCP; older files are upgraded by the renderer on first save.
-    if (loaded.version === 3) state = loaded
-    return loaded
-  } catch {
-    return null
-  }
+  const db = await openStore()
+  state = await loadInitial(db)
+  return state
 })
 
 ipcMain.handle('data:save', (_event, data: AppData) => {

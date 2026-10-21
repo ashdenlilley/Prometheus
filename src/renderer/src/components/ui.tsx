@@ -98,3 +98,58 @@ export function Menu({ items, align = 'left' }: { items: MenuItem[]; align?: 'le
     </div>
   )
 }
+
+// Electron does not support window.prompt(). askText() opens an in-app text dialog instead.
+interface Ask {
+  label: string
+  value: string
+  resolve: (v: string | null) => void
+}
+
+let openAsk: ((a: Ask) => void) | null = null
+
+export function askText(label: string, value = ''): Promise<string | null> {
+  return new Promise(resolve => {
+    if (openAsk) openAsk({ label, value, resolve })
+    else resolve(null)
+  })
+}
+
+// Mounted once in App. Renders the dialog requested by askText().
+export function PromptHost() {
+  const [ask, setAsk] = useState<Ask | null>(null)
+  const [text, setText] = useState('')
+
+  useEffect(() => {
+    openAsk = a => {
+      setText(a.value)
+      setAsk(a)
+    }
+    return () => {
+      openAsk = null
+    }
+  }, [])
+
+  if (!ask) return null
+  const done = (v: string | null) => {
+    ask.resolve(v)
+    setAsk(null)
+  }
+  return (
+    <Modal title={ask.label} onClose={() => done(null)}>
+      <input
+        className="field-input"
+        autoFocus
+        value={text}
+        onChange={e => setText(e.target.value)}
+        onKeyDown={e => {
+          if (e.key === 'Enter') done(text.trim() || null)
+        }}
+      />
+      <div className="actions">
+        <button className="btn" onClick={() => done(null)}>Cancel</button>
+        <button className="btn primary" onClick={() => done(text.trim() || null)}>OK</button>
+      </div>
+    </Modal>
+  )
+}
