@@ -1,0 +1,117 @@
+import { useState } from 'react'
+import { useStore } from './store'
+import { clsx } from './util'
+import { IssueDetail } from './components/IssueDetail'
+import { NewProjectModal } from './components/NewProjectModal'
+import { IssuesView } from './views/IssuesView'
+import { BoardView } from './views/BoardView'
+import { TableView } from './views/TableView'
+import { TimelineView } from './views/TimelineView'
+import { CyclesView } from './views/CyclesView'
+import { RoadmapView } from './views/RoadmapView'
+
+const VIEWS = [
+  { id: 'issues', label: 'Issues' },
+  { id: 'board', label: 'Board' },
+  { id: 'table', label: 'Table' },
+  { id: 'timeline', label: 'Timeline' },
+  { id: 'cycles', label: 'Cycles' },
+  { id: 'roadmap', label: 'Roadmap' }
+] as const
+
+type ViewId = (typeof VIEWS)[number]['id']
+
+export default function App() {
+  const { data, dispatch } = useStore()
+  const [view, setView] = useState<ViewId>('issues')
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [openIssueId, setOpenIssueId] = useState<string | null>(null)
+  const [creating, setCreating] = useState(false)
+
+  const project = data.projects.find(p => p.id === selectedId) ?? data.projects[0]
+  const current = VIEWS.find(v => v.id === view)!
+  const projectScoped = view !== 'issues' && view !== 'roadmap'
+
+  const deleteProject = () => {
+    if (project && window.confirm(`Delete project "${project.name}" and all its issues?`)) {
+      dispatch({ type: 'deleteProject', id: project.id })
+    }
+  }
+
+  const renderBody = () => {
+    if (!project) {
+      return (
+        <div className="empty">
+          <p>No projects yet.</p>
+          <button className="btn primary" onClick={() => setCreating(true)}>New project</button>
+        </div>
+      )
+    }
+    switch (view) {
+      case 'issues':
+        return <IssuesView projectId={project.id} onOpen={setOpenIssueId} />
+      case 'board':
+        return <BoardView projectId={project.id} onOpen={setOpenIssueId} />
+      case 'table':
+        return <TableView project={project} onOpen={setOpenIssueId} />
+      case 'timeline':
+        return <TimelineView project={project} onOpen={setOpenIssueId} />
+      case 'cycles':
+        return <CyclesView project={project} onOpen={setOpenIssueId} />
+      case 'roadmap':
+        return <RoadmapView />
+    }
+  }
+
+  return (
+    <div className="app">
+      <aside className="sidebar">
+        <div className="brand">Prometheus</div>
+        {VIEWS.map(v => (
+          <button key={v.id} className={clsx('nav-item', view === v.id && 'active')} onClick={() => setView(v.id)}>
+            {v.label}
+          </button>
+        ))}
+        <div className="section-title">
+          Projects
+          <button className="icon-btn" title="New project" onClick={() => setCreating(true)}>+</button>
+        </div>
+        {data.projects.map(p => (
+          <button
+            key={p.id}
+            className={clsx('nav-item', project?.id === p.id && 'active')}
+            onClick={() => setSelectedId(p.id)}
+          >
+            <span className="dot" style={{ background: p.color }} />
+            {p.name}
+          </button>
+        ))}
+      </aside>
+
+      <main className="main">
+        <header className="topbar">
+          <h1>
+            {current.label}
+            {project && projectScoped && <span className="muted"> · {project.name}</span>}
+          </h1>
+          {project && (
+            <button className="btn danger" onClick={deleteProject}>Delete project</button>
+          )}
+        </header>
+        <div className="content">{renderBody()}</div>
+      </main>
+
+      {openIssueId && <IssueDetail key={openIssueId} issueId={openIssueId} onClose={() => setOpenIssueId(null)} />}
+      {creating && (
+        <NewProjectModal
+          onClose={() => setCreating(false)}
+          onCreated={id => {
+            setSelectedId(id)
+            setView('board')
+            setCreating(false)
+          }}
+        />
+      )}
+    </div>
+  )
+}
