@@ -1,4 +1,13 @@
-# Prometheus
+<p align="center">
+  <img src="build/icon.png" alt="Prometheus icon" width="128" height="128">
+</p>
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="src/renderer/src/assets/wordmark-light.png">
+    <img src="src/renderer/src/assets/wordmark-dark.png" alt="PROMETHEUS" width="420">
+  </picture>
+</p>
 
 Local-first project management. Linear-style issues, cycles and roadmap. Monday-style boards with custom columns and timeline. Single user. Optional folder sync across devices (see docs/sync.md). Runs on macOS and Windows.
 
