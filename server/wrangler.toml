@@ -1,4 +1,5 @@
-# Prometheus cloud sync server. Replace every REPLACE_WITH_... value before deploying.
+# Prometheus cloud sync server, configured for the live deployment at
+# https://prometheus-sync.ashden-lilley.workers.dev (Cloudflare Email Sending from olympusstudios.org).
 #
 # Secrets are NOT set here. Set them with the Wrangler CLI, never commit them:
 #   npx wrangler secret put JWT_SECRET
@@ -12,8 +13,8 @@ compatibility_date = "2026-08-01"
 
 # Only needed for EMAIL_PROVIDER = "cloudflare" (Cloudflare Email Sending; no API key).
 # The sender domain in EMAIL_FROM must be onboarded to Email Sending first.
-# [[send_email]]
-# name = "EMAIL"
+[[send_email]]
+name = "EMAIL"
 
 [[durable_objects.bindings]]
 name = "AUTH"
@@ -29,14 +30,14 @@ new_sqlite_classes = ["Auth", "Workspace"]
 
 [vars]
 # The only account allowed to sign in. Everyone else gets the same replies and no email.
-OWNER_EMAIL = "you@example.com"
+OWNER_EMAIL = "ashden.lilley@gmail.com"
 # Public base URL of this Worker. Sign-in links point here.
-PUBLIC_URL = "https://prometheus-sync.REPLACE_WITH_SUBDOMAIN.workers.dev"
+PUBLIC_URL = "https://prometheus-sync.ashden-lilley.workers.dev"
 # "resend", or "cloudflare" (Cloudflare Email Sending, through the send_email binding below).
 # "log" is for local development only: it prints the link and is refused for any non-local PUBLIC_URL.
-EMAIL_PROVIDER = "resend"
+EMAIL_PROVIDER = "cloudflare"
 # Must be a sender on a domain you have verified with the email provider (SPF/DKIM).
-EMAIL_FROM = "Prometheus <signin@REPLACE_WITH_VERIFIED_DOMAIN>"
+EMAIL_FROM = "prometheus@olympusstudios.org"
 # Optional tuning (defaults shown in src/*.ts):
 # LINK_TTL_SECONDS = "900"
 # COMPACT_AT = "10000"

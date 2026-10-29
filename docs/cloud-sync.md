@@ -4,7 +4,7 @@ The sync server lives in `server/`. It is a Cloudflare Worker with two Durable O
 one owner account syncs live across that owner's devices, and sign-in is by email magic link.
 This document covers the server and the Electron client (`src/main/cloud.ts`, see [Client (Electron)](#client-electron)).
 
-Nothing here is deployed. Every account id, domain, email and key in the repo is a placeholder.
+Deployed at `https://prometheus-sync.ashden-lilley.workers.dev` (Worker `prometheus-sync`). `server/wrangler.toml` holds the real non-secret settings; secrets are set only on the Worker. Sign-in email needs Cloudflare Email Sending onboarded for `olympusstudios.org` (Workers Paid plan).
 
 ## Architecture
 
