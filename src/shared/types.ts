@@ -247,6 +247,7 @@ export interface Issue {
   dueDate?: string
   estimate?: number
   favourite?: boolean
+  recurrence?: Recurrence
   // Automation keys already run for this issue, e.g. "ruleId:2026-10-01", so timed rules fire once
   firedAutomations?: string[]
   // Triage inbox: new items wait here until accepted or declined
@@ -258,6 +259,16 @@ export interface Issue {
   createdAt: string
   updatedAt: string
   completedAt?: string
+}
+
+// Copies the issue on a schedule. `next` is the YYYY-MM-DD of the next copy.
+export interface Recurrence {
+  kind: 'daily' | 'weekly' | 'monthly' | 'interval'
+  weekdays?: number[] // 0=Sun..6=Sat, weekly
+  monthDay?: number // 1..31, monthly
+  every?: number // days, interval
+  next: string
+  dueInDays?: number // copy's due date = creation day + this
 }
 
 export interface Cycle {

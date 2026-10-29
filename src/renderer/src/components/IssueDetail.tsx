@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react'
-import type { ActivityEntry, Comment, Issue, Relation, RelationType } from '@shared/types'
+import type { ActivityEntry, Comment, Issue, Recurrence, Relation, RelationType } from '@shared/types'
 import { childrenOf, progress } from '@shared/query'
 import { createIssue, issueKey, useStore, withValue } from '../store'
 import { inverseRelations } from '@shared/model'
+import { nextOccurrence } from '@shared/recurrence'
 import { CellEditor } from './cells'
 import { PrioritySelect, StatusDot, StatusSelect } from './fields'
 import { ICONS } from './icons'
 import { askText, useEscape } from './ui'
-import { clsx, fmtDate, uid } from '../util'
+import { clsx, fmtDate, parseISO, todayISO, uid } from '../util'
 
 const REL_LABEL: Record<RelationType | 'blocked_by' | 'duplicated_by', string> = {
   blocks: 'Blocks',
@@ -16,6 +17,9 @@ const REL_LABEL: Record<RelationType | 'blocked_by' | 'duplicated_by', string> =
   duplicated_by: 'Duplicated by',
   related: 'Related'
 }
+
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+const toNum = (v: string) => (v === '' ? undefined : Number(v))
 
 // Issue drawer: every field, sub-issues, relations, comments and activity.
 export function IssueDetail({ issueId, onClose, onOpen }: { issueId: string; onClose: () => void; onOpen: (id: string) => void }) {
@@ -49,6 +53,20 @@ export function IssueDetail({ issueId, onClose, onOpen }: { issueId: string; onC
   if (!issue || !project) return null
 
   const patch = (p: Partial<Issue>) => dispatch({ type: 'patchIssue', id: issue.id, patch: p })
+  const rec = issue.recurrence
+  const today = todayISO()
+  // Any rule change re-derives `next` from today, so a match today counts only on the next run.
+  const setRepeat = (r?: Recurrence) => patch({ recurrence: r && { ...r, next: nextOccurrence(r, today) } })
+  const editRepeat = (p: Partial<Recurrence>) => rec && setRepeat({ ...rec, ...p })
+  const pickKind = (kind: Recurrence['kind'] | 'none') => {
+    if (kind === 'none') return setRepeat()
+    const day = parseISO(today)
+    setRepeat({ kind, next: today, weekdays: [day.getDay()], monthDay: day.getDate(), every: 2, dueInDays: rec?.dueInDays })
+  }
+  const toggleDay = (d: number) => {
+    const days = rec?.weekdays ?? []
+    editRepeat({ weekdays: days.includes(d) ? days.filter(x => x !== d) : [...days, d] })
+  }
   const cycles = data.cycles.filter(c => c.projectId === project.id)
   const milestones = project.milestones
   const children = childrenOf(data.issues, issue.id)
@@ -234,6 +252,70 @@ export function IssueDetail({ issueId, onClose, onOpen }: { issueId: string; onC
           <label>
             Due
             <input className="field-input" type="date" value={issue.dueDate ?? ''} onChange={e => patch({ dueDate: e.target.value || undefined })} />
+          </label>
+          <label className="wide">
+            Repeat
+            <div className="repeat-row">
+              <select
+                aria-label="Repeat"
+                className="field-input"
+                value={rec?.kind ?? 'none'}
+                onChange={e => pickKind(e.target.value as Recurrence['kind'] | 'none')}
+              >
+                <option value="none">None</option>
+                <option value="daily">Daily</option>
+                <option value="weekly">Weekly</option>
+                <option value="monthly">Monthly</option>
+                <option value="interval">Every N days</option>
+              </select>
+              {rec?.kind === 'weekly' &&
+                WEEKDAYS.map((d, n) => (
+                  <button
+                    key={d}
+                    type="button"
+                    aria-label={`Repeat on ${d}`}
+                    aria-pressed={!!rec.weekdays?.includes(n)}
+                    className={clsx('repeat-day', rec.weekdays?.includes(n) && 'on')}
+                    onClick={() => toggleDay(n)}
+                  >
+                    {d}
+                  </button>
+                ))}
+              {rec?.kind === 'monthly' && (
+                <input
+                  aria-label="Day of month"
+                  className="field-input"
+                  type="number"
+                  min={1}
+                  max={31}
+                  value={rec.monthDay ?? ''}
+                  onChange={e => editRepeat({ monthDay: toNum(e.target.value) })}
+                />
+              )}
+              {rec?.kind === 'interval' && (
+                <input
+                  aria-label="Every N days"
+                  className="field-input"
+                  type="number"
+                  min={1}
+                  value={rec.every ?? ''}
+                  onChange={e => editRepeat({ every: toNum(e.target.value) })}
+                />
+              )}
+              {rec && <span className="muted small">Due after (days)</span>}
+              {rec && (
+                <input
+                  aria-label="Due after days"
+                  className="field-input"
+                  type="number"
+                  min={0}
+                  placeholder="Due after (days)"
+                  value={rec.dueInDays ?? ''}
+                  onChange={e => editRepeat({ dueInDays: toNum(e.target.value) })}
+                />
+              )}
+            </div>
+            {rec && <span className="muted small">Next: {fmtDate(rec.next)}</span>}
           </label>
           {project.columns.map(col => (
             <label key={col.id} className={col.type === 'long_text' ? 'wide' : undefined}>

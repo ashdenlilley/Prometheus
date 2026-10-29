@@ -3171,3 +3171,36 @@ select.field-input:focus {
   color: #e5484d;
   margin: 8px 0 0;
 }
+
+.repeat-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.repeat-row .field-input {
+  width: auto;
+  min-width: 0;
+}
+
+.repeat-row input[type='number'] {
+  width: 110px;
+}
+
+.repeat-day {
+  min-width: 36px;
+  min-height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--control);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.repeat-day.on {
+  border-color: transparent;
+  background: var(--accent);
+  color: #fff;
+}
