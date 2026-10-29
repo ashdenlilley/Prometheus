@@ -246,7 +246,7 @@ describe('migrate: malformed and edge input', () => {
     assert.deepEqual(i.values, { x: 'Y' })
   })
 
-  test('an empty spaces list still gets a default Workspace space', { todo: 'BUG: spaces: [] is not nullish, so spaces[0].id throws instead of falling back to a default Workspace' }, () => {
+  test('an empty spaces list still gets a default Workspace space', () => {
     const out = migrate(legacyFile({ spaces: [] }))
     assert.equal(out.spaces.length, 1)
   })

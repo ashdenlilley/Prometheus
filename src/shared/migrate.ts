@@ -8,7 +8,7 @@ export function migrate(raw: unknown): AppData {
 
   const legacy = raw as unknown as Record<string, unknown> & AppData
   const base = emptyData()
-  const spaces = legacy.spaces ?? [{ id: crypto.randomUUID(), name: 'Workspace', color: '#5e6ad2' }]
+  const spaces = legacy.spaces?.length ? legacy.spaces : [{ id: crypto.randomUUID(), name: 'Workspace', color: '#5e6ad2' }]
   const defaultSpaceId = spaces[0].id
 
   const projects = legacy.projects.map(p => {
