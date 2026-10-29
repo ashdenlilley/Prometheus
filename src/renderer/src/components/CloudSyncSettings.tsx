@@ -125,7 +125,7 @@ export function CloudSyncSettings() {
             {cloud.email} · {cloud.serverUrl}
           </div>
           <div className="muted small">
-            <span className="chip" role="status">{STATE_LABEL[cloud.state]}</span>{' '}
+            <span className="chip neutral" role="status">{STATE_LABEL[cloud.state]}</span>{' '}
             {cloud.pending ? `${cloud.pending} pending · ` : ''}
             {cloud.lastSync ? `Last sync ${new Date(cloud.lastSync).toLocaleTimeString()}` : 'Waiting for first sync'}
           </div>

@@ -490,7 +490,17 @@ export class CloudSync {
     if (this.config.enabled && !this.stopped) this.retry()
   }
 
+  // Errors from applying a frame must not escape into the socket callback (an uncaught exception in Electron main).
   private onFrame(ws: SocketLike, data: unknown) {
+    try {
+      this.handleFrame(ws, data)
+    } catch (err) {
+      console.error('cloud frame failed', err instanceof Error ? err.message : 'unknown')
+      this.error = 'Could not apply changes from the server.'
+    }
+  }
+
+  private handleFrame(ws: SocketLike, data: unknown) {
     if (ws !== this.socket) return
     let msg: Frame
     try {

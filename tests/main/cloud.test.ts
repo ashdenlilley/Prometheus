@@ -307,6 +307,23 @@ describe('CloudSync', () => {
     adopt.cloud.stop()
   })
 
+  test('a frame that throws while applying sets a status error instead of escaping', async () => {
+    const h = harness(signInHandlers())
+    await signedIn(h, 0)
+    const joined = await socketAt(1)
+    joined.open()
+    joined.frame({ type: 'ready', head: 0 })
+    // Reading issues throws, so applying a remote issue op fails inside the frame handler.
+    Object.defineProperty(h.state.data, 'issues', {
+      get() {
+        throw new Error('boom')
+      }
+    })
+    assert.doesNotThrow(() => joined.frame({ type: 'ops', ops: [{ seq: 1, op: issueOp(2000, 'remote', 'x') }] }))
+    assert.equal(h.cloud.getStatus().error, 'Could not apply changes from the server.')
+    h.cloud.stop()
+  })
+
   test('a device that is not joined cannot join twice', async () => {
     const h = harness(signInHandlers())
     await signedIn(h, 0)
