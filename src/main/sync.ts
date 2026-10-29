@@ -4,6 +4,7 @@ import { randomUUID } from 'crypto'
 import { hostname } from 'os'
 import type { AppData } from '../shared/types'
 import { emptyData } from '../shared/seed'
+import { ensureTeams, resolveNumberClashes } from '../shared/teams'
 import { Clock, applyOps, diffOps, opKeys, snapshotOps, stampOps, type Op } from '../shared/sync'
 import { createMeta, open as openSealed, seal, unlockMeta, type FolderMeta, type Sealed } from './crypto'
 import type { Store } from './db'
@@ -312,7 +313,9 @@ export class SyncEngine {
     for (const op of ops) this.clock.observe(op.hlc)
     // Read the live state after the awaits above, then apply synchronously.
     const result = applyOps(this.hooks.read(), ops, this.clocks)
-    if (result.applied > 0) this.hooks.write(result.data)
+    // Two devices can hand out the same number; the clash is resolved the same way on each
+    const data = resolveNumberClashes(ensureTeams(result.data))
+    if (result.applied > 0) this.hooks.write(data)
     const entries: [string, string][] = []
     for (const op of ops) for (const k of opKeys(op)) entries.push([k, this.clocks.get(k)!])
     await this.store.setClocks(entries)

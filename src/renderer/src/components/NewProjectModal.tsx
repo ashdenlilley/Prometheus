@@ -22,6 +22,8 @@ export function NewProjectModal({
   const [startDate, setStartDate] = useState(todayISO())
   const [targetDate, setTargetDate] = useState(addDays(todayISO(), 90))
   const [templateId, setTemplateId] = useState('')
+  const [teamId, setTeamId] = useState('')
+  const teams = data.teams.filter(t => t.spaceId === spaceId && !t.archivedAt)
   const initiatives = data.initiatives.filter(i => i.spaceId === spaceId)
   const templates = data.spaces.find(s => s.id === spaceId)?.projectTemplates ?? []
 
@@ -30,17 +32,21 @@ export function NewProjectModal({
     const tpl = templates.find(t => t.id === templateId)
     if (tpl) {
       const made = instantiateProjectTemplate(tpl, { spaceId, name: name.trim(), key: projectKey(name), newId: uid, now: new Date().toISOString() })
-      const project = { ...made.project, color, lead, initiativeId: initiativeId || undefined, startDate, targetDate }
+      const project = { ...made.project, teamId, color, lead, initiativeId: initiativeId || undefined, startDate, targetDate }
       dispatch({ type: 'addProjectFromTemplate', ...made, project })
+      if (teamId) dispatch({ type: 'moveProjectToTeam', projectId: project.id, teamId })
       onCreated(project.id)
       return
     }
     const id = uid()
+    // A chosen team is set on the project first, so addProject doesn't make a team from it
+    const team = teams.find(t => t.id === teamId)
     dispatch({
       type: 'addProject',
       project: blankProject({
         id,
         spaceId,
+        teamId,
         name: name.trim(),
         key: projectKey(name),
         color,
@@ -51,6 +57,7 @@ export function NewProjectModal({
         targetDate
       })
     })
+    if (team) dispatch({ type: 'moveProjectToTeam', projectId: id, teamId: team.id })
     onCreated(id)
   }
 
@@ -72,6 +79,15 @@ export function NewProjectModal({
       <label className="field">
         Lead
         <input value={lead} onChange={e => setLead(e.target.value)} />
+      </label>
+      <label className="field">
+        Team
+        <select aria-label="Team" value={teamId} onChange={e => setTeamId(e.target.value)}>
+          <option value="">New team</option>
+          {teams.map(t => (
+            <option key={t.id} value={t.id}>{t.name} ({t.key})</option>
+          ))}
+        </select>
       </label>
       {initiatives.length > 0 && (
         <label className="field">
