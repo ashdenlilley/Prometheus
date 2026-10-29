@@ -7,6 +7,7 @@ import { ICONS } from './icons'
 import { fmtDate, clsx, uid } from '../util'
 import { LABEL_COLORS } from '../columns'
 import { SpaceLabels } from './SpaceLabels'
+import { SpaceTeams } from './SpaceTeams'
 
 interface SpaceHomeProps {
   space: Space
@@ -151,6 +152,7 @@ export function SpaceHome({ space, onOpenProject, onNewProject, onDeleted }: Spa
         </div>
       )}
       <SpaceLabels space={space} />
+      <SpaceTeams space={space} />
     </div>
   )
 }

@@ -1,4 +1,5 @@
 import type { AppData, Comment, Issue, WebhookEvent } from './types'
+import { issueKey } from './model'
 
 // Outgoing webhook rules. Pure: no node imports, so the renderer and tests can use it.
 
@@ -99,7 +100,7 @@ export function webhookEvents(prev: AppData, next: AppData, actor: string, at: s
       at,
       actor,
       project: { id: issue.projectId, key: project?.key ?? '' },
-      issue: { ...issue, key: `${project?.key ?? ''}-${issue.number}` },
+      issue: { ...issue, key: issueKey(next.projects.some(p => p.id === issue.projectId) ? next : prev, issue) },
       ...extra
     }
     for (const w of hooks) {

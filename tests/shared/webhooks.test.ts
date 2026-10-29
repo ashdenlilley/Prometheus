@@ -91,6 +91,14 @@ describe('webhookEvents', () => {
     assert.equal(out[0].payload.at, at)
   })
 
+  test('the payload key uses the issue\'s own stored key prefix (team-aware)', () => {
+    const prev = base()
+    const moved = { ...prev.issues[0], key: 'ENG', number: 7, title: 'Renamed' }
+    const next = { ...prev, webhooks: [hook()], issues: [moved] }
+    const out = webhookEvents(prev, next, 'me', at)
+    assert.equal(out[0].payload.issue?.key, 'ENG-7')
+  })
+
   test('an edit fires issue.updated with the changed fields, ignoring activity and updatedAt', () => {
     const prev = base()
     const changed = { ...prev.issues[0], title: 'Renamed', priority: 2, updatedAt: at, activity: [{ id: 'a', at, text: 'x' }] }

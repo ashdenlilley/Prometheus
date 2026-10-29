@@ -2,7 +2,7 @@ import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'crypto'
 import { join } from 'path'
 import { promises as fs } from 'fs'
 import type { AppData } from '../shared/types'
-import type { Action } from '../shared/model'
+import { issueKey, type Action } from '../shared/model'
 import { TIMEOUT_MS, nextAttemptAt, urlAllowed, type WebhookDelivery, type WebhookEventOut, type WebhookPayload } from '../shared/webhooks'
 import type { Store } from './db'
 
@@ -138,7 +138,7 @@ export class WebhookDispatcher {
       at: new Date(this.now()).toISOString(),
       actor: 'test',
       project: { id: hook.projectId, key: project?.key ?? '' },
-      issue: sample ? { ...sample, key: `${project?.key ?? ''}-${sample.number}` } : null,
+      issue: sample ? { ...sample, key: issueKey(data, sample) } : null,
       changes: {},
       test: true
     }

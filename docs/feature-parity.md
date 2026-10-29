@@ -13,7 +13,7 @@ Last checked against the code: 2026-10-29.
 ### 1.1 Object model
 | Feature | Status |
 |---|---|
-| Teams (separate issue sequences, workflows, cycles) | P (projects act as teams: own key and issue numbers, statuses and cycles; no team entity or membership. `shared/types.ts` Project) |
+| Teams (separate issue sequences, workflows, cycles) | Y (team entity per space with its own key, shared issue sequence, statuses, cycle settings and a member list; each project belongs to one team, and projects can move between teams without renumbering. Space overview > Teams, `shared/teams.ts`, `SpaceTeams.tsx`; no team-level permissions) |
 | Issues with identifiers (`ENG-123`) | Y (`shared/model.ts` issueKey) |
 | Sub-issues, parent progress roll-up | Y (`shared/model.ts`, `shared/query.ts` childrenOf and progress, `IssueDetail.tsx`) |
 | Projects (status, lead, members, start and target date, progress, milestones) | Y (`shared/types.ts` Project, `ProjectSettings.tsx` General tab, `RoadmapView.tsx` progress) |
@@ -39,7 +39,7 @@ Last checked against the code: 2026-10-29.
 | Feature | Status |
 |---|---|
 | Custom statuses in categories (Backlog, Unstarted, Started, Completed, Canceled) | Y (`shared/types.ts` StatusDef and StatusCategory, `ProjectSettings.tsx` Statuses) |
-| Per-team workflow editing | Y (statuses are edited per project in `ProjectSettings.tsx`; a project is the team here) |
+| Per-team workflow editing | Y (statuses are edited in `ProjectSettings.tsx` and saved to the project's team, so every project in the team shares them) |
 | Triage inbox with accept, decline, duplicate | Y (`TriageView.tsx`, `IssueDetail.tsx` Accept and Decline) |
 | Triage rules (auto-assign team, status, labels, priority) | Y (`shared/types.ts` TriageRule, `shared/model.ts` intake, `ProjectSettings.tsx` Triage rules; sets assignee, status, priority, labels, cycle) |
 | Auto-close and auto-archive rules | Y (per project: cancel open issues untouched for N days, archive completed or canceled issues untouched for N days; archived issues are listed and restored in Project settings > Archive, and hidden from Cycles, Triage, command search, dashboard widgets and Activity. `shared/model.ts` runHousekeeping, `shared/live.ts`) |
@@ -186,7 +186,6 @@ Full 1:1 with both products is a multi-quarter build and needs a multi-user back
 **Still missing, feasible locally (single user):**
 - Project and team documents (single user).
 - Document templates.
-- Team entities with their own membership.
 - Cross-project item creation. Recipes.
 - Agent as an assignee type.
 
