@@ -1,5 +1,5 @@
-import { applyFilter } from './filter'
 import { addDays } from './dates'
+import { applyFilter } from './filter'
 import { nextOccurrence } from './recurrence'
 import type {
   ActivityEntry,
