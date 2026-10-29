@@ -3756,3 +3756,8 @@ select.field-input:focus {
 .doc-preview a.issue-mention { font-weight: 600; }
 .doc-backlinks { display: flex; flex-wrap: wrap; gap: 6px; }
 .doc-cell { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+
+/* OS-464: per-role column rules */
+.cell-locked { color: var(--muted); cursor: not-allowed; }
+.col-perm { gap: 6px; }
+.col-perm-row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }

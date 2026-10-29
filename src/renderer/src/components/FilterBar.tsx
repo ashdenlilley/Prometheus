@@ -7,6 +7,7 @@ import { useStore } from '../store'
 import { askText, useOutside } from './ui'
 import { ICONS } from './icons'
 import { clsx, uid } from '../util'
+import { colMode, useRole } from '../useRole'
 
 type ChartType = NonNullable<SavedView['chartType']>
 
@@ -145,6 +146,7 @@ function groupOptions(project: Project): { value: string; label: string }[] {
 
 export function FilterBar({ project, kind, query, showGroup = true }: { project: Project; kind: ViewKind; query: ViewQuery; showGroup?: boolean }) {
   const { dispatch } = useStore()
+  const role = useRole()
   const [open, setOpen] = useState(false)
   const [viewsOpen, setViewsOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -152,7 +154,9 @@ export function FilterBar({ project, kind, query, showGroup = true }: { project:
   useOutside(ref, () => setOpen(false), open)
   useOutside(viewsRef, () => setViewsOpen(false), viewsOpen)
 
-  const fields = fieldOptions(project)
+  // Hidden columns are left out of every field picker; their values are not sent to this role.
+  const shown = { ...project, columns: project.columns.filter(c => colMode(role, c) !== 'hidden') }
+  const fields = fieldOptions(shown)
   const views = project.views.filter(v => v.view === kind)
   const f = query.filter
   const search = f.conditions.find(c => c.key === 'name' && c.op === 'contains')
@@ -210,7 +214,7 @@ export function FilterBar({ project, kind, query, showGroup = true }: { project:
             </label>
             {f.conditions.map((c, n) => {
               if (c.key === 'name' && c.op === 'contains') return null
-              const opts = valueOptions(project, c.key)
+              const opts = valueOptions(shown, c.key)
               const realN = f.conditions.indexOf(c)
               return (
                 <div key={realN} className="filter-row">
@@ -250,7 +254,7 @@ export function FilterBar({ project, kind, query, showGroup = true }: { project:
         <label className="inline-select">
           Group
           <select className="input-sm" value={query.groupBy ?? ''} onChange={e => query.setGroupBy(e.target.value || null)}>
-            {groupOptions(project).map(o => (
+            {groupOptions(shown).map(o => (
               <option key={o.value} value={o.value}>{o.label}</option>
             ))}
           </select>
@@ -261,7 +265,7 @@ export function FilterBar({ project, kind, query, showGroup = true }: { project:
         <label className="inline-select">
           Rows
           <select className="input-sm" aria-label="Rows" value={query.rowsBy ?? ''} onChange={e => query.setRowsBy(e.target.value || null)}>
-            {groupOptions(project).map(o => (
+            {groupOptions(shown).map(o => (
               <option key={o.value} value={o.value}>{o.label}</option>
             ))}
           </select>

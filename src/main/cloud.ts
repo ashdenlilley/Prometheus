@@ -5,7 +5,7 @@ import type { AppData } from '../shared/types'
 import { emptyData } from '../shared/seed'
 import { ensureTeams, resolveNumberClashes } from '../shared/teams'
 import { applyOps, opKeys, snapshotOps, type Clock, type Op } from '../shared/sync'
-import type { Role } from '../shared/permissions'
+import type { Principal, Role } from '../shared/permissions'
 
 // Cloud sync client (OS-359). Talks to server/ over HTTPS and one WebSocket; see docs/cloud-sync.md.
 // No Electron imports, so tests run it in plain Node. Local ops are stamped by the folder engine's
@@ -111,6 +111,7 @@ interface Config {
   joined: boolean
   userId: string
   role: Role | ''
+  projects: string[] // guest's granted project ids, from the last ready frame
 }
 
 // `inflight` is the batch sent but not yet acked. Its id is kept, so a retry after reconnect is idempotent.
@@ -137,7 +138,7 @@ type Frame =
   | { type: 'error'; id?: string; code: string; skewMs?: number; message?: string }
   | { type: 'pong' }
 
-const BLANK: Config = { serverUrl: '', email: '', deviceId: '', deviceName: '', lastSeq: 0, enabled: false, joined: false, userId: '', role: '' }
+const BLANK: Config = { serverUrl: '', email: '', deviceId: '', deviceName: '', lastSeq: 0, enabled: false, joined: false, userId: '', role: '', projects: [] }
 
 const INVITE_ERRORS: Record<number, string> = {
   400: 'Check the email address and role.',
@@ -259,6 +260,13 @@ export class CloudSync {
       presence: this.presence,
       backup: this.backupPath
     }
+  }
+
+  // The signed-in user as the server sees them, for the local role guard. Null when sync is off or not joined.
+  principal(): Principal | null {
+    const c = this.config
+    if (!c.enabled || !c.joined || !c.role) return null
+    return { userId: c.userId, role: c.role, projects: c.projects ?? [] }
   }
 
   // Local change, already stamped by the folder engine. Queued until the server acks it.
@@ -478,7 +486,7 @@ export class CloudSync {
   private async finishSignIn(p: Pending, body: { refreshToken: string; accessToken: string; accessExpiresAt: number; deviceId: string }) {
     await this.opts.credentials.set(REFRESH_KEY, body.refreshToken)
     this.pending = null
-    this.config = { serverUrl: p.serverUrl, email: p.email, deviceId: body.deviceId, deviceName: p.deviceName, lastSeq: 0, enabled: true, joined: false, userId: '', role: '' }
+    this.config = { serverUrl: p.serverUrl, email: p.email, deviceId: body.deviceId, deviceName: p.deviceName, lastSeq: 0, enabled: true, joined: false, userId: '', role: '', projects: [] }
     this.access = { token: body.accessToken, expiresAt: body.accessExpiresAt }
     this.outbox = { inflight: null, ops: [] }
     this.error = null
@@ -610,6 +618,7 @@ export class CloudSync {
         if (!this.replay) this.error = null
         this.config.userId = msg.userId
         this.config.role = msg.role
+        this.config.projects = msg.projects
         void this.save()
         if (this.issueId) ws.send(JSON.stringify({ type: 'presence', issueId: this.issueId }))
         if (!this.config.joined) {

@@ -3,6 +3,7 @@ import type { Issue, Project } from '@shared/types'
 import { fitBounds, formatLocation, mercator, parseLocation, unmercator } from '@shared/location'
 import { issueKey, useStore, withValue } from '../store'
 import { clsx } from '../util'
+import { colMode, useRole } from '../useRole'
 
 const W = 1000
 const H = 560
@@ -11,10 +12,11 @@ const TILE = 256
 // Pins for the first Location column, drawn as an offline SVG. Tiles are optional and off unless a URL is set.
 export function MapView({ project, onOpen }: { project: Project; onOpen: (id: string) => void }) {
   const { data, dispatch } = useStore()
+  const role = useRole()
   const [colId, setColId] = useState('')
   const [placing, setPlacing] = useState<string | null>(null)
   const [tiles, setTiles] = useState(project.mapTiles ?? '')
-  const locCols = project.columns.filter(c => c.type === 'location')
+  const locCols = project.columns.filter(c => c.type === 'location' && colMode(role, c) !== 'hidden')
   const col = locCols.find(c => c.id === colId) ?? locCols[0]
   if (!col) return <div className="view map-view"><div className="muted">Add a Location column to use the map</div></div>
 

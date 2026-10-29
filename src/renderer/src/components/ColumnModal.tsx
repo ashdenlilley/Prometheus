@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { PRIORITIES, type AutomationAction, type Column, type ColumnType, type Project, type SelectOption } from '@shared/types'
+import { hasColumnRules, type Role } from '@shared/permissions'
 import { useStore } from '../store'
+import { useRole } from '../useRole'
 import { COLUMN_TYPE_INFO, HAS_OPTIONS, LABEL_COLORS } from '../columns'
 import { ICONS } from './icons'
 import { Modal } from './ui'
@@ -13,6 +15,15 @@ const STATUS_DEFAULTS: SelectOption[] = [
   { id: 'idle', label: 'Not started', color: '#c4c4c4' }
 ]
 
+// OS-464: roles a column rule can name. The owner always has full access, so it is not listed.
+type RuleRole = Exclude<Role, 'owner'>
+const RULE_ROLES: { role: RuleRole; label: string }[] = [
+  { role: 'member', label: 'Members' },
+  { role: 'guest', label: 'Guests' },
+  { role: 'viewer', label: 'Viewers' }
+]
+const toggleRole = (list: RuleRole[], r: RuleRole) => (list.includes(r) ? list.filter(x => x !== r) : [...list, r])
+
 // Button "On click": count only, or one automation action. Mirrors AutomationAction, which the reducer runs.
 type ButtonKind = 'count' | NonNullable<Column['buttonAction']>['type']
 
@@ -22,6 +33,7 @@ const actionText = (a?: AutomationAction) =>
 // Add a new column (no `column`) or edit an existing one.
 export function ColumnModal({ project, column, onClose }: { project: Project; column?: Column; onClose: () => void }) {
   const { data, dispatch } = useStore()
+  const role = useRole()
   const [name, setName] = useState(column?.name ?? '')
   const [type, setType] = useState<ColumnType>(column?.type ?? 'text')
   const [description, setDescription] = useState(column?.description ?? '')
@@ -43,6 +55,10 @@ export function ColumnModal({ project, column, onClose }: { project: Project; co
   const [buttonText, setButtonText] = useState(actionText(column?.buttonAction))
   const [buttonStatus, setButtonStatus] = useState(column?.buttonAction?.type === 'set_status' ? column.buttonAction.status : project.statuses[0]?.id ?? '')
   const [buttonPriority, setButtonPriority] = useState(column?.buttonAction?.type === 'set_priority' ? column.buttonAction.priority : 1)
+  const [readOnlyFor, setReadOnlyFor] = useState<RuleRole[]>(column?.access?.readOnlyFor ?? [])
+  const [hiddenFor, setHiddenFor] = useState<RuleRole[]>(column?.access?.hiddenFor ?? [])
+  // Only the owner changes a column that has rules. A local workspace (no role) edits everything.
+  const locked = !!column && role !== null && role !== 'owner' && hasColumnRules([column])
 
   const hasOptions = HAS_OPTIONS.includes(type)
   const space = data.projects.filter(p => p.spaceId === project.spaceId && p.id !== project.id)
@@ -71,7 +87,7 @@ export function ColumnModal({ project, column, onClose }: { project: Project; co
   }
 
   const save = () => {
-    if (!name.trim()) return
+    if (!name.trim() || locked) return
     const action = type === 'button' ? buttonAction() : undefined
     const patch: Partial<Column> = {
       buttonAction: action,
@@ -89,7 +105,11 @@ export function ColumnModal({ project, column, onClose }: { project: Project; co
       linkProjectId: type === 'board_relation' ? linkProjectId || undefined : undefined,
       relationColumnId: type === 'mirror' ? relationColumnId || undefined : undefined,
       mirrorField: type === 'mirror' ? mirrorField : undefined,
-      required: required || undefined
+      required: required || undefined,
+      // Empty lists are left out; with no rules at all, access is unset
+      access: readOnlyFor.length || hiddenFor.length
+        ? { readOnlyFor: readOnlyFor.length ? readOnlyFor : undefined, hiddenFor: hiddenFor.length ? hiddenFor : undefined }
+        : undefined
     }
     if (column) {
       dispatch({ type: 'patchColumn', projectId: project.id, columnId: column.id, patch })
@@ -304,9 +324,37 @@ export function ColumnModal({ project, column, onClose }: { project: Project; co
         Required
       </label>
 
+      {role === 'owner' && (
+        <div className="field col-perm">
+          Permissions
+          {[
+            { label: 'Read-only for', testId: 'readonly', list: readOnlyFor, set: setReadOnlyFor },
+            { label: 'Hidden from', testId: 'hidden', list: hiddenFor, set: setHiddenFor }
+          ].map(row => (
+            <div key={row.testId} className="col-perm-row">
+              <span className="muted small">{row.label}</span>
+              {RULE_ROLES.map(r => (
+                <label key={r.role} className="check-field">
+                  <input
+                    type="checkbox"
+                    data-testid={`col-${row.testId}-${r.role}`}
+                    checked={row.list.includes(r.role)}
+                    onChange={() => row.set(l => toggleRole(l, r.role))}
+                  />
+                  {r.label}
+                </label>
+              ))}
+            </div>
+          ))}
+          <span className="muted small">The owner always has full access. Hidden values are not sent to those roles.</span>
+        </div>
+      )}
+
+      {locked && <span className="muted small">Only the owner can change this column</span>}
+
       <div className="actions">
         <button className="btn" onClick={onClose}>Cancel</button>
-        <button className="btn primary" onClick={save}>{column ? 'Save' : 'Add column'}</button>
+        <button className="btn primary" disabled={locked} onClick={save}>{column ? 'Save' : 'Add column'}</button>
       </div>
     </Modal>
   )

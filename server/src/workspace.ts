@@ -1,6 +1,6 @@
 import { DurableObject } from 'cloudflare:workers'
 import { parse, TABLE_KEYS, type Op } from '../../src/shared/sync'
-import { ISSUE_SCOPE, PROJECT_SCOPE, canReadRow, isProjectAccess, writeError, type Principal, type ProjectAccess, type RowScope, type Role } from '../../src/shared/permissions'
+import { ISSUE_SCOPE, PROJECT_SCOPE, accessChanged, canReadRow, columnMode, columnsError, isProjectAccess, mergeHidden, sameValue, stripHidden, valuesError, writeError, type ColumnAccess, type Principal, type ProjectAccess, type RowScope, type Role } from '../../src/shared/permissions'
 import type { Env } from './env'
 
 // Wire protocol: JSON text frames. See docs/cloud-sync.md.
@@ -21,6 +21,8 @@ const SCHEMA = [
   // Scope index, derived from the ops: the winning project (or issue) ref per row, and each project's winning access.
   `CREATE TABLE IF NOT EXISTS scope (tbl TEXT NOT NULL, id TEXT NOT NULL, ref TEXT, hlc TEXT NOT NULL, PRIMARY KEY (tbl, id))`,
   `CREATE TABLE IF NOT EXISTS pacc (id TEXT PRIMARY KEY, access TEXT, hlc TEXT NOT NULL)`,
+  // Field index: the winning projects.columns and issues.values per row (JSON, NULL when unset).
+  `CREATE TABLE IF NOT EXISTS fval (tbl TEXT NOT NULL, id TEXT NOT NULL, field TEXT NOT NULL, v TEXT, hlc TEXT NOT NULL, PRIMARY KEY (tbl, id, field))`,
   `CREATE TABLE IF NOT EXISTS denials (at INTEGER NOT NULL, user TEXT NOT NULL, tbl TEXT NOT NULL, "row" TEXT NOT NULL, reason TEXT NOT NULL)`
 ]
 
@@ -50,6 +52,8 @@ type Entry = {
   body: string
 }
 
+type Col = { id: string; name: string; access?: ColumnAccess }
+
 // Thrown inside a push's transaction so that none of its ops are kept.
 class Refused extends Error {
   index: number
@@ -67,6 +71,8 @@ const principal = (a: Att): Principal => ({ userId: a.user, role: a.role, projec
 const scopeField = (tbl: string): string | undefined => (tbl === 'projects' ? 'access' : (PROJECT_SCOPE[tbl] ?? ISSUE_SCOPE[tbl]))
 // The op's new value for a scope field: undefined when the op leaves it alone, null when it unsets it.
 const scopeValue = (op: Op, field: string): unknown => (field in (op.set ?? {}) ? op.set?.[field] : op.unset?.includes(field) ? null : undefined)
+// Whether an op sets or unsets a field.
+const touches = (op: Op, field: string): boolean => field in (op.set ?? {}) || (op.unset?.includes(field) ?? false)
 
 // Returns why an op is invalid, or null when it is valid.
 function opError(o: unknown): string | null {
@@ -107,8 +113,8 @@ export class Workspace extends DurableObject<Env> {
     this.compactKeep = Number(env.COMPACT_KEEP ?? 2_000)
     ctx.blockConcurrencyWhile(async () => {
       for (const s of SCHEMA) run(ctx.storage.sql, s)
-      // Logs written before the scope index existed are indexed once, on first start.
-      if (rows<{ v: string }>(ctx.storage.sql, "SELECT v FROM meta WHERE k = 'scope_v'").length === 0) this.buildIndex()
+      // Indexes are rebuilt from the logs once per index version ('2' adds the field index).
+      if (rows<{ v: string }>(ctx.storage.sql, "SELECT v FROM meta WHERE k = 'scope_v'")[0]?.v !== '2') this.buildIndex()
     })
   }
 
@@ -209,32 +215,87 @@ export class Workspace extends DurableObject<Env> {
     )
   }
 
-  // Scope index: the winning scope field per row, last-writer-wins by hlc. Deletes keep their index rows.
+  // Scope and field indexes: the winning scope field per row, and the winning columns and values, last-writer-wins by hlc. Deletes keep their index rows.
   private index(op: Op) {
-    const field = scopeField(op.table)
-    if (!field || op.del) return
+    if (op.del) return
     const sql = this.ctx.storage.sql
-    const next = scopeValue(op, field)
-    const val = next === null || next === undefined ? null : op.table === 'projects' ? JSON.stringify(next) : String(next)
-    if (op.table === 'projects') {
-      run(sql, "INSERT OR IGNORE INTO pacc (id, access, hlc) VALUES (?, NULL, '')", op.id)
-      if (next !== undefined) run(sql, 'UPDATE pacc SET access = ?, hlc = ? WHERE id = ? AND hlc < ?', val, op.hlc, op.id, op.hlc)
-    } else {
-      run(sql, "INSERT OR IGNORE INTO scope (tbl, id, ref, hlc) VALUES (?, ?, NULL, '')", op.table, op.id)
-      if (next !== undefined) run(sql, 'UPDATE scope SET ref = ?, hlc = ? WHERE tbl = ? AND id = ? AND hlc < ?', val, op.hlc, op.table, op.id, op.hlc)
+    const field = scopeField(op.table)
+    if (field) {
+      const next = scopeValue(op, field)
+      const val = next === null || next === undefined ? null : op.table === 'projects' ? JSON.stringify(next) : String(next)
+      if (op.table === 'projects') {
+        run(sql, "INSERT OR IGNORE INTO pacc (id, access, hlc) VALUES (?, NULL, '')", op.id)
+        if (next !== undefined) run(sql, 'UPDATE pacc SET access = ?, hlc = ? WHERE id = ? AND hlc < ?', val, op.hlc, op.id, op.hlc)
+      } else {
+        run(sql, "INSERT OR IGNORE INTO scope (tbl, id, ref, hlc) VALUES (?, ?, NULL, '')", op.table, op.id)
+        if (next !== undefined) run(sql, 'UPDATE scope SET ref = ?, hlc = ? WHERE tbl = ? AND id = ? AND hlc < ?', val, op.hlc, op.table, op.id, op.hlc)
+      }
+    }
+    const f = op.table === 'projects' ? 'columns' : op.table === 'issues' ? 'values' : undefined
+    if (f && touches(op, f)) {
+      const next = scopeValue(op, f)
+      run(sql, "INSERT OR IGNORE INTO fval (tbl, id, field, v, hlc) VALUES (?, ?, ?, NULL, '')", op.table, op.id, f)
+      run(sql, 'UPDATE fval SET v = ?, hlc = ? WHERE tbl = ? AND id = ? AND field = ? AND hlc < ?', next === null ? null : JSON.stringify(next), op.hlc, op.table, op.id, f, op.hlc)
     }
   }
 
   private buildIndex() {
     this.ctx.storage.transactionSync(() => {
+      run(this.ctx.storage.sql, 'DELETE FROM scope')
+      run(this.ctx.storage.sql, 'DELETE FROM pacc')
+      run(this.ctx.storage.sql, 'DELETE FROM fval')
       for (const op of this.snapshotOps()) this.index(op)
       for (const r of rows<{ body: string }>(this.ctx.storage.sql, 'SELECT body FROM ops ORDER BY seq')) this.index(JSON.parse(r.body) as Op)
-      run(this.ctx.storage.sql, "INSERT INTO meta (k, v) VALUES ('scope_v', '1')")
+      run(this.ctx.storage.sql, "INSERT OR REPLACE INTO meta (k, v) VALUES ('scope_v', '2')")
     })
   }
 
   private refOf(tbl: string, id: string): string | null {
     return rows<{ ref: string | null }>(this.ctx.storage.sql, 'SELECT ref FROM scope WHERE tbl = ? AND id = ?', tbl, id)[0]?.ref ?? null
+  }
+
+  // The winning value of a field from the field index, or undefined when unset or absent.
+  private fieldOf(tbl: string, id: string, field: string): unknown {
+    const v = rows<{ v: string | null }>(this.ctx.storage.sql, 'SELECT v FROM fval WHERE tbl = ? AND id = ? AND field = ?', tbl, id, field)[0]?.v
+    return v === undefined || v === null ? undefined : JSON.parse(v)
+  }
+
+  // A project's custom columns; none when it has no columns or no row.
+  private columnsOf(projectId: string | null): Col[] {
+    const cols = projectId === null ? undefined : this.fieldOf('projects', projectId, 'columns')
+    return Array.isArray(cols) ? cols : []
+  }
+
+  // OS-464: column rules for a non-owner's write. Returns why it is refused, and the op to store with hidden values kept.
+  private columnCheck(p: Principal, op: Op, next: unknown): { reason: string | null; op: Op } {
+    if (op.table === 'projects' && touches(op, 'columns')) {
+      return { reason: columnsError(p.role, this.fieldOf('projects', op.id, 'columns') as Col[] | undefined, op.set?.columns as Col[] | undefined), op }
+    }
+    if (op.table !== 'issues' || !touches(op, 'values')) return { reason: null, op }
+    const sets = op.set ?? {}
+    const cols = this.columnsOf(this.resolve(op.table, op.id, next).project)
+    const prior = this.fieldOf('issues', op.id, 'values') as Record<string, unknown> | undefined
+    if (!('values' in sets)) {
+      // Clearing values must not erase a hidden column's value, which the writer cannot see.
+      const hidden = cols.some(c => columnMode(p.role, c) === 'hidden' && !sameValue(prior?.[c.id], undefined))
+      return { reason: valuesError(p.role, cols, prior, undefined) ?? (hidden ? 'hidden column values cannot be cleared' : null), op }
+    }
+    const raw = sets.values as Record<string, unknown> | null
+    if (raw !== null && !isObj(raw)) return { reason: 'values must be an object', op }
+    return {
+      reason: valuesError(p.role, cols, prior, raw ?? undefined),
+      op: { ...op, set: { ...sets, values: mergeHidden(p.role, cols, prior, raw ?? {}) } }
+    }
+  }
+
+  // What one principal may read of an op's values: hidden columns stripped. Other ops and owners pass through.
+  private redactor(p: Principal): (op: Op) => Op {
+    if (p.role === 'owner') return op => op
+    return op => {
+      if (op.table !== 'issues' || !op.set || !('values' in op.set)) return op
+      const values = stripHidden(p.role, this.columnsOf(this.refOf('issues', op.id)), op.set.values as Record<string, unknown> | undefined)
+      return values === op.set.values ? op : { ...op, set: { ...op.set, values } }
+    }
   }
 
   private access(id: string): ProjectAccess | null {
@@ -284,14 +345,17 @@ export class Workspace extends DurableObject<Env> {
     const sql = this.ctx.storage.sql
     const floor = this.floor()
     const head = this.head()
-    const can = this.readable(principal(att))
+    const p = principal(att)
+    const can = this.readable(p)
+    const red = this.redactor(p)
     if (since < floor) {
-      const snap = this.snapshotOps().filter(can)
+      const snap = this.snapshotOps().filter(can).map(red)
       for (let i = 0; i < snap.length; i += BATCH) this.reply(ws, { type: 'snapshot', ops: snap.slice(i, i + BATCH), head })
     }
     const list = rows<{ seq: number; body: string }>(sql, 'SELECT seq, body FROM ops WHERE seq > ? ORDER BY seq', Math.max(since, floor))
       .map(r => ({ seq: r.seq, op: JSON.parse(r.body) as Op }))
       .filter(e => can(e.op))
+      .map(e => ({ seq: e.seq, op: red(e.op) }))
     this.sendOps(ws, list, head)
     this.reply(ws, { type: 'ready', head, userId: att.user, role: att.role, projects: att.projects })
     ws.serializeAttachment({ ...att, hello: true } satisfies Att)
@@ -319,11 +383,16 @@ export class Workspace extends DurableObject<Env> {
     const now = Date.now()
     const p = principal(att)
     const seqs: number[] = []
+    // The ops as stored: hidden values merged back in, so every reader gets the merged op.
+    const stored: Op[] = []
+    // Set when a push changes a column rule; sockets that hold values under the old rules are closed.
+    let rulesChanged = false
     // Rows whose scope this push changes, with the scope they had before. The first change wins.
     const moved = new Map<string, { tbl: string; id: string; before: RowScope }>()
     try {
       this.ctx.storage.transactionSync(() => {
-        typed.forEach((op, i) => {
+        typed.forEach((given, i) => {
+          let op = given
           const before = this.exists(op.table, op.id) ? this.resolve(op.table, op.id) : null
           const field = scopeField(op.table)
           const next = field ? scopeValue(op, field) : undefined
@@ -331,11 +400,16 @@ export class Workspace extends DurableObject<Env> {
             const fields = [...Object.keys(op.set ?? {}), ...(op.unset ?? [])]
             const reason = writeError(p, op.table, fields, before, op.del ? null : this.resolve(op.table, op.id, next))
             if (reason) throw new Refused(i, reason)
+            const col = this.columnCheck(p, op, next)
+            if (col.reason) throw new Refused(i, col.reason)
+            op = col.op
           }
+          if (op.table === 'projects' && touches(op, 'columns') && accessChanged(this.fieldOf('projects', op.id, 'columns') as Col[] | undefined, op.set?.columns as Col[] | undefined)) rulesChanged = true
           const key = `${op.table}\u0000${op.id}`
           if (next !== undefined && before && !moved.has(key)) moved.set(key, { tbl: op.table, id: op.id, before })
           seqs.push(rows<{ seq: number }>(sql, 'INSERT INTO ops (hlc, device, body, at) VALUES (?, ?, ?, ?) RETURNING seq', op.hlc, att.device, JSON.stringify(op), now)[0].seq)
           this.index(op)
+          stored.push(op)
         })
         run(sql, 'INSERT INTO pushes (device, id, seqs, at) VALUES (?, ?, ?, ?)', att.device, id, JSON.stringify(seqs), now)
         run(sql, 'DELETE FROM pushes WHERE at < ?', now - PUSH_TTL_MS)
@@ -352,19 +426,20 @@ export class Workspace extends DurableObject<Env> {
 
     const head = this.head()
     this.reply(ws, { type: 'ack', id, seqs, head })
-    const list = typed.map((op, i) => ({ seq: seqs[i], op }))
+    const list = stored.map((op, i) => ({ seq: seqs[i], op }))
     const after = [...moved.values()].map(m => ({ ...m, now: this.resolve(m.tbl, m.id) }))
     for (const other of this.ctx.getWebSockets()) {
       const a = other.deserializeAttachment() as Att | null
       if (other === ws || !a?.hello) continue
       const pr = principal(a)
-      // A socket that gained or lost a row's scope may hold a stale snapshot, so it closes and resyncs from 0.
-      if (after.some(m => canReadRow(pr, m.tbl, m.before) !== canReadRow(pr, m.tbl, m.now))) {
+      // A socket that gained or lost a row's scope, or holds values under old column rules, may be stale, so it closes and resyncs from 0.
+      if ((rulesChanged && pr.role !== 'owner') || after.some(m => canReadRow(pr, m.tbl, m.before) !== canReadRow(pr, m.tbl, m.now))) {
         other.close(4003, 'access changed')
         continue
       }
       const can = this.readable(pr)
-      this.sendOps(other, list.filter(e => can(e.op)), head)
+      const red = this.redactor(pr)
+      this.sendOps(other, list.filter(e => can(e.op)).map(e => ({ seq: e.seq, op: red(e.op) })), head)
     }
   }
 

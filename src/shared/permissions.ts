@@ -1,7 +1,7 @@
 // OS-360: pure access rules for roles and restricted projects. No I/O, so main and renderer can share them.
-import type { ProjectAccess } from './types'
+import type { ColumnAccess, ProjectAccess } from './types'
 
-export type { ProjectAccess } from './types'
+export type { ColumnAccess, ProjectAccess } from './types'
 
 export type Role = 'owner' | 'member' | 'viewer' | 'guest'
 export const ROLES: Role[] = ['owner', 'member', 'viewer', 'guest']
@@ -70,4 +70,92 @@ export function canManageMembers(p: Principal): boolean {
 const LABELS: Record<Role, string> = { owner: 'Owner', member: 'Member', viewer: 'Viewer (read only)', guest: 'Guest' }
 export function roleLabel(r: Role): string {
   return LABELS[r]
+}
+
+// OS-464: per-custom-column rules by role. The owner, and local-only workspaces (role null), always edit.
+export type ColumnMode = 'edit' | 'read' | 'hidden'
+type AccessCol = { id: string; access?: ColumnAccess }
+const COLUMN_OWNER_ONLY = 'only the owner can change column permissions or restricted columns'
+const hasRole = (list: string[] | undefined, role: Role) => !!list?.includes(role)
+const ruled = (c?: AccessCol) => !!(c?.access?.readOnlyFor?.length || c?.access?.hiddenFor?.length)
+const hasOwn = (o: object, k: string) => Object.prototype.hasOwnProperty.call(o, k)
+
+export function columnMode(role: Role | null, col: { access?: ColumnAccess }): ColumnMode {
+  if (role === null || role === 'owner') return 'edit'
+  if (hasRole(col.access?.hiddenFor, role)) return 'hidden'
+  if (role === 'viewer' || hasRole(col.access?.readOnlyFor, role)) return 'read'
+  return 'edit'
+}
+
+const COLUMN_ROLES = ['member', 'guest', 'viewer']
+const isRoleList = (v: unknown) => v === undefined || (Array.isArray(v) && v.length <= 3 && v.every(r => COLUMN_ROLES.includes(r)))
+export function isColumnAccess(v: unknown): boolean {
+  if (v === undefined || v === null) return true
+  if (typeof v !== 'object') return false
+  const a = v as Record<string, unknown>
+  return isRoleList(a.readOnlyFor) && isRoleList(a.hiddenFor)
+}
+
+// undefined, null, '' and [] all mean "no value"; other values compare as JSON with sorted keys
+const isEmpty = (v: unknown) => v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0)
+const stable = (v: unknown) => JSON.stringify(v, (_, x) => x && typeof x === 'object' && !Array.isArray(x)
+  ? Object.fromEntries(Object.keys(x).sort().map(k => [k, x[k]])) : x)
+export function sameValue(a: unknown, b: unknown): boolean {
+  if (isEmpty(a) || isEmpty(b)) return isEmpty(a) && isEmpty(b)
+  return stable(a) === stable(b)
+}
+
+// Returns the reason a row's values break column rules, or null when allowed.
+export function valuesError(role: Role, cols: { id: string; name: string; access?: ColumnAccess }[],
+  before: Record<string, unknown> | undefined, after: Record<string, unknown> | undefined): string | null {
+  if (role === 'owner') return null
+  for (const c of cols) {
+    const mode = columnMode(role, c)
+    if (mode === 'read' && !sameValue(before?.[c.id], after?.[c.id])) return `the ${c.name} column is read-only for ${role}s`
+    if (mode === 'hidden' && after && hasOwn(after, c.id) && !sameValue(before?.[c.id], after[c.id])) return `the ${c.name} column is hidden from ${role}s`
+  }
+  return null
+}
+
+// Keeps hidden values as they were, so a write cannot change or see them
+export function mergeHidden(role: Role, cols: AccessCol[], before: Record<string, unknown> | undefined,
+  after: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+  const hidden = cols.filter(c => columnMode(role, c) === 'hidden').map(c => c.id)
+  if (!hidden.length || !after) return after
+  const out = { ...after }
+  for (const id of hidden) {
+    if (before && hasOwn(before, id)) out[id] = before[id]
+    else delete out[id]
+  }
+  return out
+}
+
+export function stripHidden(role: Role, cols: AccessCol[], values: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+  const hidden = cols.filter(c => columnMode(role, c) === 'hidden').map(c => c.id).filter(id => values && hasOwn(values, id))
+  if (!values || !hidden.length) return values
+  const out = { ...values }
+  for (const id of hidden) delete out[id]
+  return out
+}
+
+// Non-owners may not add, remove or change a column that has rules in either version
+export function columnsError(role: Role, before: AccessCol[] | undefined, after: AccessCol[] | undefined): string | null {
+  if (role === 'owner') return null
+  const a = new Map((before ?? []).map(c => [c.id, c]))
+  const b = new Map((after ?? []).map(c => [c.id, c]))
+  for (const id of new Set([...a.keys(), ...b.keys()])) {
+    const x = a.get(id), y = b.get(id)
+    if ((ruled(x) || ruled(y)) && !sameValue(x, y)) return COLUMN_OWNER_ONLY
+  }
+  return null
+}
+
+export function hasColumnRules(cols: AccessCol[]): boolean {
+  return cols.some(ruled)
+}
+
+// True when any restricted column's rule differs between the two versions
+export function accessChanged(before: AccessCol[] | undefined, after: AccessCol[] | undefined): boolean {
+  const map = (cs?: AccessCol[]) => Object.fromEntries((cs ?? []).filter(ruled).map(c => [c.id, c.access]))
+  return !sameValue(map(before), map(after))
 }

@@ -19,6 +19,7 @@ import { PrPill } from './PrPill'
 import { ICONS } from './icons'
 import { askText, Menu, useEscape, type MenuItem } from './ui'
 import { clsx, fmtDate, parseISO, todayISO, uid } from '../util'
+import { colMode, useRole } from '../useRole'
 
 const REL_LABEL: Record<RelationType | 'blocked_by' | 'duplicated_by', string> = {
   blocks: 'Blocks',
@@ -46,6 +47,7 @@ export function IssueDetail({
   onNavigate: (route: Route) => void
 }) {
   const { data, dispatch } = useStore()
+  const role = useRole()
   const issue = data.issues.find(i => i.id === issueId)
   const project = data.projects.find(p => p.id === issue?.projectId)
   const [comment, setComment] = useState('')
@@ -519,13 +521,15 @@ export function IssueDetail({
             </div>
             {rec && <span className="muted small">Next: {fmtDate(rec.next)}</span>}
           </label>
-          {project.columns.map(col => (
+          {project.columns.filter(col => colMode(role, col) !== 'hidden').map(col => (
             <label key={col.id} className={col.type === 'long_text' ? 'wide' : undefined}>
               {col.name}
+              {colMode(role, col) === 'read' && ' 🔒'}
               <CellEditor
                 column={col}
                 project={project}
                 issue={issue}
+                readOnly={colMode(role, col) === 'read'}
                 value={issue.values[col.id]}
                 onChange={v => patch({ values: withValue(issue.values, col.id, v) })}
               />
