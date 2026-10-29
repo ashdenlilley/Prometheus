@@ -141,6 +141,7 @@ export interface SavedView {
   showCompleted?: boolean
   chartType?: 'bar' | 'pie' | 'line'
   favourite?: boolean
+  order?: string[] // table column order for this view; falls back to project.order
 }
 
 export type Operator = 'is' | 'is_not' | 'contains' | 'gt' | 'lt' | 'empty' | 'not_empty'
@@ -257,6 +258,7 @@ export interface Issue {
   estimate?: number
   favourite?: boolean
   recurrence?: Recurrence
+  timer?: { columnId: string; start: string } // running time-tracking timer (one per issue)
   // Automation keys already run for this issue, e.g. "ruleId:2026-10-01", so timed rules fire once
   firedAutomations?: string[]
   // Triage inbox: new items wait here until accepted or declined

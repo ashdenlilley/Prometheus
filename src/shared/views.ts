@@ -14,3 +14,8 @@ export function viewIdFor(kind: ViewKind) {
 export function favouriteViews(projects: Project[]): { project: Project; view: SavedView }[] {
   return projects.flatMap(project => project.views.filter(v => v.favourite).map(view => ({ project, view })))
 }
+
+// Table layout: a view's own order and hidden columns, on top of the project's. Old views have no order, so they use the project's.
+export function resolveColumnLayout(project: Project, view?: SavedView): { order: string[] | undefined; hidden: string[] } {
+  return { order: view?.order ?? project.order, hidden: [...new Set([...project.hiddenColumns, ...(view?.hidden ?? [])])] }
+}

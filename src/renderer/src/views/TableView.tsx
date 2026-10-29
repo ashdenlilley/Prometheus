@@ -1,10 +1,11 @@
 import { useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
-import type { Column, Issue, Project } from '@shared/types'
-import { applyFilter, childrenOf, groupIssues, issuesToCSV, parseCSV, progressValue, summarize, withoutCompleted, type FixedField } from '@shared/query'
+import type { Column, Issue, Project, SavedView } from '@shared/types'
+import { applyFilter, childrenOf, groupIssues, issuesFromRows, issuesToCSV, issuesToRows, parseCSV, progressValue, summarize, withoutCompleted, type FixedField } from '@shared/query'
+import { resolveColumnLayout } from '@shared/views'
 import { createIssue, issueKey, useStore, withValue } from '../store'
 import { CellEditor } from '../components/cells'
-import { parseEstimate } from '@shared/estimate'
 import { EstimateSelect, PrioritySelect, StatusDot, StatusSelect } from '../components/fields'
+import { exportXlsx, importXlsx } from '../xlsx'
 import { ICONS } from '../components/icons'
 import { ColumnModal } from '../components/ColumnModal'
 import { FilterBar, useViewQuery } from '../components/FilterBar'
@@ -46,11 +47,16 @@ export function TableView({ project, onOpen }: { project: Project; onOpen: (id: 
   const [picked, setPicked] = useState<Set<string>>(new Set())
   const [templateId, setTemplateId] = useState('')
   const fileInput = useRef<HTMLInputElement>(null)
+  const excelInput = useRef<HTMLInputElement>(null)
 
   const all = data.issues.filter(i => i.projectId === project.id && !i.triage)
   const filtered = applyFilter(all, query.filter, project)
   const visible = query.showCompleted ? filtered : withoutCompleted(filtered, project)
   const visibleIds = new Set(visible.map(i => i.id))
+
+  // With a saved table view active, its order and hidden columns apply and edits go to that view.
+  const activeView = project.views.find(v => v.id === query.viewId && v.view === 'table')
+  const layout = resolveColumnLayout(project, activeView)
 
   const baseCols: ColumnRef[] = [
     ...FIXED_COLUMNS.map(f => ({
@@ -68,9 +74,9 @@ export function TableView({ project, onOpen }: { project: Project; onOpen: (id: 
       column: c
     }))
   ]
-    .filter(c => !query.hidden.includes(c.key) && !project.hiddenColumns.includes(c.key))
+    .filter(c => !query.hidden.includes(c.key) && !layout.hidden.includes(c.key))
     .map(c => ({ ...c, width: liveWidths[c.key] ?? c.width }))
-  const cols = orderColumns(baseCols, project.order)
+  const cols = orderColumns(baseCols, layout.order)
 
   const template = `${FAV_WIDTH}px ${SELECT_WIDTH}px ${cols.map(c => `${c.width}px`).join(' ')} ${ACTIONS_WIDTH}px`
   const rowStyle = { gridTemplateColumns: template, width: 'max-content' }
@@ -119,15 +125,24 @@ export function TableView({ project, onOpen }: { project: Project; onOpen: (id: 
     window.addEventListener('mouseup', up)
   }
 
+  // Patches the active view's layout, or the project's when no view is active.
+  const viewsWith = (patch: Partial<SavedView>) => project.views.map(v => (v.id === activeView?.id ? { ...v, ...patch } : v))
+
   // Drop onto a header: the dragged column moves to the target's position.
   const moveColumn = (from: string, to: string) => {
     if (from === to || to === 'name') return
     const keys = cols.map(c => c.key).filter(k => k !== from)
     keys.splice(keys.indexOf(to), 0, from)
-    dispatch({ type: 'patchProject', id: project.id, patch: { order: keys } })
+    dispatch({ type: 'patchProject', id: project.id, patch: activeView ? { views: viewsWith({ order: keys }) } : { order: keys } })
   }
 
-  const hideColumn = (key: string) => query.setHidden([...query.hidden, key])
+  // Hidden columns are kept in the page's memory, and in the active view when there is one.
+  const setHidden = (hidden: string[]) => {
+    query.setHidden(hidden)
+    if (activeView) dispatch({ type: 'patchProject', id: project.id, patch: { views: viewsWith({ hidden }) } })
+  }
+
+  const hideColumn = (key: string) => setHidden([...query.hidden, key])
 
   const deleteColumn = (c: Column) => {
     if (window.confirm(`Delete column "${c.name}"? Its values are removed.`)) {
@@ -236,35 +251,23 @@ export function TableView({ project, onOpen }: { project: Project; onOpen: (id: 
     URL.revokeObjectURL(a.href)
   }
 
-  // Import: first row is the header. Title is required; status and priority match labels.
-  const importCSV = async (file: File) => {
-    const rows = parseCSV(await file.text())
-    const [header, ...body] = rows
-    if (!header) return
-    const col = (name: string) => header.findIndex(h => h.trim().toLowerCase() === name.toLowerCase())
-    const titleAt = col('Title')
-    if (titleAt < 0) return window.alert('CSV needs a Title column.')
-    const statusAt = col('Status')
-    const priorityAt = col('Priority')
-    const assigneeAt = col('Assignee')
-    const dueAt = col('Due')
-    const estimateAt = col('Estimate')
-    const issues = body
-      .filter(r => r[titleAt]?.trim())
-      .map(r => {
-        const statusLabel = statusAt >= 0 ? r[statusAt] : ''
-        const status = project.statuses.find(s => s.label.toLowerCase() === statusLabel.toLowerCase())?.id ?? project.statuses[0].id
-        const pri = priorityAt >= 0 ? ['No priority', 'Urgent', 'High', 'Medium', 'Low'].indexOf(r[priorityAt]) : -1
-        return createIssue(data, project.id, r[titleAt].trim(), {
-          status,
-          priority: pri > 0 ? pri : 0,
-          assignee: assigneeAt >= 0 ? r[assigneeAt] : '',
-          dueDate: dueAt >= 0 && r[dueAt] ? r[dueAt] : undefined,
-          // Letters (XS–XL) or numbers, so an exported t-shirt project imports back.
-          estimate: estimateAt >= 0 ? parseEstimate(r[estimateAt] ?? '', project.estimateScale) : undefined
-        })
-      })
-    if (issues.length) dispatch({ type: 'addIssues', issues: issues.reduce<Issue[]>((acc, i) => [...acc, { ...i, number: i.number + acc.length }], []) })
+  const exportExcel = () => exportXlsx(issuesToRows(data, project, visible), `${project.key}-issues.xlsx`)
+
+  // Shared by CSV and Excel import. The first row is the header and needs a Title column.
+  const importRows = (rows: string[][]) => {
+    if (!rows[0]?.some(h => h.trim().toLowerCase() === 'title')) return window.alert('The file needs a Title column.')
+    const issues = issuesFromRows(data, project, rows)
+    if (issues.length) dispatch({ type: 'addIssues', issues })
+  }
+  const importCSV = async (file: File) => importRows(parseCSV(await file.text()))
+  const importExcel = async (file: File) => {
+    let rows: string[][]
+    try {
+      rows = await importXlsx(file)
+    } catch {
+      return window.alert(`Could not read ${file.name} as an Excel (.xlsx) file.`)
+    }
+    importRows(rows)
   }
 
   const tpl = data.templates.find(t => t.id === templateId && t.projectId === project.id)
@@ -296,6 +299,7 @@ export function TableView({ project, onOpen }: { project: Project; onOpen: (id: 
     <div className="view table-view">
       <div className="toolbar">
         <FilterBar project={project} kind="table" query={query} />
+        {activeView && <span className="muted small">Layout saved to view {activeView.name}</span>}
         <span className="grow" />
         <select className="input-sm" value={templateId} onChange={e => setTemplateId(e.target.value)} aria-label="Template for new items">
           <option value="">No template</option>
@@ -306,6 +310,9 @@ export function TableView({ project, onOpen }: { project: Project; onOpen: (id: 
         <button className="btn" onClick={exportCSV}>Export CSV</button>
         <button className="btn" onClick={() => fileInput.current?.click()}>Import CSV</button>
         <input ref={fileInput} type="file" accept=".csv,text/csv" hidden onChange={e => e.target.files?.[0] && importCSV(e.target.files[0])} />
+        <button className="btn" onClick={exportExcel}>Export Excel</button>
+        <button className="btn" onClick={() => excelInput.current?.click()}>Import Excel</button>
+        <input ref={excelInput} type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden onChange={e => e.target.files?.[0] && importExcel(e.target.files[0])} />
       </div>
 
       <BulkBar
@@ -429,7 +436,7 @@ export function TableView({ project, onOpen }: { project: Project; onOpen: (id: 
           {query.hidden.map(k => {
             const label = FIXED_COLUMNS.find(f => f.key === (k as FixedField))?.label ?? project.columns.find(c => c.id === k)?.name ?? k
             return (
-              <button key={k} className="chip neutral" onClick={() => query.setHidden(query.hidden.filter(x => x !== k))}>
+              <button key={k} className="chip neutral" onClick={() => setHidden(query.hidden.filter(x => x !== k))}>
                 {label} +
               </button>
             )

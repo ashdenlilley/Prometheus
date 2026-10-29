@@ -70,6 +70,8 @@
     "fsevents@2.3.3": true
   },
   "dependencies": {
-    "sql.js": "^1.11.0"
+    "read-excel-file": "^9.3.13",
+    "sql.js": "^1.11.0",
+    "write-excel-file": "^4.1.1"
   }
 }
