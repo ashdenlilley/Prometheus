@@ -29,6 +29,7 @@ Local-first project management for a single user, on macOS and Windows. Linear-s
 ## Also
 
 - Teams: several projects can share one key, issue sequence, workflow and cycle settings.
+- Markdown docs per space or project, with issue mentions, backlinks, a Doc column and doc templates.
 - Sub-issues and relations (blocks, duplicate, related).
 - Comments, @mention notifications and per-issue activity.
 - Saved views with AND/OR filters.

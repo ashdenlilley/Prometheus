@@ -8,9 +8,9 @@ import { AUDIT_LIMIT, type AuditEntry, type AuditFilter, type AuditRow } from '.
 // the entity as JSON with its parent id indexed. Saves diff against the last write, so only
 // changed rows are rewritten.
 
-type Table = 'spaces' | 'initiatives' | 'teams' | 'projects' | 'issues' | 'cycles' | 'automations' | 'triage_rules' | 'templates' | 'dashboards' | 'notifications' | 'agents'
+type Table = 'spaces' | 'initiatives' | 'teams' | 'projects' | 'issues' | 'cycles' | 'automations' | 'triage_rules' | 'templates' | 'dashboards' | 'notifications' | 'docs' | 'agents'
 
-const TABLES: Table[] = ['spaces', 'initiatives', 'teams', 'projects', 'issues', 'cycles', 'automations', 'triage_rules', 'templates', 'dashboards', 'notifications', 'agents']
+const TABLES: Table[] = ['spaces', 'initiatives', 'teams', 'projects', 'issues', 'cycles', 'automations', 'triage_rules', 'templates', 'dashboards', 'notifications', 'docs', 'agents']
 
 // AppData key for each table.
 const KEY: Record<Table, keyof AppData> = {
@@ -25,6 +25,7 @@ const KEY: Record<Table, keyof AppData> = {
   templates: 'templates',
   dashboards: 'dashboards',
   notifications: 'notifications',
+  docs: 'docs',
   agents: 'agents'
 }
 
@@ -38,7 +39,8 @@ const PARENT: Partial<Record<Table, string>> = {
   automations: 'project_id',
   triage_rules: 'project_id',
   templates: 'project_id',
-  dashboards: 'space_id'
+  dashboards: 'space_id',
+  docs: 'space_id'
 }
 
 let sqlPromise: Promise<SqlJsStatic> | null = null
@@ -222,6 +224,7 @@ export class Store {
       templates: all('templates') as AppData['templates'],
       dashboards: all('dashboards') as AppData['dashboards'],
       notifications: all('notifications') as AppData['notifications'],
+      docs: all('docs') as AppData['docs'],
       agents: all('agents') as AppData['agents'],
       me
     }
@@ -258,6 +261,7 @@ export class Store {
       templates: data.templates.map(r => ({ id: r.id, parent: r.projectId, json: JSON.stringify(r) })),
       dashboards: data.dashboards.map(r => ({ id: r.id, parent: r.spaceId, json: JSON.stringify(r) })),
       notifications: data.notifications.map(r => ({ id: r.id, json: JSON.stringify(r) })),
+      docs: (data.docs ?? []).map(r => ({ id: r.id, parent: r.spaceId, json: JSON.stringify(r) })),
       agents: (data.agents ?? []).map(r => ({ id: r.id, json: JSON.stringify(r) }))
     }
 

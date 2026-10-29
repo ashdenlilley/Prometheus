@@ -33,6 +33,7 @@ export const COLUMN_TYPE_INFO: { type: ColumnType; label: string; glyph: string;
   { type: 'location', label: 'Location', glyph: '⌖', group: 'Contact' },
   { type: 'formula', label: 'Formula', glyph: 'ƒ', group: 'Advanced' },
   { type: 'mirror', label: 'Mirror', glyph: '⧉', group: 'Advanced' },
+  { type: 'doc', label: 'Doc', glyph: '📄', group: 'Advanced' },
   { type: 'board_relation', label: 'Connect projects', glyph: '⇄', group: 'Advanced' },
   { type: 'dependency', label: 'Dependency', glyph: '⛓', group: 'Advanced' },
   { type: 'files', label: 'Files', glyph: '📎', group: 'Advanced' },

@@ -38,6 +38,7 @@ export type ColumnType =
   | 'rating'
   | 'progress'
   | 'created'
+  | 'doc'
   | 'updated'
   | 'auto_number'
   | 'item_id'
@@ -435,6 +436,24 @@ export interface Notification {
   read: boolean
 }
 
+// A Markdown document under a space or project. rev/baseRev/revBy drive conflict detection on sync.
+export interface Doc {
+  id: string
+  spaceId: string
+  projectId?: string
+  teamId?: string
+  title: string
+  body: string
+  createdAt: number
+  updatedAt: number
+  archivedAt?: number
+  template?: boolean
+  rev?: string
+  baseRev?: string
+  revBy?: string
+  conflictOf?: string
+}
+
 // An MCP client that acts on issues. Its token is shown once; only the SHA-256 hash is stored.
 export interface Agent {
   id: string
@@ -459,6 +478,8 @@ export interface AppData {
   templates: Template[]
   dashboards: Dashboard[]
   notifications: Notification[]
+  // Optional so files saved before docs existed still load. Read as `?? []`.
+  docs?: Doc[]
   agents?: Agent[]
   // Display name for the local user. Used for comment authors and notifications.
   me: string

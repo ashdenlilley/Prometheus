@@ -1,4 +1,5 @@
-import type { AppData, Project, SavedView } from './types'
+import type { AppData, Doc, Project, SavedView } from './types'
+import { docConflictCopy, type IncomingBody } from './docs'
 
 // Row-level sync with per-field clocks. Pure functions only: no fs, no Electron.
 //
@@ -23,6 +24,7 @@ export type Table =
   | 'templates'
   | 'dashboards'
   | 'notifications'
+  | 'docs'
   | 'agents'
 
 export const TABLE_KEYS: [Table, keyof AppData][] = [
@@ -37,6 +39,7 @@ export const TABLE_KEYS: [Table, keyof AppData][] = [
   ['templates', 'templates'],
   ['dashboards', 'dashboards'],
   ['notifications', 'notifications'],
+  ['docs', 'docs'],
   ['agents', 'agents']
 ]
 
@@ -220,6 +223,14 @@ export function applyOps(data: AppData, ops: Op[], clocks?: Map<string, string>)
       // Field ops need the row to exist. A deleted row ignores late field edits.
       const row = rows.get(op.id)
       if (!row) continue
+      // Concurrent body edits keep the later body; the loser is kept as a conflicted copy doc.
+      if (table === 'docs' && op.set && 'body' in op.set) {
+        const copy = docConflictCopy(row as unknown as Doc, op.set as IncomingBody, wins(rowKey(table, op.id, 'body'), op.hlc))
+        if (copy && !rows.has(copy.id)) {
+          rows.set(copy.id, { ...copy } as unknown as Record<string, unknown>)
+          applied++
+        }
+      }
       let touched = false
       for (const [f, v] of Object.entries(op.set ?? {})) {
         if (!wins(rowKey(table, op.id, f), op.hlc)) continue
