@@ -19,7 +19,8 @@ export const COLLECTIONS = [
   'triageRules',
   'templates',
   'dashboards',
-  'docs'
+  'docs',
+  'agents'
 ] as const
 // Notifications are left out: they are a feed, not user data.
 export type Collection = (typeof COLLECTIONS)[number]

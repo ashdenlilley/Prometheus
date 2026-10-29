@@ -7,6 +7,8 @@ import { inverseRelations } from '@shared/model'
 import { backlinks } from '@shared/docs'
 import type { Route } from '../route'
 import { availableLabels, labelGroups } from '@shared/labels'
+import { activeAgents, AGENT_PREFIX, agentAssignee, agentText, displayAssignee, isAgentAssignee } from '@shared/agents'
+import { AgentBadge } from './AgentBadge'
 import { nextOccurrence } from '@shared/recurrence'
 import type { Recurrence } from '@shared/types'
 import { CellEditor } from './cells'
@@ -314,12 +316,27 @@ export function IssueDetail({
           </label>
           <label>
             Assignee
-            <input ref={assigneeRef} aria-label="Assignee" className="field-input" list={`people-${project.id}`} value={issue.assignee} onChange={e => patch({ assignee: e.target.value })} />
-            <datalist id={`people-${project.id}`}>
-              {project.members.map(m => (
-                <option key={m} value={m} />
+            {isAgentAssignee(issue.assignee) ? (
+              <div className="agent-cell">
+                <AgentBadge data={data} assignee={issue.assignee} />
+                <button className="btn ghost" aria-label="Clear assignee" onClick={() => patch({ assignee: '' })}>×</button>
+              </div>
+            ) : (
+              <>
+                <input ref={assigneeRef} aria-label="Assignee" className="field-input" list={`people-${project.id}`} value={issue.assignee} onChange={e => patch({ assignee: e.target.value })} />
+                <datalist id={`people-${project.id}`}>
+                  {project.members.map(m => (
+                    <option key={m} value={m} />
+                  ))}
+                </datalist>
+              </>
+            )}
+            <select aria-label="Assign to agent" className="field-input" value="" onChange={e => e.target.value && patch({ assignee: e.target.value })}>
+              <option value="">Assign to agent…</option>
+              {activeAgents(data).map(a => (
+                <option key={a.id} value={agentAssignee(a.id)}>🤖 {a.name}</option>
               ))}
-            </datalist>
+            </select>
           </label>
           <label>
             Labels
@@ -551,7 +568,10 @@ export function IssueDetail({
           {timeline.map((t, n) =>
             t.kind === 'activity' ? (
               <div key={`a-${n}`} className="activity-row muted small">
-                {(t.item as ActivityEntry).text} · {fmtDate(t.at.slice(0, 10))}
+                {agentText(data, (t.item as ActivityEntry).text)} · {fmtDate(t.at.slice(0, 10))}
+                {(t.item as ActivityEntry).actor?.startsWith(AGENT_PREFIX) && (
+                  <span className="muted" data-testid="activity-actor"> · by {displayAssignee(data, (t.item as ActivityEntry).actor ?? '')}</span>
+                )}
               </div>
             ) : (
               renderComment(t.item as Comment)

@@ -37,6 +37,7 @@ Local-first project management for a single user, on macOS and Windows. Linear-s
 - Automations triggered by status, priority, assignee or due-date.
 - Command palette (Cmd/Ctrl+K).
 - Local MCP server for coding agents such as Claude Code and Codex (streamable HTTP on 127.0.0.1, default port 7878, bearer token).
+- Agents as assignees: register agents in Settings > Agents, each with its own token (shown once, stored hashed) and a level (read, comment, write). Assign issues to an agent; it finds them with the `my_issues` MCP tool, and its changes are attributed to it in activity. Writes are rate limited to 60 a minute per agent.
 
 For gaps compared with Linear and monday.com, see [docs/feature-parity.md](docs/feature-parity.md).
 

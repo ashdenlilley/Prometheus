@@ -3,6 +3,7 @@ import { applyFilter } from './filter'
 import { nextOccurrence, recurrenceCopyId } from './recurrence'
 import type {
   ActivityEntry,
+  Agent,
   AppData,
   Automation,
   AutomationAction,
@@ -89,6 +90,9 @@ export type Action =
   | { type: 'saveDocAsTemplate'; id: string; newId: string }
   | { type: 'notify'; notification: Notification }
   | { type: 'markNotifications'; read: boolean }
+  | { type: 'addAgent'; agent: Agent }
+  | { type: 'patchAgent'; id: string; patch: Partial<Pick<Agent, 'name' | 'color' | 'level'>> }
+  | { type: 'revokeAgent'; id: string; at: string }
   | { type: 'tick'; today: string }
 
 const mapProject = (s: AppData, id: string, fn: (p: Project) => Project): AppData => ({
@@ -375,6 +379,15 @@ export function reducer(s: AppData, a: Action): AppData {
       return { ...s, dashboards: s.dashboards.filter(d => d.id !== a.id) }
     case 'notify':
       return { ...s, notifications: [a.notification, ...s.notifications].slice(0, 200) }
+    case 'addAgent':
+      return { ...s, agents: [...(s.agents ?? []), a.agent] }
+    case 'patchAgent':
+      return {
+        ...s,
+        agents: (s.agents ?? []).map(g => (g.id === a.id ? { ...g, name: a.patch.name ?? g.name, color: a.patch.color ?? g.color, level: a.patch.level ?? g.level } : g))
+      }
+    case 'revokeAgent':
+      return { ...s, agents: (s.agents ?? []).map(g => (g.id === a.id ? { ...g, revokedAt: a.at } : g)) }
     case 'markNotifications':
       return { ...s, notifications: s.notifications.map(n => ({ ...n, read: a.read })) }
   }

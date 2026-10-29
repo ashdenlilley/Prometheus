@@ -68,7 +68,7 @@ Last checked against the code: 2026-10-29.
 | Slack, GitHub, GitLab, Figma, Sentry, Zendesk and similar | N |
 | API and webhooks | P (local HTTP MCP server for agents, `src/main/mcp.ts`; no webhooks, no public REST API) |
 | Import from Jira, Asana, CSV | Y (CSV import and export, plus file import of a Jira CSV export and an Asana CSV or JSON export with a preview and status mapping. `ImportModal.tsx`, `shared/importers.ts`; no live API import) |
-| Agents assigned to issues | N (MCP exists for local agents, but assignee is free text and there is no agent assignee type) |
+| Agents assigned to issues | Y (registered agents with their own MCP token and level read/comment/write, `agent:<id>` assignees with a robot badge, `my_issues`/`whoami` tools, activity attributed to the agent; `src/shared/agents.ts`, `src/main/mcp.ts`) |
 
 ## 2. monday.com
 
@@ -186,7 +186,6 @@ Full 1:1 with both products is a multi-quarter build and needs a multi-user back
 **Still missing, feasible locally (single user):**
 - Team documents and images in docs.
 - Cross-project item creation. Recipes.
-- Agent as an assignee type.
 
 **Needs a backend or multi-user:**
 - Accounts, guests, roles, permissions, sharing.

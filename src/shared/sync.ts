@@ -25,6 +25,7 @@ export type Table =
   | 'dashboards'
   | 'notifications'
   | 'docs'
+  | 'agents'
 
 export const TABLE_KEYS: [Table, keyof AppData][] = [
   ['spaces', 'spaces'],
@@ -38,7 +39,8 @@ export const TABLE_KEYS: [Table, keyof AppData][] = [
   ['templates', 'templates'],
   ['dashboards', 'dashboards'],
   ['notifications', 'notifications'],
-  ['docs', 'docs']
+  ['docs', 'docs'],
+  ['agents', 'agents']
 ]
 
 export interface Op {

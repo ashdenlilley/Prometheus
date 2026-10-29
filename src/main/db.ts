@@ -8,9 +8,9 @@ import { AUDIT_LIMIT, type AuditEntry, type AuditFilter, type AuditRow } from '.
 // the entity as JSON with its parent id indexed. Saves diff against the last write, so only
 // changed rows are rewritten.
 
-type Table = 'spaces' | 'initiatives' | 'teams' | 'projects' | 'issues' | 'cycles' | 'automations' | 'triage_rules' | 'templates' | 'dashboards' | 'notifications' | 'docs'
+type Table = 'spaces' | 'initiatives' | 'teams' | 'projects' | 'issues' | 'cycles' | 'automations' | 'triage_rules' | 'templates' | 'dashboards' | 'notifications' | 'docs' | 'agents'
 
-const TABLES: Table[] = ['spaces', 'initiatives', 'teams', 'projects', 'issues', 'cycles', 'automations', 'triage_rules', 'templates', 'dashboards', 'notifications', 'docs']
+const TABLES: Table[] = ['spaces', 'initiatives', 'teams', 'projects', 'issues', 'cycles', 'automations', 'triage_rules', 'templates', 'dashboards', 'notifications', 'docs', 'agents']
 
 // AppData key for each table.
 const KEY: Record<Table, keyof AppData> = {
@@ -25,7 +25,8 @@ const KEY: Record<Table, keyof AppData> = {
   templates: 'templates',
   dashboards: 'dashboards',
   notifications: 'notifications',
-  docs: 'docs'
+  docs: 'docs',
+  agents: 'agents'
 }
 
 // Parent column per table, used to index child lookups.
@@ -224,6 +225,7 @@ export class Store {
       dashboards: all('dashboards') as AppData['dashboards'],
       notifications: all('notifications') as AppData['notifications'],
       docs: all('docs') as AppData['docs'],
+      agents: all('agents') as AppData['agents'],
       me
     }
     this.primeCache(data)
@@ -259,7 +261,8 @@ export class Store {
       templates: data.templates.map(r => ({ id: r.id, parent: r.projectId, json: JSON.stringify(r) })),
       dashboards: data.dashboards.map(r => ({ id: r.id, parent: r.spaceId, json: JSON.stringify(r) })),
       notifications: data.notifications.map(r => ({ id: r.id, json: JSON.stringify(r) })),
-      docs: (data.docs ?? []).map(r => ({ id: r.id, parent: r.spaceId, json: JSON.stringify(r) }))
+      docs: (data.docs ?? []).map(r => ({ id: r.id, parent: r.spaceId, json: JSON.stringify(r) })),
+      agents: (data.agents ?? []).map(r => ({ id: r.id, json: JSON.stringify(r) }))
     }
 
     db.run('BEGIN')
