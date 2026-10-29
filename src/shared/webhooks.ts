@@ -68,7 +68,8 @@ export interface WebhookPayload {
   at: string
   actor: string
   project: { id: string; key: string }
-  issue: Issue | null
+  // The issue as stored, plus its display key (such as PRM-12).
+  issue: (Issue & { key: string }) | null
   changes?: Record<string, [unknown, unknown]>
   comment?: Comment
   test?: true
@@ -98,7 +99,7 @@ export function webhookEvents(prev: AppData, next: AppData, actor: string, at: s
       at,
       actor,
       project: { id: issue.projectId, key: project?.key ?? '' },
-      issue,
+      issue: { ...issue, key: `${project?.key ?? ''}-${issue.number}` },
       ...extra
     }
     for (const w of hooks) {

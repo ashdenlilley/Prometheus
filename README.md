@@ -35,6 +35,7 @@ Local-first project management for a single user, on macOS and Windows. Linear-s
 - Automations triggered by status, priority, assignee or due-date.
 - Command palette (Cmd/Ctrl+K).
 - Local MCP server for coding agents such as Claude Code and Codex (streamable HTTP on 127.0.0.1, default port 7878, bearer token).
+- Local REST API at `http://127.0.0.1:7878/api/v1` (same token as MCP) and per-project outgoing webhooks signed with HMAC-SHA256, with retries and a delivery log. See [docs/api.md](docs/api.md).
 
 For gaps compared with Linear and monday.com, see [docs/feature-parity.md](docs/feature-parity.md).
 

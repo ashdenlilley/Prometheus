@@ -3559,3 +3559,38 @@ select.field-input:focus {
   border: 1px solid var(--line);
   border-radius: 3px;
 }
+
+.webhook-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.webhook-url {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+
+.webhook-events {
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+.webhook-deliveries {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+}
+.webhook-deliveries th,
+.webhook-deliveries td {
+  text-align: left;
+  padding: 3px 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: top;
+}

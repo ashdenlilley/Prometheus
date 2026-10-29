@@ -105,6 +105,7 @@ export interface DispatcherDeps {
 export class WebhookDispatcher {
   private timer: ReturnType<typeof setInterval> | null = null
   private busy = false
+  private again = false
   private fetch: typeof fetch
   private now: () => number
 
@@ -131,12 +132,13 @@ export class WebhookDispatcher {
     const hook = data?.webhooks?.find(w => w.id === webhookId)
     if (!data || !hook) return null
     const project = data.projects.find(p => p.id === hook.projectId)
+    const sample = data.issues.find(i => i.projectId === hook.projectId)
     const payload: WebhookPayload = {
       event: 'issue.updated',
       at: new Date(this.now()).toISOString(),
       actor: 'test',
       project: { id: hook.projectId, key: project?.key ?? '' },
-      issue: data.issues.find(i => i.projectId === hook.projectId) ?? null,
+      issue: sample ? { ...sample, key: `${project?.key ?? ''}-${sample.number}` } : null,
       changes: {},
       test: true
     }
@@ -157,10 +159,18 @@ export class WebhookDispatcher {
   // Sends every due row, one at a time. Overlapping ticks are skipped.
   async tick(): Promise<void> {
     // Before the data loads, webhooks cannot be looked up. Skip rather than fail the queue.
-    if (this.busy || !this.deps.read()) return
+    if (!this.deps.read()) return
+    if (this.busy) {
+      // Rows queued during a pass are picked up by one more pass right after it.
+      this.again = true
+      return
+    }
     this.busy = true
     try {
-      for (const row of this.deps.store.dueDeliveries(this.now())) await this.attempt(row)
+      do {
+        this.again = false
+        for (const row of this.deps.store.dueDeliveries(this.now())) await this.attempt(row)
+      } while (this.again)
     } finally {
       this.busy = false
     }

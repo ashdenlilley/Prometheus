@@ -138,6 +138,22 @@ describe('WebhookDispatcher', () => {
     }
   })
 
+  test('rows queued while a pass is running are sent by a follow-up pass', async () => {
+    const rx = await receiver()
+    const h = await harness({ url: rx.url })
+    try {
+      h.dispatcher.enqueue([event()])
+      const first = h.dispatcher.tick()
+      h.dispatcher.enqueue([event()])
+      await h.dispatcher.tick() // busy: only flags another pass
+      await first
+      assert.deepEqual(h.store.listDeliveries('wh-1').map(r => r.status), ['delivered', 'delivered'])
+    } finally {
+      await rx.close()
+      await h.cleanup()
+    }
+  })
+
   test('a 500 is retried after the schedule, and a later 200 marks it delivered', async () => {
     const rx = await receiver(n => (n === 1 ? 500 : 200))
     const h = await harness({ url: rx.url })

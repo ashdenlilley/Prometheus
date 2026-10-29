@@ -44,7 +44,7 @@ async function openStore(): Promise<Store> {
   // Webhook secrets use the same OS keychain as the sync key. Plaintext only where no keychain exists.
   secrets = new WebhookSecrets(
     dataDir(),
-    safeStorage.isEncryptionAvailable()
+    (await safeStorage.isAsyncEncryptionAvailable())
       ? {
           seal: async text => (await safeStorage.encryptStringAsync(text)).toString('base64'),
           open: async sealed => (await safeStorage.decryptStringAsync(Buffer.from(sealed, 'base64'))).result
@@ -112,7 +112,11 @@ function audit(entries: AuditEntry[]) {
 // Like audit, a failure here must not break the change itself.
 function enqueueWebhooks(prev: AppData, next: AppData, actor: string) {
   try {
-    dispatcher?.enqueue(webhookEvents(prev, next, actor, new Date().toISOString()))
+    const events = webhookEvents(prev, next, actor, new Date().toISOString())
+    if (events.length === 0) return
+    dispatcher?.enqueue(events)
+    // Send now rather than on the next 15 s tick. setImmediate lets the caller store the new state first.
+    setImmediate(() => void dispatcher?.tick())
   } catch (err) {
     console.warn('webhook enqueue failed', err)
   }

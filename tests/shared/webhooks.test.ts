@@ -85,6 +85,7 @@ describe('webhookEvents', () => {
     const out = webhookEvents(prev, next, 'me', at)
     assert.deepEqual(out.map(o => [o.webhookId, o.event]), [['wh-1', 'issue.created']])
     assert.equal(out[0].payload.issue?.id, 'issue-2')
+    assert.match(out[0].payload.issue?.key ?? '', /^PRM-\d+$/)
     assert.deepEqual(out[0].payload.project, { id: 'proj-1', key: 'PRM' })
     assert.equal(out[0].payload.actor, 'me')
     assert.equal(out[0].payload.at, at)
