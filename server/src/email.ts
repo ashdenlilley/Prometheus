@@ -1,18 +1,67 @@
 import type { Env } from './env'
 import { escapeHtml } from './pages'
 
+export interface EmailSender {
+  send(msg: { to: string; from: string; subject: string; text: string; html: string }): Promise<void>
+}
+
+// Picks the sender by EMAIL_PROVIDER. Config problems throw; the messages never include a link or a provider reply.
+export function emailSender(env: Env): EmailSender {
+  switch (env.EMAIL_PROVIDER) {
+    case 'resend':
+      return resendSender(env)
+    case 'cloudflare':
+      return cloudflareSender(env)
+    case 'log':
+      return logSender(env)
+    default:
+      throw new Error('EMAIL_PROVIDER must be resend, cloudflare or log')
+  }
+}
+
+function resendSender(env: Env): EmailSender {
+  return {
+    async send(msg) {
+      const res = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: { authorization: `Bearer ${env.EMAIL_API_KEY}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ from: msg.from, to: [msg.to], subject: msg.subject, text: msg.text, html: msg.html })
+      })
+      if (!res.ok) throw new Error(`email provider responded with HTTP ${res.status}`)
+    }
+  }
+}
+
+// Cloudflare Email Sending through the send_email binding (no API key). Its errors carry a code such as E_SENDER_NOT_VERIFIED.
+function cloudflareSender(env: Env): EmailSender {
+  return {
+    async send(msg) {
+      if (!env.EMAIL) throw new Error('send_email binding EMAIL is not configured')
+      try {
+        await env.EMAIL.send(msg)
+      } catch (e) {
+        const code = (e as { code?: unknown }).code
+        throw new Error(typeof code === 'string' && /^E_[A-Z_]+$/.test(code) ? `email send failed: ${code}` : 'email send failed')
+      }
+    }
+  }
+}
+
+// Local development only: prints the link to the console instead of sending it.
+function logSender(env: Env): EmailSender {
+  if (!/^http:\/\/(127\.0\.0\.1|localhost)(:|\/|$)/.test(env.PUBLIC_URL ?? '')) {
+    throw new Error('EMAIL_PROVIDER=log is only allowed when PUBLIC_URL starts with http://127.0.0.1 or http://localhost')
+  }
+  return {
+    async send(msg) {
+      console.log(`sign-in link for ${msg.to}: ${msg.text.match(/https?:\/\/\S+/)?.[0]}`)
+    }
+  }
+}
+
 // Sends the sign-in link. Throws on a non-2xx reply; the message never includes the link or the reply body.
 export async function sendMagicLink(env: Env, to: string, link: string): Promise<void> {
   const text = `Sign in to Prometheus sync:\n\n${link}\n\nThis link works once and expires in 15 minutes. If you did not ask for it, ignore this email.`
   const html = `<p>Sign in to Prometheus sync:</p><p><a href="${escapeHtml(link)}">Sign in</a></p><p>This link works once and expires in 15 minutes. If you did not ask for it, ignore this email.</p>`
-  const message = { from: env.EMAIL_FROM, to: [to], subject: 'Sign in to Prometheus', text, html }
-  const auth = { authorization: `Bearer ${env.EMAIL_API_KEY}`, 'content-type': 'application/json' }
-
-  // Cloudflare Email Sending: confirm the exact endpoint and payload at setup (see docs/cloud-sync.md).
-  const url =
-    env.EMAIL_PROVIDER === 'cloudflare'
-      ? `https://api.cloudflare.com/client/v4/accounts/${env.CF_ACCOUNT_ID}/email/sending/send`
-      : 'https://api.resend.com/emails'
-  const res = await fetch(url, { method: 'POST', headers: auth, body: JSON.stringify(message) })
-  if (!res.ok) throw new Error(`email provider responded with HTTP ${res.status}`)
+  await emailSender(env).send({ from: env.EMAIL_FROM!, to, subject: 'Sign in to Prometheus', text, html })
 }

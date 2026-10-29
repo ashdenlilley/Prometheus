@@ -1,3 +1,6 @@
 # Copy to .dev.vars for `npx wrangler dev`. .dev.vars is gitignored. Placeholders only.
 JWT_SECRET=replace-with-64-random-hex-chars
 EMAIL_API_KEY=replace-with-email-api-key
+# Local development only: prints the sign-in link to the `wrangler dev` console instead of emailing it.
+# Refused unless PUBLIC_URL starts with http://127.0.0.1 or http://localhost.
+# EMAIL_PROVIDER=log

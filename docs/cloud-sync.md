@@ -93,21 +93,24 @@ Settings come from `wrangler.toml` `[vars]` and from secrets. A request that fin
 |---|---|---|
 | `OWNER_EMAIL` | var | The only account allowed to sign in. |
 | `PUBLIC_URL` | var | Base URL used in sign-in links. |
-| `EMAIL_PROVIDER` | var | `resend` or `cloudflare`. |
+| `EMAIL_PROVIDER` | var | `resend` or `cloudflare`. `log` is local development only. |
 | `EMAIL_FROM` | var | Sender on a verified domain. |
-| `CF_ACCOUNT_ID` | var | Only for `EMAIL_PROVIDER = "cloudflare"`. |
+| `EMAIL` | binding | `send_email` binding, only for `EMAIL_PROVIDER = "cloudflare"`. No key. |
 | `JWT_SECRET` | secret | Signs access tokens. 64 random hex characters (at least 32). The Worker refuses to run (500, `config_missing`) while any setting still holds its placeholder value or `JWT_SECRET` is shorter than 32 characters. |
-| `EMAIL_API_KEY` | secret | Email provider API key. |
+| `EMAIL_API_KEY` | secret | Resend API key. Only for `EMAIL_PROVIDER = "resend"`. |
 | `LINK_TTL_SECONDS`, `COMPACT_AT`, `COMPACT_KEEP` | optional var | Defaults 900, 10000, 2000. |
 
 Secrets never go in `wrangler.toml` or in the repo.
 
 ## Email
 
-`src/email.ts` sends the magic link through the provider named by `EMAIL_PROVIDER`:
+`src/email.ts` sends the magic link through an `EmailSender` chosen by `EMAIL_PROVIDER`:
 
 - `resend`: `POST https://api.resend.com/emails`, bearer `EMAIL_API_KEY`.
-- `cloudflare`: `POST https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/email/sending/send`, bearer `EMAIL_API_KEY`. **Confirm this endpoint and its payload against the current Cloudflare Email Sending docs before the first deploy.** Only the Resend path is exercised by tests.
+- `cloudflare`: Cloudflare Email Sending through the Workers `send_email` binding `EMAIL` (`env.EMAIL.send(...)`). No REST call and no API key. A failure throws with the error code only (for example `E_SENDER_NOT_VERIFIED`).
+- `log`: local development only. Prints `sign-in link for <email>: <link>` to the console and sends nothing. It throws unless `PUBLIC_URL` starts with `http://127.0.0.1` or `http://localhost`.
+
+Any other value, or a missing key or binding for the chosen provider, gives the `config_missing` reply.
 
 A failed send still returns `200` to the client, so the reply stays uniform. The failure is logged with its HTTP status only. Neither the token nor the link is logged.
 
@@ -129,7 +132,7 @@ cp .dev.vars.example .dev.vars   # then edit: JWT_SECRET and EMAIL_API_KEY value
 npx wrangler dev
 ```
 
-`npx wrangler dev` runs the Worker locally. With the placeholder `OWNER_EMAIL` and no real email key, a sign-in email cannot be delivered. For local testing, read the link from the test harness instead.
+`npx wrangler dev` runs the Worker locally. In `.dev.vars` set `EMAIL_PROVIDER=log` and `PUBLIC_URL=http://127.0.0.1:8787` (the local dev URL), and the sign-in link is printed to the dev console. Without it, a sign-in email cannot be delivered; the test harness also reads the link directly.
 
 ## Client (Electron)
 
@@ -207,12 +210,14 @@ Nothing is deployed yet. These steps are for later, on Ashden's machine.
 1. Create a Cloudflare account. Note the account id from the dashboard. Enable the Workers plan that supports Durable Objects with SQLite.
 2. Choose a `workers.dev` subdomain in the dashboard (free).
 3. Log in from the server directory: `cd server && npx wrangler login`. This is interactive and runs on Ashden's machine only.
-4. Edit `server/wrangler.toml`. Replace `you@example.com`, `REPLACE_WITH_SUBDOMAIN`, `REPLACE_WITH_VERIFIED_DOMAIN` and, if using Cloudflare Email Sending, `CF_ACCOUNT_ID`.
-5. Verify the sender domain with the email provider (add its SPF and DKIM records on a domain you control). Do this before the first sign-in.
+4. Edit `server/wrangler.toml`. Replace `you@example.com`, `REPLACE_WITH_SUBDOMAIN` and `REPLACE_WITH_VERIFIED_DOMAIN`. Pick `EMAIL_PROVIDER`:
+   - Resend: set `EMAIL_PROVIDER = "resend"`. Verify the sender domain (SPF and DKIM records on a domain you control) and create an API key.
+   - Cloudflare: set `EMAIL_PROVIDER = "cloudflare"`, uncomment the `[[send_email]]` block, and onboard the sender domain to Email Sending in the dashboard. No API key is needed.
+5. Verify the sender domain before the first sign-in: for Resend, the SPF and DKIM records; for Cloudflare, Email Sending onboarding.
 6. Set the secrets. Each command prompts for the value:
    ```sh
    npx wrangler secret put JWT_SECRET       # 64 random hex characters
-   npx wrangler secret put EMAIL_API_KEY    # the provider's API key
+   npx wrangler secret put EMAIL_API_KEY    # Resend only; skip for Cloudflare
    ```
 7. Deploy: `npx wrangler deploy`. Then check `https://prometheus-sync.REPLACE_WITH_SUBDOMAIN.workers.dev/health` returns `{"ok":true}`.
 8. Optional, GitHub Actions deploys: create an API token in the Cloudflare dashboard from the "Edit Cloudflare Workers" template, scoped to this account. Store it as the repo secret `CLOUDFLARE_API_TOKEN`, and store the account id as `CLOUDFLARE_ACCOUNT_ID`. The workflow `.github/workflows/deploy-sync-server.yml` runs only from the Actions tab (`workflow_dispatch`). It runs the tests, then `npx wrangler deploy`.

@@ -7,7 +7,7 @@ export { Auth } from './auth'
 export { Workspace } from './workspace'
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-const REQUIRED = ['OWNER_EMAIL', 'JWT_SECRET', 'PUBLIC_URL', 'EMAIL_API_KEY', 'EMAIL_FROM', 'EMAIL_PROVIDER'] as const
+const REQUIRED = ['OWNER_EMAIL', 'JWT_SECRET', 'PUBLIC_URL', 'EMAIL_FROM', 'EMAIL_PROVIDER'] as const
 
 const json = (body: unknown, status = 200, headers: Record<string, string> = {}) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', ...headers } })
@@ -129,7 +129,7 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
 
 // A deploy that still has the example values must not run: a known JWT secret would let anyone mint tokens.
 function placeholder(env: Env): string | undefined {
-  const vars = ['OWNER_EMAIL', 'PUBLIC_URL', 'EMAIL_FROM', 'CF_ACCOUNT_ID', 'EMAIL_API_KEY', 'JWT_SECRET'] as const
+  const vars = ['OWNER_EMAIL', 'PUBLIC_URL', 'EMAIL_FROM', 'EMAIL_API_KEY', 'JWT_SECRET'] as const
   const left = vars.find(k => /REPLACE_WITH|^replace-with-/i.test(env[k] ?? '') || env[k] === 'you@example.com')
   if (left) return `${left} (still the placeholder value)`
   if ((env.JWT_SECRET ?? '').length < 32) return 'JWT_SECRET (at least 32 characters)'
@@ -143,8 +143,9 @@ export default {
     // Names the setting only, never its value.
     const missing =
       REQUIRED.find(k => !env[k]) ??
-      (env.EMAIL_PROVIDER !== 'resend' && env.EMAIL_PROVIDER !== 'cloudflare' ? 'EMAIL_PROVIDER (resend or cloudflare)' : undefined) ??
-      (env.EMAIL_PROVIDER === 'cloudflare' && !env.CF_ACCOUNT_ID ? 'CF_ACCOUNT_ID' : undefined) ??
+      (['resend', 'cloudflare', 'log'].includes(env.EMAIL_PROVIDER!) ? undefined : 'EMAIL_PROVIDER (resend, cloudflare or log)') ??
+      (env.EMAIL_PROVIDER === 'resend' && !env.EMAIL_API_KEY ? 'EMAIL_API_KEY' : undefined) ??
+      (env.EMAIL_PROVIDER === 'cloudflare' && !env.EMAIL ? 'EMAIL (send_email binding)' : undefined) ??
       placeholder(env)
     if (missing) return json({ error: 'config_missing', message: `Missing setting: ${missing}` }, 500)
 
