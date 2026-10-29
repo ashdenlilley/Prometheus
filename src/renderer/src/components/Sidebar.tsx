@@ -1,7 +1,9 @@
 import { useState } from 'react'
-import type { Space } from '@shared/types'
+import type { Project, SavedView, Space } from '@shared/types'
+import { favouriteViews, viewIdFor } from '@shared/views'
 import { useStore } from '../store'
 import { PROJECT_VIEWS, type Route, type ViewId } from '../route'
+import { openSavedView } from './FilterBar'
 import { ICONS } from './icons'
 import { clsx } from '../util'
 
@@ -23,9 +25,33 @@ export function Sidebar(props: SidebarProps) {
 
   const go = (spaceId: string, projectId: string | null, view: ViewId) => onNavigate({ spaceId, projectId, view })
 
+  // Projects in the order the tree shows them, so favourites follow the same order.
+  const orderedProjects = data.spaces.flatMap(s => data.projects.filter(pr => pr.spaceId === s.id))
+  const favourites = favouriteViews(orderedProjects)
+  const openFavourite = (project: Project, view: SavedView) => {
+    openSavedView(project.id, view)
+    go(project.spaceId, project.id, viewIdFor(view.view))
+  }
+
   return (
     <div className={clsx('side-slot', pinned ? 'pinned' : 'unpinned')}>
       <aside className="sidebar">
+        {favourites.length > 0 && (
+          <>
+            <div className="section-label">
+              <span className="lbl">Favourites</span>
+            </div>
+            <nav className="tree">
+              {favourites.map(({ project, view }) => (
+                <button key={`${project.id}:${view.id}`} className="tree-row" onClick={() => openFavourite(project, view)}>
+                  <span className="lbl grow ellipsis">{view.name}</span>
+                  <span className="muted small ellipsis">{project.name}</span>
+                </button>
+              ))}
+            </nav>
+          </>
+        )}
+
         <div className="section-label">
           <span className="lbl">Spaces</span>
           <button className="icon-btn" title="New space" aria-label="New space" onClick={props.onNewSpace}>

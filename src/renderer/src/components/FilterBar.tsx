@@ -1,12 +1,13 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Condition, FilterGroup, Project, SavedView, Sort } from '@shared/types'
 import { emptyFilter, FIXED_FIELDS, viewShowsCompleted } from '@shared/query'
+import type { ViewKind } from '@shared/views'
 import { useStore } from '../store'
 import { askText, useOutside } from './ui'
 import { ICONS } from './icons'
 import { clsx, uid } from '../util'
 
-export type ViewKind = 'list' | 'board' | 'table'
+type ChartType = NonNullable<SavedView['chartType']>
 
 export interface ViewQuery {
   filter: FilterGroup
@@ -21,6 +22,8 @@ export interface ViewQuery {
   setHidden: (h: string[]) => void
   showCompleted: boolean
   setShowCompleted: (s: boolean) => void
+  chartType: ChartType
+  setChartType: (c: ChartType) => void
   applyView: (v: SavedView) => void
 }
 
@@ -33,13 +36,34 @@ interface QueryState {
   sort: Sort | null
   hidden: string[]
   showCompleted: boolean
+  chartType?: ChartType
 }
 
 const memory = new Map<string, QueryState>()
+// Mounted useViewQuery hooks, told when openSavedView rewrites their key.
+const listeners = new Set<(key: string) => void>()
+
+function queryStateFromView(v: SavedView): QueryState {
+  return { filter: v.filter, groupBy: v.groupBy, rowsBy: v.rowsBy ?? null, sort: v.sort, hidden: v.hidden, showCompleted: viewShowsCompleted(v), chartType: v.chartType ?? 'bar' }
+}
+
+// Applies a saved view to its project's page for that kind, whether or not the page is open.
+export function openSavedView(projectId: string, view: SavedView) {
+  const key = `${projectId}:${view.view}`
+  memory.set(key, queryStateFromView(view))
+  listeners.forEach(l => l(key))
+}
 
 export function useViewQuery(project: Project, kind: ViewKind): ViewQuery {
   const key = `${project.id}:${kind}`
   const [state, setState] = useState<QueryState>(() => memory.get(key) ?? { filter: emptyFilter(), groupBy: null, rowsBy: null, sort: null, hidden: [], showCompleted: true })
+  useEffect(() => {
+    const listener = (k: string) => {
+      if (k === key) setState(memory.get(key)!)
+    }
+    listeners.add(listener)
+    return () => { listeners.delete(listener) }
+  }, [key])
   const write = (patch: Partial<QueryState>) =>
     setState(s => {
       const next = { ...s, ...patch }
@@ -59,7 +83,9 @@ export function useViewQuery(project: Project, kind: ViewKind): ViewQuery {
     setHidden: hidden => write({ hidden }),
     showCompleted: state.showCompleted,
     setShowCompleted: showCompleted => write({ showCompleted }),
-    applyView: v => write({ filter: v.filter, groupBy: v.groupBy, rowsBy: v.rowsBy ?? null, sort: v.sort, hidden: v.hidden, showCompleted: viewShowsCompleted(v) })
+    chartType: state.chartType ?? 'bar',
+    setChartType: chartType => write({ chartType }),
+    applyView: v => write(queryStateFromView(v))
   }
 }
 
@@ -136,12 +162,16 @@ export function FilterBar({ project, kind, query, showGroup = true }: { project:
   const saveView = async () => {
     const name = await askText('Name this view')
     if (!name) return
-    const view: SavedView = { id: uid(), name, view: kind, filter: f, groupBy: query.groupBy, rowsBy: query.rowsBy, sort: query.sort, hidden: query.hidden, showCompleted: query.showCompleted }
+    const view: SavedView = { id: uid(), name, view: kind, filter: f, groupBy: query.groupBy, rowsBy: query.rowsBy, sort: query.sort, hidden: query.hidden, showCompleted: query.showCompleted, chartType: kind === 'chart' ? query.chartType : undefined }
     dispatch({ type: 'patchProject', id: project.id, patch: { views: [...project.views, view] } })
   }
 
   const deleteView = (id: string) => {
     dispatch({ type: 'patchProject', id: project.id, patch: { views: project.views.filter(v => v.id !== id) } })
+  }
+
+  const toggleFavourite = (id: string) => {
+    dispatch({ type: 'patchProject', id: project.id, patch: { views: project.views.map(v => (v.id === id ? { ...v, favourite: !v.favourite } : v)) } })
   }
 
   const active = f.conditions.filter(c => !(c.key === 'name' && c.op === 'contains')).length
@@ -236,6 +266,7 @@ export function FilterBar({ project, kind, query, showGroup = true }: { project:
             {views.map(v => (
               <div key={v.id} className="popover-row">
                 <button className="popover-item grow" onClick={() => { query.applyView(v); setViewsOpen(false) }}>{v.name}</button>
+                <button className="fav-btn" aria-label={`Favourite ${v.name}`} aria-pressed={!!v.favourite} onClick={() => toggleFavourite(v.id)}>{v.favourite ? '★' : '☆'}</button>
                 <button className="icon-btn" aria-label={`Delete ${v.name}`} onClick={() => deleteView(v.id)}>{ICONS.close}</button>
               </div>
             ))}

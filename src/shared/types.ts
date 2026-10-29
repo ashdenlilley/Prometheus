@@ -128,13 +128,15 @@ export interface ProjectUpdate {
 export interface SavedView {
   id: string
   name: string
-  view: 'list' | 'board' | 'table'
+  view: 'list' | 'board' | 'table' | 'chart'
   filter: FilterGroup
   groupBy: string | null
   rowsBy?: string | null
   sort: Sort | null
   hidden: string[]
   showCompleted?: boolean
+  chartType?: 'bar' | 'pie' | 'line'
+  favourite?: boolean
 }
 
 export type Operator = 'is' | 'is_not' | 'contains' | 'gt' | 'lt' | 'empty' | 'not_empty'
