@@ -610,6 +610,13 @@ ipcMain.handle('cloud:revokeDevice', (_event, id: string) => {
   return requireCloud().revokeDevice(id)
 })
 ipcMain.handle('cloud:signOut', () => requireCloud().signOut())
+ipcMain.handle('cloud:members', () => requireCloud().members())
+ipcMain.handle('cloud:invite', (_event, body: Parameters<CloudSync['invite']>[0]) => requireCloud().invite(body))
+ipcMain.handle('cloud:updateMember', (_event, id: string, patch: Parameters<CloudSync['updateMember']>[1]) => requireCloud().updateMember(id, patch))
+ipcMain.handle('cloud:removeMember', (_event, id: string) => requireCloud().removeMember(id))
+ipcMain.handle('cloud:revokeInvite', (_event, id: string) => requireCloud().revokeInvite(id))
+// A presence hint: with cloud off there is nothing to tell, so it is a no-op.
+ipcMain.handle('cloud:presence', (_event, issueId: string | null) => cloud?.setPresence(typeof issueId === 'string' ? issueId : null))
 
 ipcMain.handle('audit:list', (_event, filters: AuditFilter) => store?.readAudit(filters) ?? [])
 ipcMain.handle('audit:csv', (_event, filters: AuditFilter) =>

@@ -5,6 +5,7 @@ import type { AppData } from '../shared/types'
 import { emptyData } from '../shared/seed'
 import { ensureTeams, resolveNumberClashes } from '../shared/teams'
 import { applyOps, opKeys, snapshotOps, type Clock, type Op } from '../shared/sync'
+import type { Role } from '../shared/permissions'
 
 // Cloud sync client (OS-359). Talks to server/ over HTTPS and one WebSocket; see docs/cloud-sync.md.
 // No Electron imports, so tests run it in plain Node. Local ops are stamped by the folder engine's
@@ -33,6 +34,12 @@ export interface CloudStatus {
   signIn: { email: string; expiresAt: number } | null
   // Signed in, and the server already has data: the user must pick merge or adopt.
   needsJoin: boolean
+  userId: string | null
+  role: Role | null
+  // Other users on this workspace, and the issue each has open. This device is never listed.
+  presence: { userId: string; name: string; issueId?: string }[]
+  // Path of the backup written by the last adopt in this session.
+  backup: string | null
 }
 
 export interface CloudDevice {
@@ -41,6 +48,29 @@ export interface CloudDevice {
   createdAt: number
   lastSeenAt: number
   current: boolean
+}
+
+export interface CloudMember {
+  id: string
+  name: string
+  role: Role
+  email?: string
+  projects?: string[]
+  createdAt?: number
+}
+
+export interface CloudInvite {
+  id: string
+  email: string
+  name: string
+  role: Role
+  projects: string[]
+  expiresAt: number
+}
+
+export interface CloudMembers {
+  members: CloudMember[]
+  invites: CloudInvite[]
 }
 
 // The part of WebSocket this class uses. The real one comes from globalThis; tests pass a fake.
@@ -79,6 +109,8 @@ interface Config {
   lastSeq: number
   enabled: boolean
   joined: boolean
+  userId: string
+  role: Role | ''
 }
 
 // `inflight` is the batch sent but not yet acked. Its id is kept, so a retry after reconnect is idempotent.
@@ -97,14 +129,22 @@ interface Pending {
 }
 
 type Frame =
-  | { type: 'ready'; head: number }
+  | { type: 'ready'; head: number; userId: string; role: Role; projects: string[] }
   | { type: 'snapshot'; ops: Op[] }
   | { type: 'ops'; ops: { seq: number; op: Op }[] }
+  | { type: 'presence'; users: { userId: string; name: string; issueId?: string }[] }
   | { type: 'ack'; id: string }
   | { type: 'error'; id?: string; code: string; skewMs?: number; message?: string }
   | { type: 'pong' }
 
-const BLANK: Config = { serverUrl: '', email: '', deviceId: '', deviceName: '', lastSeq: 0, enabled: false, joined: false }
+const BLANK: Config = { serverUrl: '', email: '', deviceId: '', deviceName: '', lastSeq: 0, enabled: false, joined: false, userId: '', role: '' }
+
+const INVITE_ERRORS: Record<number, string> = {
+  400: 'Check the email address and role.',
+  403: 'Only the owner can invite people.',
+  409: 'That person is already a member.',
+  429: 'Too many invites. Try again in a few minutes.'
+}
 
 // https only, except a loopback server (local development and tests).
 export function normalizeServerUrl(input: string): string {
@@ -154,6 +194,11 @@ export class CloudSync {
   private chain: Promise<void> = Promise.resolve()
   private timers: Partial<Record<'poll' | 'retry' | 'refresh', ReturnType<typeof setTimeout>>> = {}
   private pingTimer: ReturnType<typeof setInterval> | null = null
+  // Set by resync: the next 'ready' re-applies the outbox before pumping.
+  private replay = false
+  private backupPath: string | null = null
+  private presence: CloudStatus['presence'] = []
+  private issueId: string | null = null
   private readonly fetch: typeof fetch
   private readonly Socket: SocketCtor
   private readonly now: () => number
@@ -208,7 +253,11 @@ export class CloudSync {
       lastSync: this.lastSync,
       error: this.error,
       signIn: this.pending ? { email: this.pending.email, expiresAt: this.pending.expiresAt } : null,
-      needsJoin: c.enabled && !c.joined && (this.probeHead ?? 0) > 0
+      needsJoin: c.enabled && !c.joined && (this.probeHead ?? 0) > 0,
+      userId: c.userId || null,
+      role: c.role || null,
+      presence: this.presence,
+      backup: this.backupPath
     }
   }
 
@@ -218,6 +267,13 @@ export class CloudSync {
     this.outbox.ops.push(...ops)
     void this.save()
     this.pump()
+  }
+
+  // The issue this device has open. Sent when it changes, and again after each ready.
+  setPresence(issueId: string | null) {
+    const changed = issueId !== this.issueId
+    this.issueId = issueId
+    if (changed && this.ready) this.socket?.send(JSON.stringify({ type: 'presence', issueId }))
   }
 
   // Sends a sign-in link to `email` and starts polling for the device's tokens.
@@ -243,6 +299,10 @@ export class CloudSync {
   async join(mode: 'merge' | 'adopt'): Promise<void> {
     if (!this.config.enabled || this.config.joined) throw new Error('Nothing to join.')
     if (mode === 'adopt') {
+      // Written before anything is cleared, so a failed write leaves the local data untouched.
+      const backup = join(this.opts.dir, `cloud-backup-${Date.now()}.json`)
+      await writeAtomic(backup, JSON.stringify(this.opts.hooks.read()))
+      this.backupPath = backup
       this.opts.clocks.clear()
       await this.opts.store.clearClocks()
       this.opts.hooks.write(emptyData())
@@ -267,6 +327,35 @@ export class CloudSync {
   async revokeDevice(id: string): Promise<void> {
     const res = await this.authed(`/devices/${encodeURIComponent(id)}`, { method: 'DELETE' })
     if (!res.ok) throw new Error(res.status === 404 ? 'That device is already gone.' : `Could not revoke the device (HTTP ${res.status}).`)
+  }
+
+  members(): Promise<CloudMembers> {
+    return this.authed('/members').then(async res => {
+      if (!res.ok) throw new Error(`Could not load members (HTTP ${res.status}).`)
+      // Non-owners get members only, so their invites are empty.
+      const body = (await res.json()) as Partial<CloudMembers>
+      return { members: body.members ?? [], invites: body.invites ?? [] }
+    })
+  }
+
+  async invite(body: { email: string; name?: string; role: Role; projects?: string[] }): Promise<void> {
+    const res = await this.authed('/invites', post(body))
+    if (!res.ok) throw new Error(INVITE_ERRORS[res.status] ?? `Could not send the invite (HTTP ${res.status}).`)
+  }
+
+  async updateMember(id: string, patch: { role?: Role; projects?: string[]; name?: string }): Promise<void> {
+    const res = await this.authed(`/members/${encodeURIComponent(id)}`, { ...post(patch), method: 'PATCH' })
+    if (!res.ok) throw new Error(`Could not update the member (HTTP ${res.status}).`)
+  }
+
+  async removeMember(id: string): Promise<void> {
+    const res = await this.authed(`/members/${encodeURIComponent(id)}`, { method: 'DELETE' })
+    if (!res.ok) throw new Error(`Could not remove the member (HTTP ${res.status}).`)
+  }
+
+  async revokeInvite(id: string): Promise<void> {
+    const res = await this.authed(`/invites/${encodeURIComponent(id)}`, { method: 'DELETE' })
+    if (!res.ok) throw new Error(`Could not revoke the invite (HTTP ${res.status}).`)
   }
 
   // Revokes this device on the server when reachable, then forgets the sign-in. Local data stays.
@@ -313,6 +402,7 @@ export class CloudSync {
     this.socket = null
     this.ready = false
     this.awaiting = false
+    this.presence = []
     this.clearTimer('poll')
     this.clearTimer('retry')
     this.clearTimer('refresh')
@@ -327,6 +417,7 @@ export class CloudSync {
     this.socket = null
     this.ready = false
     this.awaiting = false
+    this.presence = []
     if (this.pingTimer) clearInterval(this.pingTimer)
     this.pingTimer = null
     ws?.close()
@@ -387,7 +478,7 @@ export class CloudSync {
   private async finishSignIn(p: Pending, body: { refreshToken: string; accessToken: string; accessExpiresAt: number; deviceId: string }) {
     await this.opts.credentials.set(REFRESH_KEY, body.refreshToken)
     this.pending = null
-    this.config = { serverUrl: p.serverUrl, email: p.email, deviceId: body.deviceId, deviceName: p.deviceName, lastSeq: 0, enabled: true, joined: false }
+    this.config = { serverUrl: p.serverUrl, email: p.email, deviceId: body.deviceId, deviceName: p.deviceName, lastSeq: 0, enabled: true, joined: false, userId: '', role: '' }
     this.access = { token: body.accessToken, expiresAt: body.accessExpiresAt }
     this.outbox = { inflight: null, ops: [] }
     this.error = null
@@ -441,7 +532,8 @@ export class CloudSync {
   // Bearer request for the device-management API. A 401 means the device is gone.
   private async authed(path: string, init: RequestInit = {}): Promise<Response> {
     const token = await this.accessToken()
-    const res = await this.fetch(`${this.config.serverUrl}${path}`, { ...init, headers: { authorization: `Bearer ${token}` } })
+    const headers = { ...(init.headers as Record<string, string>), authorization: `Bearer ${token}` }
+    const res = await this.fetch(`${this.config.serverUrl}${path}`, { ...init, headers })
     if (res.status === 401) {
       await this.forget(SIGNED_OUT)
       throw new Error(SIGNED_OUT)
@@ -484,9 +576,11 @@ export class CloudSync {
     this.socket = null
     this.ready = false
     this.awaiting = false
+    this.presence = []
     if (this.pingTimer) clearInterval(this.pingTimer)
     this.pingTimer = null
     if (code === 4001) return void this.forget(SIGNED_OUT) // the server revoked this device
+    if (code === 4003) return void this.resync(null) // role or visibility changed: the server copy is authoritative
     if (this.config.enabled && !this.stopped) this.retry()
   }
 
@@ -509,23 +603,35 @@ export class CloudSync {
       return
     }
     switch (msg.type) {
-      case 'ready':
+      case 'ready': {
         this.ready = true
         this.attempt = 0
-        this.error = null
+        // After a resync the error keeps saying what was undone until the next push is acked.
+        if (!this.replay) this.error = null
+        this.config.userId = msg.userId
+        this.config.role = msg.role
+        void this.save()
+        if (this.issueId) ws.send(JSON.stringify({ type: 'presence', issueId: this.issueId }))
         if (!this.config.joined) {
-          this.probeHead = msg.head
-          // Nothing on the server yet, so merging is the only choice. Otherwise the user picks.
-          if (msg.head === 0) {
+          // Only an owner or member may seed an empty server. Anyone else leaves the choice to the user.
+          const canSeed = msg.role === 'owner' || msg.role === 'member'
+          this.probeHead = msg.head === 0 && !canSeed ? 1 : msg.head
+          if (msg.head === 0 && canSeed) {
             this.join('merge').catch(err => {
               this.error = err instanceof Error ? err.message : 'Join failed.'
             })
           }
           return
         }
+        if (this.replay) {
+          // Edits still in the outbox are newer than the server copy, so they go back on top before the pump.
+          this.replay = false
+          this.apply(this.outbox.ops)
+        }
         this.config.lastSeq = Math.max(this.config.lastSeq, msg.head)
         void this.save()
         return this.pump()
+      }
       case 'snapshot':
         if (this.config.joined) this.apply(msg.ops)
         return
@@ -534,6 +640,9 @@ export class CloudSync {
         this.apply(msg.ops.map(e => e.op))
         this.config.lastSeq = Math.max(this.config.lastSeq, ...msg.ops.map(e => e.seq))
         void this.save()
+        return
+      case 'presence':
+        this.presence = msg.users.filter(u => u.userId !== this.config.userId)
         return
       case 'ack': {
         const inflight = this.outbox.inflight
@@ -558,6 +667,11 @@ export class CloudSync {
           this.error = `This device's clock is about ${minutes} min ahead of the server. Fix the clock to resume cloud sync.`
           return
         }
+        if (msg.code === 'forbidden') {
+          // The server no longer lets this user make that change. Drop the batch, then reload what they may see.
+          this.outbox.ops.splice(0, inflight.count)
+          return void this.resync(`Not allowed: ${msg.message ?? 'this change is refused'}. Your change was undone.`)
+        }
         // Any other rejection would repeat forever, so drop the batch and say what was lost.
         console.error('cloud push rejected', msg.code, msg.message ?? '')
         this.outbox.ops.splice(0, inflight.count)
@@ -570,6 +684,20 @@ export class CloudSync {
       case 'pong':
         return
     }
+  }
+
+  // The server changed what this device may see, or refused a change. Local data is rebuilt from the server.
+  // Unsent edits stay in the outbox and go back on top once the new connection is ready.
+  private async resync(reason: string | null) {
+    this.opts.clocks.clear()
+    await this.opts.store.clearClocks()
+    this.opts.hooks.write(emptyData())
+    this.config.lastSeq = 0
+    this.outbox.inflight = null
+    this.replay = true
+    this.error = reason
+    await this.save()
+    this.reconnect()
   }
 
   // Sends the next batch if one is not already out. The batch id is persisted, so a retry reuses it.

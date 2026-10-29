@@ -1,6 +1,6 @@
 import { test, describe, after } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, readFileSync } from 'fs'
+import { mkdtempSync, readdirSync, readFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { CloudSync, normalizeServerUrl, SIGNED_OUT, type SocketLike } from '../../src/main/cloud'
@@ -68,7 +68,7 @@ async function socketAt(i: number): Promise<FakeSocket> {
   return FakeSocket.all[i]
 }
 
-type Handler = (body: any) => Response
+type Handler = (body: any, init?: RequestInit) => Response
 // Every client made by a test is stopped at the end, so a failed assertion cannot leave a timer running.
 const clouds: CloudSync[] = []
 const track = (c: CloudSync) => {
@@ -97,7 +97,7 @@ function harness(handlers: Record<string, Handler>, initialData: AppData = empty
     const key = `${init?.method ?? 'GET'} ${path}`
     calls.push(key)
     const h = handlers[key] ?? handlers[path]
-    return h ? h(init?.body ? JSON.parse(String(init.body)) : undefined) : json({ error: 'not_found' }, 404)
+    return h ? h(init?.body ? JSON.parse(String(init.body)) : undefined, init) : json({ error: 'not_found' }, 404)
   }
   const clocks = new Map<string, string>()
   const store = {
@@ -141,13 +141,31 @@ function signInHandlers(extra: Record<string, Handler> = {}): Record<string, Han
   }
 }
 
-// Signs in and connects; the server reports `head` at ready. An empty head merges automatically.
-async function signedIn(h: ReturnType<typeof harness>, head = 0) {
+const ME = 'u-me'
+const readyFrame = (head = 0, role = 'owner') => ({ type: 'ready', head, userId: ME, role, projects: [] })
+
+// Signs in and connects; the server reports `head` at ready. An empty head merges only for an owner or member.
+async function signedIn(h: ReturnType<typeof harness>, head = 0, role = 'owner') {
   await h.cloud.startSignIn(SERVER, 'owner@example.test', 'Laptop')
   const s = await socketAt(0)
   s.open()
-  s.frame({ type: 'ready', head })
+  s.frame(readyFrame(head, role))
   return s
+}
+
+// The live socket after a join: the second one opened.
+async function live(h: ReturnType<typeof harness>, head = 0): Promise<FakeSocket> {
+  const s = await socketAt(1)
+  s.open()
+  s.frame(readyFrame(head))
+  return s
+}
+
+// A joined device with an empty outbox: the server has data, so this device adopts it.
+async function adopted(h: ReturnType<typeof harness>): Promise<FakeSocket> {
+  await signedIn(h, 1)
+  await h.cloud.join('adopt')
+  return live(h, 1)
 }
 
 describe('CloudSync', () => {
@@ -329,6 +347,116 @@ describe('CloudSync', () => {
     await signedIn(h, 0)
     await until(() => h.cloud.getStatus().enabled && h.cloud.getStatus().needsJoin === false)
     await assert.rejects(h.cloud.join('merge'), /Nothing to join/)
+    h.cloud.stop()
+  })
+
+  test('ready stores the role and user id, and the status shows them', async () => {
+    const h = harness(signInHandlers())
+    await signedIn(h, 1, 'member')
+    assert.equal(h.cloud.getStatus().userId, ME)
+    assert.equal(h.cloud.getStatus().role, 'member')
+    await until(() => fileText(h.dir, 'cloud-sync.json').includes('"role": "member"'))
+    h.cloud.stop()
+  })
+
+  test('presence leaves out this device, and clears when the socket closes', async () => {
+    const h = harness(signInHandlers())
+    const s = await adopted(h)
+    s.frame({ type: 'presence', users: [{ userId: ME, name: 'Me' }, { userId: 'u-2', name: 'Sam', issueId: 'i1' }] })
+    assert.deepEqual(h.cloud.getStatus().presence, [{ userId: 'u-2', name: 'Sam', issueId: 'i1' }])
+    s.drop(1006)
+    assert.deepEqual(h.cloud.getStatus().presence, [])
+    h.cloud.stop()
+  })
+
+  test('setPresence is sent once per change, and again after each reconnect', async () => {
+    const h = harness(signInHandlers())
+    const s = await adopted(h)
+    h.cloud.setPresence('i1')
+    h.cloud.setPresence('i1') // unchanged: nothing more is sent
+    assert.deepEqual(s.sent.filter(f => f.type === 'presence'), [{ type: 'presence', issueId: 'i1' }])
+    s.drop(1006)
+    const again = await socketAt(2)
+    again.open()
+    again.frame(readyFrame(1))
+    assert.deepEqual(again.sent.filter(f => f.type === 'presence'), [{ type: 'presence', issueId: 'i1' }])
+    h.cloud.stop()
+  })
+
+  test('close 4003 resyncs: local data is cleared, the next hello starts at 0, and unsent edits are replayed', async () => {
+    const h = harness(signInHandlers())
+    const s = await adopted(h)
+    h.cloud.record([issueOp(1000, 'i1', 'queued')])
+    assert.equal(s.pushes().length, 1)
+    s.drop(4003)
+    const again = await socketAt(2)
+    assert.deepEqual(h.state.data.issues.length, 0, 'local data is cleared before the reconnect')
+    again.open()
+    assert.deepEqual(again.sent[0], { type: 'hello', since: 0 })
+    again.frame(readyFrame(0))
+    assert.deepEqual((h.state.data.issues as { title: string }[]).map(i => i.title), ['queued'])
+    assert.deepEqual(again.pushes()[0].ops, [issueOp(1000, 'i1', 'queued')])
+    assert.equal(h.cloud.getStatus().error, null)
+    h.cloud.stop()
+  })
+
+  test('a forbidden push drops that batch, resets local data, and says what was undone', async () => {
+    const h = harness(signInHandlers())
+    const s = await adopted(h)
+    h.state.data = { ...emptyData(), issues: [{ id: 'i1', title: 'refused', projectId: '', number: 1, createdAt: new Date().toISOString() }] as any }
+    h.cloud.record([issueOp(1000, 'i1', 'refused')])
+    const push = s.pushes()[0]
+    s.frame({ type: 'error', id: push.id, code: 'forbidden', index: 0, message: 'that project is not visible to you' })
+    assert.equal(h.cloud.getStatus().pending, 0)
+    await until(() => h.cloud.getStatus().error !== null)
+    assert.match(h.cloud.getStatus().error!, /^Not allowed: that project is not visible to you\. Your change was undone\./)
+    assert.deepEqual(h.state.data.issues, [])
+    // The message stays on the new connection, and the dropped batch is not pushed again.
+    const again = await socketAt(2)
+    again.open()
+    again.frame(readyFrame(1))
+    assert.match(h.cloud.getStatus().error ?? '', /^Not allowed/)
+    assert.deepEqual(again.pushes(), [])
+    h.cloud.stop()
+  })
+
+  test('adopt writes a backup of the local data before it replaces it', async () => {
+    const local = { ...emptyData(), issues: [{ id: 'local', title: 'local', projectId: '', number: 1, createdAt: new Date().toISOString() }] as any }
+    const h = harness(signInHandlers(), local)
+    await signedIn(h, 1)
+    await h.cloud.join('adopt')
+    const name = readdirSync(h.dir).find(f => f.startsWith('cloud-backup-'))!
+    assert.equal(h.cloud.getStatus().backup, join(h.dir, name))
+    assert.deepEqual(JSON.parse(readFileSync(join(h.dir, name), 'utf8')).issues.map((i: any) => i.title), ['local'])
+    h.cloud.stop()
+  })
+
+  test('a viewer or guest with an empty server does not merge automatically', async () => {
+    const h = harness(signInHandlers())
+    await signedIn(h, 0, 'viewer')
+    await new Promise(r => setTimeout(r, 20))
+    assert.equal(FakeSocket.all.length, 1, 'no second socket: nothing was joined')
+    assert.equal(h.cloud.getStatus().needsJoin, true)
+    assert.equal(h.cloud.getStatus().role, 'viewer')
+    h.cloud.stop()
+  })
+
+  test('invite posts JSON with the bearer token, and a 409 becomes a friendly message', async () => {
+    let posted: unknown
+    let headers: Record<string, string> = {}
+    const h = harness({
+      ...signInHandlers(),
+      'POST /invites': (body, init) => {
+        posted = body
+        headers = init?.headers as Record<string, string>
+        return json({ error: 'already_member' }, 409)
+      }
+    })
+    await signedIn(h, 1)
+    await assert.rejects(h.cloud.invite({ email: 'pat@example.test', role: 'member' }), /already a member/)
+    assert.deepEqual(posted, { email: 'pat@example.test', role: 'member' })
+    assert.equal(headers.authorization, 'Bearer access-1')
+    assert.equal(headers['content-type'], 'application/json')
     h.cloud.stop()
   })
 })

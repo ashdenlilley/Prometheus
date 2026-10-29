@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 import type { Agent, AppData, PendingPost, Webhook, WebhookEvent } from '../shared/types'
 import type { AuditFilter, AuditRow } from '../shared/audit'
 import type { WebhookDelivery } from '../shared/webhooks'
+import type { Role } from '../shared/permissions'
 
 contextBridge.exposeInMainWorld('api', {
   platform: process.platform,
@@ -46,7 +47,14 @@ contextBridge.exposeInMainWorld('api', {
     join: (mode: 'merge' | 'adopt') => ipcRenderer.invoke('cloud:join', mode) as Promise<void>,
     devices: () => ipcRenderer.invoke('cloud:devices') as Promise<CloudDevice[]>,
     revokeDevice: (id: string) => ipcRenderer.invoke('cloud:revokeDevice', id) as Promise<void>,
-    signOut: () => ipcRenderer.invoke('cloud:signOut') as Promise<void>
+    signOut: () => ipcRenderer.invoke('cloud:signOut') as Promise<void>,
+    members: () => ipcRenderer.invoke('cloud:members') as Promise<CloudMembers>,
+    invite: (body: { email: string; name?: string; role: Role; projects?: string[] }) => ipcRenderer.invoke('cloud:invite', body) as Promise<void>,
+    updateMember: (id: string, patch: { role?: Role; projects?: string[]; name?: string }) =>
+      ipcRenderer.invoke('cloud:updateMember', id, patch) as Promise<void>,
+    removeMember: (id: string) => ipcRenderer.invoke('cloud:removeMember', id) as Promise<void>,
+    revokeInvite: (id: string) => ipcRenderer.invoke('cloud:revokeInvite', id) as Promise<void>,
+    setPresence: (issueId: string | null) => ipcRenderer.invoke('cloud:presence', issueId) as Promise<void>
   },
   mcp: {
     status: () => ipcRenderer.invoke('mcp:status') as Promise<McpStatus>,
@@ -136,6 +144,10 @@ export interface CloudStatus {
   error: string | null
   signIn: { email: string; expiresAt: number } | null
   needsJoin: boolean
+  userId: string | null
+  role: Role | null
+  presence: { userId: string; name: string; issueId?: string }[]
+  backup: string | null
 }
 
 export interface CloudDevice {
@@ -144,4 +156,27 @@ export interface CloudDevice {
   createdAt: number
   lastSeenAt: number
   current: boolean
+}
+
+export interface CloudMember {
+  id: string
+  name: string
+  role: Role
+  email?: string
+  projects?: string[]
+  createdAt?: number
+}
+
+export interface CloudInvite {
+  id: string
+  email: string
+  name: string
+  role: Role
+  projects: string[]
+  expiresAt: number
+}
+
+export interface CloudMembers {
+  members: CloudMember[]
+  invites: CloudInvite[]
 }
