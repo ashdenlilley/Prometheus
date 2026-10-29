@@ -271,7 +271,12 @@ const TOOLS: Tool[] = [
     run: (a, { data, apply }) => {
       const p = findProject(data, a)
       const patch: Partial<Project> = {}
-      if (a.status !== undefined) patch.status = a.status as Project['status']
+      if (a.status !== undefined) {
+        if (typeof a.status !== 'string' || !['planned', 'in_progress', 'paused', 'completed', 'canceled'].includes(a.status)) {
+          throw new Error('status must be one of: planned, in_progress, paused, completed, canceled')
+        }
+        patch.status = a.status as Project['status']
+      }
       if (a.lead !== undefined) patch.lead = String(a.lead)
       if (a.startDate !== undefined) patch.startDate = String(a.startDate) || undefined
       if (a.targetDate !== undefined) patch.targetDate = String(a.targetDate) || undefined

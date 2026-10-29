@@ -300,8 +300,7 @@ describe('error paths return isError results', () => {
     assert.match(reply.error?.message ?? '', /Unknown tool: no_such_tool/)
   })
 
-  // BUG: update_project does not check status against the enum in its inputSchema, so an invalid value is written to the project.
-  test('update_project rejects an invalid status', { todo: 'BUG: update_project stores any status string; schema enum is not enforced at runtime' }, async () => {
+  test('update_project rejects an invalid status', async () => {
     await fails('update_project', { projectId: 'PRM', status: 'bogus' }, /status/)
     assert.equal(data.projects[0].status, 'in_progress')
   })
