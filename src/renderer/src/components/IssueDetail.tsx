@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ActivityEntry, Comment, Issue, Relation, RelationType } from '@shared/types'
 import { childrenOf, progress } from '@shared/query'
+import { DRAWER_SHORTCUTS, drawerShortcut } from '@shared/shortcuts'
 import { createIssue, issueKey, useStore, withValue } from '../store'
 import { inverseRelations } from '@shared/model'
 import { CellEditor } from './cells'
@@ -26,21 +27,31 @@ export function IssueDetail({ issueId, onClose, onOpen }: { issueId: string; onC
   const [subTitle, setSubTitle] = useState('')
   const [relType, setRelType] = useState<RelationType>('blocks')
   const [relTarget, setRelTarget] = useState('')
+  const labelsRef = useRef<HTMLInputElement>(null)
+  const assigneeRef = useRef<HTMLInputElement>(null)
   useEscape(onClose)
 
-  // Single-key shortcuts while not typing: s status, p priority, f favourite.
+  // Single-key shortcuts while not typing (see DRAWER_SHORTCUTS): s status, p priority, f favourite, l labels, a assignee.
   useEffect(() => {
     if (!issue || !project) return
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement
-      if (e.metaKey || e.ctrlKey || e.altKey || t.closest('input, textarea, select, [contenteditable]')) return
+      const key = drawerShortcut({ key: e.key, metaKey: e.metaKey, ctrlKey: e.ctrlKey, altKey: e.altKey, typing: !!t.closest('input, textarea, select, [contenteditable]') })
+      if (!key) return
       const statuses = project.statuses
-      if (e.key === 's') {
+      if (key === 's') {
         const at = statuses.findIndex(s => s.id === issue.status)
         dispatch({ type: 'patchIssue', id: issue.id, patch: { status: statuses[(at + 1) % statuses.length].id } })
       }
-      if (e.key === 'p') dispatch({ type: 'patchIssue', id: issue.id, patch: { priority: (issue.priority + 1) % 5 } })
-      if (e.key === 'f') dispatch({ type: 'patchIssue', id: issue.id, patch: { favourite: !issue.favourite } })
+      if (key === 'p') dispatch({ type: 'patchIssue', id: issue.id, patch: { priority: (issue.priority + 1) % 5 } })
+      if (key === 'f') dispatch({ type: 'patchIssue', id: issue.id, patch: { favourite: !issue.favourite } })
+      // preventDefault stops the letter being typed into the field we just focused.
+      if (key === 'l' || key === 'a') {
+        e.preventDefault()
+        const input = key === 'l' ? labelsRef.current : assigneeRef.current
+        input?.focus()
+        input?.select()
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -142,6 +153,14 @@ export function IssueDetail({ issueId, onClose, onOpen }: { issueId: string; onC
             <button className="icon-btn" onClick={onClose} aria-label="Close">{ICONS.close}</button>
           </div>
         </div>
+        <div className="muted small drawer-keys">
+          {DRAWER_SHORTCUTS.map((s, i) => (
+            <span key={s.key}>
+              {i > 0 && ' · '}
+              <kbd>{s.key}</kbd> {s.label}
+            </span>
+          ))}
+        </div>
 
         {parent && (
           <button className="crumb-link" onClick={() => onOpen(parent.id)}>↑ {key(parent)} {parent.title}</button>
@@ -174,7 +193,7 @@ export function IssueDetail({ issueId, onClose, onOpen }: { issueId: string; onC
           </label>
           <label>
             Assignee
-            <input className="field-input" list={`people-${project.id}`} value={issue.assignee} onChange={e => patch({ assignee: e.target.value })} />
+            <input ref={assigneeRef} aria-label="Assignee" className="field-input" list={`people-${project.id}`} value={issue.assignee} onChange={e => patch({ assignee: e.target.value })} />
             <datalist id={`people-${project.id}`}>
               {project.members.map(m => (
                 <option key={m} value={m} />
@@ -184,6 +203,8 @@ export function IssueDetail({ issueId, onClose, onOpen }: { issueId: string; onC
           <label>
             Labels
             <input
+              ref={labelsRef}
+              aria-label="Labels"
               className="field-input"
               defaultValue={issue.labels.join(', ')}
               placeholder="bug, ui"
