@@ -2,6 +2,7 @@ import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
 import { dateValueMs, fromLocalInput, toLocalInput } from '../../src/shared/datetime'
 import { applyFilter } from '../../src/shared/filter'
+import { issuesToCSV, parseCSV } from '../../src/shared/query'
 import { createIssue } from '../../src/shared/model'
 import { blankProject, emptyData } from '../../src/shared/seed'
 import type { Column, Issue, Project } from '../../src/shared/types'
@@ -58,5 +59,27 @@ describe('datetime', () => {
     // lt a same-day timestamp: only date-only midnight is earlier
     assert.deepEqual(numbers('lt', fromLocalInput('2026-03-15T09:00')), [1])
     assert.deepEqual(numbers('lt', '2026-03-16'), [1, 2, 3])
+  })
+
+  test('mixed date-only and timestamp values sort chronologically', () => {
+    // The table sorts date columns by dateValueMs (renderer columns.ts customSortValue).
+    const values = ['2026-03-16', fromLocalInput('2026-03-15T18:00'), '2026-03-15', fromLocalInput('2026-03-16T08:00'), fromLocalInput('2026-03-15T09:00')]
+    const sorted = [...values].sort((a, b) => dateValueMs(a) - dateValueMs(b))
+    assert.deepEqual(sorted, ['2026-03-15', fromLocalInput('2026-03-15T09:00'), fromLocalInput('2026-03-15T18:00'), '2026-03-16', fromLocalInput('2026-03-16T08:00')])
+  })
+
+  test('CSV export keeps date-only and timestamp values as they are stored', () => {
+    const col: Column = { id: 'when', name: 'When', type: 'date', includeTime: true }
+    const project: Project = blankProject({ id: 'p1', spaceId: 's1', name: 'Test', key: 'T', color: '#000000', columns: [col] })
+    const data = { ...emptyData(), projects: [project] }
+    const stamp = fromLocalInput('2026-03-15T09:30')
+    const items = [
+      createIssue(data, 'p1', 'Date only', { number: 1, values: { when: '2026-03-15' } }),
+      createIssue(data, 'p1', 'With time', { number: 2, values: { when: stamp } }),
+      createIssue(data, 'p1', 'Empty', { number: 3 })
+    ]
+    const rows = parseCSV(issuesToCSV(data, project, items))
+    const at = rows[0].indexOf('When')
+    assert.deepEqual(rows.slice(1).map(r => r[at]), ['2026-03-15', stamp, ''])
   })
 })
