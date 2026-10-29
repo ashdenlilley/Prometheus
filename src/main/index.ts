@@ -6,6 +6,7 @@ import type { Agent, AppData, PendingPost } from '../shared/types'
 import { reducer, type Action } from '../shared/model'
 import { slackMessage, stripPendingPosts } from '../shared/integrations'
 import { applyOps, Clock, diffOps } from '../shared/sync'
+import { opsError } from '../shared/opGuard'
 import { SlackSender, allowedWebhookUrl, webhookCredential, webhookHint } from './slack'
 import { AUDIT_LIMIT, auditEntries, toCsv, type AuditEntry, type AuditFilter, type AuditSource } from '../shared/audit'
 import { subscriptionNotifications } from '../shared/subscriptions'
@@ -260,6 +261,13 @@ function applyLocal(action: Action, source: AuditSource, actor: string, stampAs?
   const prev = state
   let reduced = reducer(prev, action)
   if (reduced === prev) return
+  // OS-464: agent writes on a cloud workspace follow the signed-in user's role and column rules, as the server does.
+  // Checked before posts go out, so a refused change sends nothing.
+  const who = source === 'mcp' ? cloud?.principal() : null
+  if (who && who.role !== 'owner') {
+    const reason = opsError(who, prev, diffOps(prev, reduced, new Clock('guard')))
+    if (reason) throw new Error(reason)
+  }
   // Posts queued by this change are sent by this device, then cleared before anything is stored
   const posts = reduced.pendingPosts ?? []
   if (posts.length) {

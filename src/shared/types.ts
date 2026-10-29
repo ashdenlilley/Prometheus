@@ -109,6 +109,10 @@ export interface PendingPost {
   at: string
 }
 
+// OS-464: roles a column rule can name. The owner always has full access, so it is not listed.
+type ColumnRole = 'member' | 'guest' | 'viewer'
+export interface ColumnAccess { readOnlyFor?: ColumnRole[]; hiddenFor?: ColumnRole[] }
+
 export interface Column {
   id: string
   name: string
@@ -133,6 +137,8 @@ export interface Column {
   linkProjectId?: string
   relationColumnId?: string
   mirrorField?: string
+  // OS-464: per-role rules. Unset = editable by everyone. Enforced by src/shared/permissions.ts
+  access?: ColumnAccess
 }
 
 export interface LabelDef {

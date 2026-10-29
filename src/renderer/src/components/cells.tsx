@@ -22,6 +22,7 @@ interface CellEditorProps {
   issue?: Issue
   onChange: (v: CellValue | undefined) => void
   variant?: 'cell' | 'field'
+  readOnly?: boolean // OS-464: the role may see the column but not change it
 }
 
 const isRange = (v: CellValue | undefined): v is DateRange =>
@@ -33,12 +34,18 @@ const asIds = (v: CellValue | undefined): string[] =>
 const MAX_FILE = 5 * 1024 * 1024
 
 // One editor per column type. variant 'cell' is the compact in-table look; 'field' is the drawer look.
-export function CellEditor({ column, project, value, issue, onChange, variant = 'field' }: CellEditorProps) {
+export function CellEditor({ column, project, value, issue, onChange, variant = 'field', readOnly }: CellEditorProps) {
   const { data, dispatch } = useStore()
   const cls = variant === 'cell' ? 'cell-input' : 'field-input'
   const str = typeof value === 'string' ? value : ''
   const num = typeof value === 'number' ? value : undefined
   const options = column.options ?? []
+
+  if (readOnly) {
+    const parts: unknown[] = Array.isArray(value) ? value : value === undefined || typeof value === 'object' ? [] : [value]
+    const text = parts.map(v => options.find(o => o.id === v)?.label ?? String(v)).join(', ')
+    return <span className="cell-locked" title="Read-only for your role">{text || '—'}</span>
+  }
 
   switch (column.type) {
     case 'text':

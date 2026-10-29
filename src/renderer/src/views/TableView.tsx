@@ -10,6 +10,7 @@ import { EstimateSelect, PrioritySelect, StatusDot, StatusSelect } from '../comp
 import { exportXlsx, importXlsx } from '../xlsx'
 import { ICONS } from '../components/icons'
 import { ColumnModal } from '../components/ColumnModal'
+import { colMode, useRole } from '../useRole'
 import { PrPill } from '../components/PrPill'
 import { FilterBar, useViewQuery } from '../components/FilterBar'
 import { BulkBar } from '../components/BulkBar'
@@ -43,6 +44,7 @@ function orderColumns(cols: ColumnRef[], order: string[] | undefined): ColumnRef
 
 export function TableView({ project, onOpen }: { project: Project; onOpen: (id: string) => void }) {
   const { data, dispatch } = useStore()
+  const role = useRole()
   const query = useViewQuery(project, 'table')
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
   const [liveWidths, setLiveWidths] = useState<Record<string, number>>({})
@@ -83,6 +85,7 @@ export function TableView({ project, onOpen }: { project: Project; onOpen: (id: 
     }))
   ]
     .filter(c => !query.hidden.includes(c.key) && !layout.hidden.includes(c.key))
+    .filter(c => !c.column || colMode(role, c.column) !== 'hidden')
     .map(c => ({ ...c, width: liveWidths[c.key] ?? c.width }))
   const cols = orderColumns(baseCols, layout.order)
 
@@ -179,6 +182,7 @@ export function TableView({ project, onOpen }: { project: Project; onOpen: (id: 
           project={project}
           issue={i}
           variant="cell"
+          readOnly={colMode(role, c.column) === 'read'}
           value={i.values[c.key]}
           onChange={v => update(i.id, { values: withValue(i.values, c.key, v) })}
         />
@@ -396,6 +400,7 @@ export function TableView({ project, onOpen }: { project: Project; onOpen: (id: 
               }}
             >
               <span className="t-th-label">{c.label}</span>
+              {c.column && colMode(role, c.column) === 'read' && <span className="muted" title="Read-only for your role"> 🔒</span>}
               <Menu items={headerMenu(c)} align="right" />
               <div className="t-resize" onMouseDown={e => beginResize(e, c)} />
             </div>
