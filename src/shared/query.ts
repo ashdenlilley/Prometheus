@@ -175,7 +175,7 @@ export { evaluateFormula } from './formula'
 
 const csvCell = (v: unknown) => {
   const s = v === undefined || v === null ? '' : Array.isArray(v) ? v.join('; ') : typeof v === 'object' ? JSON.stringify(v) : String(v)
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
 }
 
 export function issuesToCSV(data: AppData, project: Project, issues: Issue[]): string {

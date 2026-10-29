@@ -262,7 +262,7 @@ describe('issuesToCSV and parseCSV', () => {
     assert.deepEqual(rows[2].slice(10), ['"', '""', ','])
   })
 
-  test('BUG-check: a carriage return inside a title survives the round trip', { todo: 'BUG: csvCell only quotes on comma, quote or LF, so a bare CR in a field splits the row when parsed' }, () => {
+  test('BUG-check: a carriage return inside a title survives the round trip', () => {
     const items = [issue(1, { title: 'one\rtwo' })]
     const rows = parseCSV(issuesToCSV(data(items), project(), items))
     assert.equal(rows[1][1], 'one\rtwo')
