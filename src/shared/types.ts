@@ -226,6 +226,7 @@ export interface Project {
   lead: string
   // Unset means points; 'tshirt' shows XS..XL but stores 1, 2, 3, 5, 8
   estimateScale?: 'points' | 'tshirt'
+  mapTiles?: string // optional tile URL template; unset = offline map
   members: string[]
   initiativeId?: string
   statuses: StatusDef[]

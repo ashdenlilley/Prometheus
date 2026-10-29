@@ -19,6 +19,8 @@ import { IssuesView } from './views/IssuesView'
 import { TriageView } from './views/TriageView'
 import { BoardView } from './views/BoardView'
 import { TableView } from './views/TableView'
+import { FilesView } from './views/FilesView'
+import { MapView } from './views/MapView'
 import { TimelineView } from './views/TimelineView'
 import { CyclesView } from './views/CyclesView'
 import { WorkloadView } from './views/WorkloadView'
@@ -161,6 +163,10 @@ export default function App() {
         return <BoardView project={project} onOpen={setOpenIssueId} />
       case 'table':
         return <TableView project={project} onOpen={setOpenIssueId} />
+      case 'files':
+        return <FilesView project={project} onOpen={setOpenIssueId} />
+      case 'map':
+        return <MapView key={project.id} project={project} onOpen={setOpenIssueId} />
       case 'timeline':
         return <TimelineView project={project} onOpen={setOpenIssueId} />
       case 'cycles':
