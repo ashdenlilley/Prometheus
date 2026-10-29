@@ -1964,6 +1964,35 @@ select.field-input:focus {
   margin-top: 8px;
 }
 
+.folder-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding-left: 14px;
+}
+
+.folder-row .lbl {
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.folder-row .btn {
+  display: none;
+  min-height: 22px;
+  padding: 0 6px;
+}
+
+.folder-row:hover .btn,
+.folder-row:focus-within .btn {
+  display: inline-flex;
+}
+
+.folder-move {
+  width: calc(100% - 54px);
+  margin: 2px 0 4px 46px;
+  font-size: 12px;
+}
+
 /* ───────────── Topbar breadcrumb ───────────── */
 .crumbs {
   display: flex;

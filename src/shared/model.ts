@@ -11,6 +11,7 @@ import type {
   Comment,
   Cycle,
   Dashboard,
+  Folder,
   Initiative,
   Issue,
   Notification,
@@ -30,6 +31,11 @@ export type Action =
   | { type: 'addSpace'; space: Space }
   | { type: 'patchSpace'; id: string; patch: Partial<Space> }
   | { type: 'deleteSpace'; id: string }
+  | { type: 'addFolder'; spaceId: string; folder: Folder }
+  | { type: 'renameFolder'; spaceId: string; folderId: string; name: string }
+  | { type: 'toggleFolder'; spaceId: string; folderId: string }
+  | { type: 'deleteFolder'; spaceId: string; folderId: string }
+  | { type: 'moveProjectToFolder'; projectId: string; folderId: string | null }
   | { type: 'addInitiative'; initiative: Initiative }
   | { type: 'patchInitiative'; id: string; patch: Partial<Initiative> }
   | { type: 'deleteInitiative'; id: string }
@@ -77,6 +83,11 @@ const mapProject = (s: AppData, id: string, fn: (p: Project) => Project): AppDat
   projects: s.projects.map(p => (p.id === id ? fn(p) : p))
 })
 
+const mapFolders = (s: AppData, spaceId: string, fn: (fs: Folder[]) => Folder[]): AppData => ({
+  ...s,
+  spaces: s.spaces.map(sp => (sp.id === spaceId ? { ...sp, folders: fn(sp.folders ?? []) } : sp))
+})
+
 export const today = () => new Date().toISOString().slice(0, 10)
 
 const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -112,6 +123,22 @@ export function reducer(s: AppData, a: Action): AppData {
         triageRules: s.triageRules.filter(r => !projectIds.includes(r.projectId)),
         templates: s.templates.filter(t => !projectIds.includes(t.projectId))
       }
+    }
+    case 'addFolder':
+      return mapFolders(s, a.spaceId, fs => [...fs, a.folder])
+    case 'renameFolder':
+      return mapFolders(s, a.spaceId, fs => fs.map(f => (f.id === a.folderId ? { ...f, name: a.name } : f)))
+    case 'toggleFolder':
+      return mapFolders(s, a.spaceId, fs => fs.map(f => (f.id === a.folderId ? { ...f, collapsed: !f.collapsed } : f)))
+    case 'deleteFolder': {
+      const out = mapFolders(s, a.spaceId, fs => fs.filter(f => f.id !== a.folderId))
+      return { ...out, projects: out.projects.map(p => (p.spaceId === a.spaceId && p.folderId === a.folderId ? { ...p, folderId: undefined } : p)) }
+    }
+    case 'moveProjectToFolder': {
+      const project = s.projects.find(p => p.id === a.projectId)
+      if (!project) return s
+      if (a.folderId !== null && !s.spaces.find(sp => sp.id === project.spaceId)?.folders?.some(f => f.id === a.folderId)) return s
+      return mapProject(s, a.projectId, p => ({ ...p, folderId: a.folderId ?? undefined }))
     }
     case 'addInitiative':
       return { ...s, initiatives: [...s.initiatives, a.initiative] }

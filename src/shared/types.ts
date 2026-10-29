@@ -121,6 +121,13 @@ export interface Space {
   color: string
   labels?: LabelDef[] // shared labels for every project in the space
   projectTemplates?: ProjectTemplate[]
+  folders?: Folder[]
+}
+
+export interface Folder {
+  id: string
+  name: string
+  collapsed?: boolean
 }
 
 export interface Initiative {
@@ -160,6 +167,7 @@ export interface SavedView {
   showCompleted?: boolean
   chartType?: 'bar' | 'pie' | 'line'
   favourite?: boolean
+  personal?: boolean // this device only; never synced
   order?: string[] // table column order for this view; falls back to project.order
 }
 
@@ -225,6 +233,7 @@ export interface Project {
   estimateScale?: 'points' | 'tshirt'
   members: string[]
   initiativeId?: string
+  folderId?: string // unset = space root
   statuses: StatusDef[]
   columns: Column[]
   // Column widths in px, keyed by fixed column key or custom column id
