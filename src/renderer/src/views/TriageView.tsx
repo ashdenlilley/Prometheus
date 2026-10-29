@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { Project } from '@shared/types'
+import type { IntakeForm, Project } from '@shared/types'
 import { issueKey, useStore } from '../store'
 import { PriorityText } from '../components/fields'
 import { QuickAdd } from '../components/ui'
@@ -8,6 +8,7 @@ import { createIssue } from '@shared/model'
 import { ICONS } from '../components/icons'
 import { fmtDate } from '../util'
 import { FavGutter } from '../components/FavGutter'
+import { FormModal } from '../components/FormModal'
 
 // Inbox for new items. Accept moves an item into the project. Decline deletes it. Duplicate links it.
 export function TriageView({ project, onOpen }: { project: Project; onOpen: (id: string) => void }) {
@@ -18,6 +19,8 @@ export function TriageView({ project, onOpen }: { project: Project; onOpen: (id:
 
   const accept = (id: string, status: string) => dispatch({ type: 'patchIssue', id, patch: { triage: false, status } })
   const decline = (id: string) => dispatch({ type: 'deleteIssue', id })
+  const [picking, setPicking] = useState(false)
+  const [openForm, setOpenForm] = useState<IntakeForm | null>(null)
   const duplicate = (id: string) => {
     const target = dupOf[id]
     if (!target) return
@@ -29,7 +32,19 @@ export function TriageView({ project, onOpen }: { project: Project; onOpen: (id:
     <div className="view">
       <div className="toolbar">
         <span className="muted">{items.length} to triage</span>
+        <div className="menu">
+          <button className="btn" aria-label="Open intake form" onClick={() => setPicking(p => !p)}>Forms</button>
+          {picking && (
+            <div className="popover right" role="menu">
+              {(project.forms ?? []).map(f => (
+                <button key={f.id} role="menuitem" className="popover-item" onClick={() => { setPicking(false); setOpenForm(f) }}>{f.name}</button>
+              ))}
+              {(project.forms ?? []).length === 0 && <div className="popover-item muted small">No forms yet</div>}
+            </div>
+          )}
+        </div>
       </div>
+      {openForm && <FormModal form={openForm} project={project} onClose={() => setOpenForm(null)} />}
 
       {items.length === 0 && <div className="empty-block"><p>Triage is clear.</p></div>}
 
