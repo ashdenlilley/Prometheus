@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { isLive } from '@shared/live'
 import logo from './assets/logo.png'
 import { createIssue, useStore } from './store'
 import { ICONS } from './components/icons'
@@ -238,7 +239,7 @@ export default function App() {
     { id: 'new-space', label: 'New space', group: 'Create', run: () => setCreatingSpace(true) },
     { id: 'settings', label: 'App settings and MCP', group: 'Settings', run: () => setSettings(true) },
     { id: 'pin', label: pinned ? 'Collapse sidebar' : 'Pin sidebar', group: 'View', run: togglePin },
-    ...data.issues.map(i => {
+    ...data.issues.filter(isLive).map(i => {
       const p = data.projects.find(x => x.id === i.projectId)
       return {
         id: `issue-${i.id}`,
