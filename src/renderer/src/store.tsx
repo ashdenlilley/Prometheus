@@ -36,7 +36,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     // Changes made outside the UI (MCP tools) replace the local copy.
     const unsubscribe = window.api.onExternal(next => dispatch({ type: 'load', data: next }))
     // Timed automations (due date passed) are checked on load and once a minute.
-    const tick = () => dispatch({ type: 'tick', today: todayISO() })
+    const tick = () => {
+      dispatch({ type: 'tick', today: todayISO() })
+      dispatch({ type: 'autoRollOver', today: todayISO() })
+      dispatch({ type: 'markRolledOver', today: todayISO() })
+    }
     const timer = setInterval(tick, 60_000)
     return () => {
       unsubscribe()
@@ -45,7 +49,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [])
 
   useEffect(() => {
-    if (ready) dispatch({ type: 'tick', today: todayISO() })
+    if (!ready) return
+    dispatch({ type: 'tick', today: todayISO() })
+    dispatch({ type: 'autoRollOver', today: todayISO() })
+    dispatch({ type: 'markRolledOver', today: todayISO() })
   }, [ready])
 
   useEffect(() => {

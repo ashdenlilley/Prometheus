@@ -1,3 +1,4 @@
+import { addDays } from './dates'
 import { applyFilter } from './filter'
 import type {
   ActivityEntry,
@@ -50,6 +51,8 @@ export type Action =
   | { type: 'patchCycle'; id: string; patch: Partial<Cycle> }
   | { type: 'deleteCycle'; id: string }
   | { type: 'rollOverCycle'; cycleId: string; toCycleId: string }
+  | { type: 'autoRollOver'; today: string }
+  | { type: 'markRolledOver'; today: string }
   | { type: 'addAutomation'; automation: Automation }
   | { type: 'patchAutomation'; id: string; patch: Partial<Automation> }
   | { type: 'deleteAutomation'; id: string }
@@ -199,6 +202,10 @@ export function reducer(s: AppData, a: Action): AppData {
         })
       }
     }
+    case 'autoRollOver':
+      return autoRollOverCycles(s, a.today)
+    case 'markRolledOver':
+      return markRolledOver(s, a.today)
     case 'addAutomation':
       return { ...s, automations: [...s.automations, a.automation] }
     case 'patchAutomation':
@@ -240,6 +247,47 @@ function intake(s: AppData, issue: Issue): Issue {
       if (applyFilter([acc], rule.when, project).length === 0) return acc
       return { ...acc, ...rule.set }
     }, issue)
+}
+
+// Auto roll-over for projects with autoRollOver on. Ended, unmarked cycles move unfinished issues to the next cycle,
+// creating it first when autoCycles is on. Marking a cycle as done is a separate, non-undoable step (markRolledOver),
+// so undoing a roll-over puts the issues back without them being rolled over again on the next tick.
+export function autoRollOverCycles(s: AppData, today: string): AppData {
+  let out = s
+  for (const p of s.projects) {
+    if (!p.autoRollOver) continue
+    // Cycles created below are appended here, so the loop also reaches an ended new cycle.
+    const list = s.cycles.filter(c => c.projectId === p.id).sort((a, b) => a.startDate.localeCompare(b.startDate))
+    for (let i = 0; i < list.length; i++) {
+      const c = list[i]
+      if (c.endDate >= today || out.cycles.find(x => x.id === c.id)?.rolledOver) continue
+      let next = list.find(n => n.startDate > c.endDate)
+      if (!next && p.autoCycles) {
+        const startDate = addDays(c.endDate, 1)
+        const count = out.cycles.filter(x => x.projectId === p.id).length
+        next = { id: crypto.randomUUID(), projectId: p.id, name: `Cycle ${count + 1}`, startDate, endDate: addDays(startDate, p.cycleLength - 1) }
+        list.push(next)
+        out = { ...out, cycles: [...out.cycles, next] }
+      }
+      if (!next) continue
+      const before = out
+      out = reducer(out, { type: 'rollOverCycle', cycleId: c.id, toCycleId: next.id })
+      // rollOverCycle always copies the issue list; keep the old reference when nothing moved.
+      if (out.issues.every((i, n) => i === before.issues[n] || i.cycleId === before.issues[n].cycleId)) out = before
+    }
+  }
+  return out
+}
+
+// Marks ended cycles of autoRollOver projects that have a following cycle, so they are rolled over only once.
+export function markRolledOver(s: AppData, today: string): AppData {
+  const marked = s.cycles.map(c => {
+    if (c.rolledOver || c.endDate >= today) return c
+    if (!s.projects.find(p => p.id === c.projectId)?.autoRollOver) return c
+    const hasNext = s.cycles.some(n => n.projectId === c.projectId && n.startDate > c.endDate)
+    return hasNext ? { ...c, rolledOver: true } : c
+  })
+  return marked.every((c, n) => c === s.cycles[n]) ? s : { ...s, cycles: marked }
 }
 
 // Timed automations (due date passed). Each rule fires once per issue per due date.

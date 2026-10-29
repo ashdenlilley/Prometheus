@@ -204,6 +204,7 @@ export interface Project {
   // Automatic cycle creation: length in days, and whether to create the next one on load
   cycleLength: number
   autoCycles: boolean
+  autoRollOver?: boolean
   milestones: Milestone[]
   updates: ProjectUpdate[]
   views: SavedView[]
@@ -266,6 +267,8 @@ export interface Cycle {
   name: string
   startDate: string
   endDate: string
+  // Set once a cycle was auto rolled over
+  rolledOver?: boolean
 }
 
 // Applied to new triage items whose fields match `when`. Sets the given fields; the item stays in triage.

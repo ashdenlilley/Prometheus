@@ -264,7 +264,8 @@ const TOOLS: Tool[] = [
         targetDate: str('YYYY-MM-DD or empty'),
         initiativeId: str('Initiative id or empty'),
         cycleLength: num('Cycle length in days'),
-        autoCycles: { type: 'boolean', description: 'Create the next cycle automatically' }
+        autoCycles: { type: 'boolean', description: 'Create the next cycle automatically' },
+        autoRollOver: { type: 'boolean', description: 'Move unfinished issues to the next cycle when a cycle ends' }
       },
       required: ['projectId']
     },
@@ -283,6 +284,7 @@ const TOOLS: Tool[] = [
       if (a.initiativeId !== undefined) patch.initiativeId = String(a.initiativeId) || undefined
       if (a.cycleLength !== undefined) patch.cycleLength = Number(a.cycleLength)
       if (a.autoCycles !== undefined) patch.autoCycles = Boolean(a.autoCycles)
+      if (a.autoRollOver !== undefined) patch.autoRollOver = Boolean(a.autoRollOver)
       apply({ type: 'patchProject', id: p.id, patch })
       return { id: p.id, key: p.key, ...patch }
     }
