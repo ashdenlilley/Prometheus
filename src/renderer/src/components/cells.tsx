@@ -1,7 +1,8 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { CellValue, Column, DateRange, FileRef, Issue, Project, SelectOption } from '@shared/types'
 import { evaluateFormula, fieldValue, formatNumber, progressValue } from '@shared/query'
 import { fromLocalInput, toLocalInput } from '@shared/datetime'
+import { elapsedHours, formatElapsed, startTimer, stopTimer } from '@shared/timetrack'
 import { useStore } from '../store'
 import { PillSelect, PrioritySelect } from './fields'
 import { ICONS } from './icons'
@@ -27,7 +28,7 @@ const MAX_FILE = 5 * 1024 * 1024
 
 // One editor per column type. variant 'cell' is the compact in-table look; 'field' is the drawer look.
 export function CellEditor({ column, project, value, issue, onChange, variant = 'field' }: CellEditorProps) {
-  const { data } = useStore()
+  const { data, dispatch } = useStore()
   const cls = variant === 'cell' ? 'cell-input' : 'field-input'
   const str = typeof value === 'string' ? value : ''
   const num = typeof value === 'number' ? value : undefined
@@ -105,13 +106,27 @@ export function CellEditor({ column, project, value, issue, onChange, variant = 
     case 'hour':
       return <input className={cls} type="time" value={str} onChange={e => onChange(e.target.value || undefined)} />
 
-    case 'time_tracking':
+    case 'time_tracking': {
+      const running = issue?.timer?.columnId === column.id
       return (
         <div className="range-edit">
           <input className={clsx(cls, 'num')} type="number" min={0} step={0.25} value={num ?? ''} placeholder="0" onChange={e => onChange(e.target.value === '' ? undefined : Number(e.target.value))} />
           <span className="muted">h</span>
+          {issue && (
+            <button
+              type="button"
+              className="icon-btn"
+              aria-label={running ? 'Stop timer' : 'Start timer'}
+              title={running ? 'Stop timer' : 'Start timer'}
+              onClick={() => dispatch({ type: 'patchIssue', id: issue.id, patch: running ? stopTimer(issue, new Date()) : startTimer(issue, column.id, new Date()) })}
+            >
+              {running ? '■' : '▶'}
+            </button>
+          )}
+          {running && issue.timer && <TimerReadout start={issue.timer.start} />}
         </div>
       )
+    }
 
     case 'world_clock':
       return <WorldClock zone={str} onChange={v => onChange(v)} cls={cls} />
@@ -315,6 +330,16 @@ export function TagsInput({
 }
 
 const ZONES = ['UTC', 'Europe/London', 'Europe/Paris', 'America/New_York', 'America/Los_Angeles', 'Asia/Tokyo', 'Australia/Sydney']
+
+// Live h:mm:ss for a running timer. Ticks each second; unmounts when the timer stops.
+function TimerReadout({ start }: { start: string }) {
+  const [now, setNow] = useState(() => new Date())
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 1000)
+    return () => clearInterval(id)
+  }, [])
+  return <span className="muted timer-readout">{formatElapsed(elapsedHours(start, now))}</span>
+}
 
 function WorldClock({ zone, onChange, cls }: { zone: string; onChange: (v: string | undefined) => void; cls: string }) {
   const time = zone ? new Date().toLocaleTimeString(undefined, { timeZone: zone, hour: '2-digit', minute: '2-digit' }) : ''

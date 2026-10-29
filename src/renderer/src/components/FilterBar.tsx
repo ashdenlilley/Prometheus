@@ -25,6 +25,7 @@ export interface ViewQuery {
   chartType: ChartType
   setChartType: (c: ChartType) => void
   applyView: (v: SavedView) => void
+  viewId: string | undefined
 }
 
 // Filter, grouping, sort and hidden columns per project and view kind. Kept in memory so they
@@ -37,6 +38,7 @@ interface QueryState {
   hidden: string[]
   showCompleted: boolean
   chartType?: ChartType
+  viewId?: string
 }
 
 const memory = new Map<string, QueryState>()
@@ -44,7 +46,7 @@ const memory = new Map<string, QueryState>()
 const listeners = new Set<(key: string) => void>()
 
 function queryStateFromView(v: SavedView): QueryState {
-  return { filter: v.filter, groupBy: v.groupBy, rowsBy: v.rowsBy ?? null, sort: v.sort, hidden: v.hidden, showCompleted: viewShowsCompleted(v), chartType: v.chartType ?? 'bar' }
+  return { filter: v.filter, groupBy: v.groupBy, rowsBy: v.rowsBy ?? null, sort: v.sort, hidden: v.hidden, showCompleted: viewShowsCompleted(v), chartType: v.chartType ?? 'bar', viewId: v.id }
 }
 
 // Applies a saved view to its project's page for that kind, whether or not the page is open.
@@ -85,7 +87,8 @@ export function useViewQuery(project: Project, kind: ViewKind): ViewQuery {
     setShowCompleted: showCompleted => write({ showCompleted }),
     chartType: state.chartType ?? 'bar',
     setChartType: chartType => write({ chartType }),
-    applyView: v => write(queryStateFromView(v))
+    applyView: v => write(queryStateFromView(v)),
+    viewId: state.viewId
   }
 }
 

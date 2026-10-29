@@ -1232,6 +1232,11 @@ select.field-input:focus {
   padding: 0 6px 4px 12px;
 }
 
+/* Running timer clock: fixed-width digits so it does not jitter each second */
+.timer-readout {
+  font-variant-numeric: tabular-nums;
+}
+
 /* ───────────── Cell editors ───────────── */
 .range-edit {
   display: flex;

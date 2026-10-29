@@ -1,6 +1,7 @@
-import { categoryOf } from './model'
+import { categoryOf, createIssue } from './model'
 import { PRIORITIES, type AppData, type Column, type Cycle, type Issue, type Project, type SavedView, type StatusDef } from './types'
-import { formatEstimate } from './estimate'
+import { formatEstimate, parseEstimate } from './estimate'
+import { toISO } from './dates'
 
 // Read-side helpers: grouping, progress, summaries and CSV. Shared by renderer views and the main process.
 // Field access and filtering live in ./filter.
@@ -198,16 +199,19 @@ export { evaluateFormula } from './formula'
 
 // ───────────── Tabular export and import ─────────────
 
+// Cell text shared by CSV and XLSX: arrays join with '; ', objects become JSON, empty is ''.
+const cellText = (v: unknown) => (v === undefined || v === null ? '' : Array.isArray(v) ? v.join('; ') : typeof v === 'object' ? JSON.stringify(v) : String(v))
+
 const csvCell = (v: unknown) => {
-  const s = v === undefined || v === null ? '' : Array.isArray(v) ? v.join('; ') : typeof v === 'object' ? JSON.stringify(v) : String(v)
+  const s = cellText(v)
   return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
 }
 
-export function issuesToCSV(data: AppData, project: Project, issues: Issue[]): string {
+// Header plus one row per issue. CSV and XLSX export both use it, so they carry the same columns and values.
+export function issuesToRows(data: AppData, project: Project, issues: Issue[]): string[][] {
   const header = ['Key', 'Title', 'Status', 'Priority', 'Assignee', 'Labels', 'Start', 'Due', 'Estimate', 'Cycle', ...project.columns.map(c => c.name)]
   const rows = issues.map(i => {
     const cycle = data.cycles.find(c => c.id === i.cycleId)?.name
-    // Raw values: the whole row is escaped once below.
     const custom = project.columns.map(c => (c.progressMode === 'subissues' ? progressValue(c, i, data.issues, project.statuses) : customValue(i, c)))
     return [
       `${project.key}-${i.number}`,
@@ -221,9 +225,13 @@ export function issuesToCSV(data: AppData, project: Project, issues: Issue[]): s
       formatEstimate(i.estimate, project.estimateScale),
       cycle,
       ...custom
-    ].map(csvCell).join(',')
+    ].map(cellText)
   })
-  return [header.map(csvCell).join(','), ...rows].join('\n')
+  return [header, ...rows]
+}
+
+export function issuesToCSV(data: AppData, project: Project, issues: Issue[]): string {
+  return issuesToRows(data, project, issues).map(r => r.map(csvCell).join(',')).join('\n')
 }
 
 // Minimal RFC 4180 parser. Returns rows of cells; first row is the header.
@@ -255,4 +263,39 @@ export function parseCSV(text: string): string[][] {
   row.push(cell)
   if (row.some(c => c !== '')) rows.push(row)
   return rows
+}
+
+// XLSX cells as the same text a CSV would hold. Dates come out as local YYYY-MM-DD.
+export function sheetText(rows: unknown[][]): string[][] {
+  return rows.map(r => r.map(v => (v instanceof Date ? toISO(v) : cellText(v))))
+}
+
+// Rows to new issues. First row is the header. Title is required (the caller checks it); status and priority match labels.
+// Returns [] when there is no Title column.
+export function issuesFromRows(data: AppData, project: Project, rows: string[][]): Issue[] {
+  const [header = [], ...body] = rows
+  const col = (name: string) => header.findIndex(h => h.trim().toLowerCase() === name.toLowerCase())
+  const titleAt = col('Title')
+  if (titleAt < 0) return []
+  const statusAt = col('Status')
+  const priorityAt = col('Priority')
+  const assigneeAt = col('Assignee')
+  const dueAt = col('Due')
+  const estimateAt = col('Estimate')
+  const issues = body
+    .filter(r => r[titleAt]?.trim())
+    .map(r => {
+      const statusLabel = statusAt >= 0 ? r[statusAt] : ''
+      const status = project.statuses.find(s => s.label.toLowerCase() === statusLabel.toLowerCase())?.id ?? project.statuses[0].id
+      const pri = priorityAt >= 0 ? PRIORITIES.indexOf(r[priorityAt]) : -1
+      return createIssue(data, project.id, r[titleAt].trim(), {
+        status,
+        priority: pri > 0 ? pri : 0,
+        assignee: assigneeAt >= 0 ? r[assigneeAt] : '',
+        dueDate: dueAt >= 0 && r[dueAt] ? r[dueAt] : undefined,
+        // Letters (XS–XL) or numbers, so an exported t-shirt project imports back.
+        estimate: estimateAt >= 0 ? parseEstimate(r[estimateAt] ?? '', project.estimateScale) : undefined
+      })
+    })
+  return issues.map((i, n) => ({ ...i, number: i.number + n }))
 }
