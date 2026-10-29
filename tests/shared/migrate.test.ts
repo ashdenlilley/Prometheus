@@ -251,7 +251,7 @@ describe('migrate: malformed and edge input', () => {
     assert.equal(out.spaces.length, 1)
   })
 
-  test('top-level data outside spaces, projects, issues and cycles is preserved', { todo: 'BUG: migrate spreads emptyData() and only copies spaces/projects/issues/cycles, so other legacy top-level fields such as me are dropped' }, () => {
+  test('top-level data outside spaces, projects, issues and cycles is preserved', () => {
     const out = migrate(legacyFile({ me: 'Ada' }))
     assert.equal(out.me, 'Ada')
   })
