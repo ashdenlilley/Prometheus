@@ -1237,6 +1237,100 @@ select.field-input:focus {
   font-variant-numeric: tabular-nums;
 }
 
+/* ───────────── Files gallery and map ───────────── */
+.files-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
+}
+.file-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+.file-thumb {
+  width: 100%;
+  height: 120px;
+  object-fit: cover;
+  border-radius: 6px;
+  background: var(--hover);
+}
+.file-ext {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  color: var(--muted);
+}
+.loc-edit {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.loc-edit .field-input,
+.loc-edit .cell-input {
+  flex: 1;
+  min-width: 0;
+}
+.map-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 240px;
+  gap: 12px;
+}
+.map-svg {
+  display: block;
+  background: var(--hover);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  user-select: none;
+}
+.map-grid {
+  stroke: var(--line);
+  stroke-width: 1;
+}
+.map-label {
+  fill: var(--muted);
+  font-size: 11px;
+}
+.map-pin {
+  cursor: pointer;
+}
+.map-pin circle {
+  fill: var(--accent);
+  stroke: var(--panel);
+  stroke-width: 2;
+}
+.map-pin text {
+  fill: var(--text);
+  font-size: 12px;
+  paint-order: stroke;
+  stroke: var(--panel);
+  stroke-width: 3px;
+}
+.map-side {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 560px;
+  overflow: auto;
+}
+.map-unplaced {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.map-unplaced .link-btn {
+  flex: 1;
+  min-width: 0;
+}
+
 /* ───────────── Cell editors ───────────── */
 .range-edit {
   display: flex;

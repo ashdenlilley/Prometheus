@@ -2,11 +2,12 @@ import { useEffect, useRef, useState } from 'react'
 import type { CellValue, Column, DateRange, FileRef, Issue, Project, SelectOption } from '@shared/types'
 import { evaluateFormula, fieldValue, formatNumber, progressValue } from '@shared/query'
 import { fromLocalInput, toLocalInput } from '@shared/datetime'
+import { formatLocation, parseLocation } from '@shared/location'
 import { elapsedHours, formatElapsed, startTimer, stopTimer } from '@shared/timetrack'
 import { useStore } from '../store'
 import { PillSelect, PrioritySelect } from './fields'
 import { ICONS } from './icons'
-import { useOutside } from './ui'
+import { askText, useOutside } from './ui'
 import { clsx, fmtDate } from '../util'
 
 interface CellEditorProps {
@@ -36,15 +37,29 @@ export function CellEditor({ column, project, value, issue, onChange, variant = 
 
   switch (column.type) {
     case 'text':
-    case 'location':
       return (
         <input
           className={cls}
           value={str}
-          placeholder={column.type === 'location' ? 'Address or place' : ''}
           onChange={e => onChange(e.target.value || undefined)}
         />
       )
+
+    case 'location': {
+      const loc = parseLocation(str)
+      // Coordinates ride along in the string (see shared/location.ts), so free text stays editable.
+      const setCoords = async () => {
+        const text = await askText('Coordinates as lat, lon', loc.lat === undefined ? '' : `${loc.lat}, ${loc.lon}`)
+        const p = text ? parseLocation(text) : undefined
+        if (p?.lat !== undefined && p.lon !== undefined) onChange(formatLocation(loc.address, p.lat, p.lon))
+      }
+      return (
+        <div className="loc-edit">
+          <input className={cls} value={str} placeholder="Address or place" onChange={e => onChange(e.target.value || undefined)} />
+          <button type="button" className={clsx('icon-btn', loc.lat === undefined && 'muted')} aria-label="Set coordinates" title={loc.lat === undefined ? 'Set coordinates' : `${loc.lat}, ${loc.lon}`} onClick={setCoords}>📍</button>
+        </div>
+      )
+    }
 
     case 'people':
       return <TagsInput value={Array.isArray(value) ? (value as string[]) : []} suggestions={project.members} onChange={onChange} placeholder="Add person" />
