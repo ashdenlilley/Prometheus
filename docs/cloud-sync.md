@@ -1,8 +1,8 @@
-# Cloud sync server (OS-359, first slice)
+# Cloud sync (OS-359, first slice)
 
 The sync server lives in `server/`. It is a Cloudflare Worker with two Durable Object classes:
 one owner account syncs live across that owner's devices, and sign-in is by email magic link.
-This document covers the server. The Electron client is not part of this slice.
+This document covers the server and the Electron client (`src/main/cloud.ts`, see [Client (Electron)](#client-electron)).
 
 Nothing here is deployed. Every account id, domain, email and key in the repo is a placeholder.
 
@@ -131,6 +131,59 @@ npx wrangler dev
 
 `npx wrangler dev` runs the Worker locally. With the placeholder `OWNER_EMAIL` and no real email key, a sign-in email cannot be delivered. For local testing, read the link from the test harness instead.
 
+## Client (Electron)
+
+The client is `src/main/cloud.ts` (class `CloudSync`). It has no Electron imports, so `tests/main/cloud.test.ts` runs it in plain Node. `src/main/index.ts` wires it up and `src/renderer/src/components/CloudSyncSettings.tsx` is the Settings UI.
+
+### Where state lives
+
+| File (in the app's data dir) | Holds | Secret? |
+|---|---|---|
+| `cloud-sync.json` | server URL, email, device id and name, `lastSeq`, `enabled`, `joined` | No |
+| `cloud-outbox.json` | ops not yet acked, and the id of the push in flight | No (ops are the user's data) |
+| `cloud-credentials.json` | the refresh token, under `cloud.refreshToken`, sealed by `safeStorage` | Yes, keychain-sealed |
+| `prometheus.db` (`sync_clock`) | per-field hlc clocks, shared with folder sync | No |
+
+- The access token (15 minutes) is kept in memory only. Refresh rotates the refresh token, and the new one is saved before the new access token is used.
+- Config and outbox are never written with tokens. Logs carry codes and messages only.
+- Sign-out (`signOut`) revokes this device on the server when it can be reached, deletes the refresh token, clears the outbox and config, and keeps all local data.
+
+### Keychain requirement
+
+Sign-in is refused unless `safeStorage` has a keychain: `isAsyncEncryptionAvailable()` must be true, and on Linux the backend must not be `basic_text`. The refusal message says so. Nothing is written in plain text.
+
+Test-only escape hatch: `PROMETHEUS_CLOUD_ALLOW_INSECURE_TEST=1` allows sign-in without a keychain and stores the refresh token in plain text in `cloud-credentials.json`. Use it only on a machine without a keychain, for testing. Never set it for a release build.
+
+### Joining and the first connection
+
+- After sign-in the client connects once and reads the server head. An empty server is merged automatically, because there is nothing to choose from.
+- If the server already has data, status shows `needsJoin`. The user picks:
+  - **Merge** sends this device's data as a snapshot (`snapshotOps`), then catches up with the server's ops under the usual per-field rules.
+  - **Adopt** clears local clocks, replaces local data with the empty workspace, and replays the server's ops from `since: 0`. Local edits made before the choice are discarded.
+- Until a join, nothing is pushed and no remote op is applied.
+
+### Offline queue
+
+- Local ops are stamped once, by the folder engine's `record()`. Cloud `record()` only queues them. A local edit made while offline is in the outbox and is persisted at once.
+- Pushes go out in batches of at most 1,000 ops, one batch in flight at a time. The batch id is persisted with the batch, so a retry after a dropped connection reuses the id. The server then acks the retry without storing it twice.
+- `ack` removes the batch. `invalid` (and any other rejection) drops the batch and sets an error that says how many changes were lost, so the client does not loop on it.
+- `skew` keeps the batch and sets an error that names the clock. It is retried on the next connection, once the clock is fixed.
+- Reconnects use exponential backoff from 1 s to 60 s. A ping goes every 30 s. After `ready`, an unacked batch is sent again with its original id.
+
+### Folder sync and cloud sync are exclusive
+
+Only one can be on. The check lives in main, not only in the UI:
+
+- `cloud:signIn` throws "Turn off folder sync first." while folder sync is on.
+- `sync:join` throws "Turn off cloud sync first." while cloud sync is on or a sign-in is waiting.
+
+"Turn off cloud sync" is sign-out. The local data stays on this device.
+
+### Errors the user sees
+
+- "This device was signed out. Sign in again." after a `4001` close (the device was revoked elsewhere), or after a refresh returns `401`. The refresh token is deleted, and local data stays.
+- Sign-in messages: the link expired or was already used (`410`), the request was not found (`404`), it timed out after 15 minutes, or too many links were requested (`429`).
+
 ## Testing
 
 ```sh
@@ -142,6 +195,8 @@ npm run typecheck
 
 - `test/auth.test.mjs`: health, missing config, emails, verify and poll, expiry, reuse, rate limits, JWT rejection, refresh rotation, devices, signout-all.
 - `test/sync.test.mjs`: upgrade auth, catch-up, push ack and broadcast, skew, invalid ops, idempotent pushes, ordering, compaction and snapshot catch-up, socket close on revoke, and a load check (3 sockets, 1,000 ops).
+- `test/client.test.mjs`: two real `CloudSync` clients (bundled from `src/main/cloud.ts` with esbuild) against Miniflare on `127.0.0.1` with a random port. Device A merges, B adopts, live edits flow both ways, A goes offline, edits twice and reconnects, and B receives both in order. A then revokes B, and B is signed out.
+- `tests/main/cloud.test.ts` (run by `npm run test:unit` from the repo root): URL rules, sign-in polling and its errors, the refresh token living only in credentials, the outbox surviving a restart, push-id reuse on retry, skew and invalid handling, `4001` sign-out, and merge versus adopt. It uses a fake fetch and a fake WebSocket.
 
 CI runs the same tests in the `server` job of `.github/workflows/ci.yml`. CI never deploys.
 

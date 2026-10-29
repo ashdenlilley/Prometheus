@@ -36,6 +36,15 @@ contextBridge.exposeInMainWorld('api', {
     disable: () => ipcRenderer.invoke('sync:disable') as Promise<void>,
     now: () => ipcRenderer.invoke('sync:now') as Promise<void>
   },
+  cloud: {
+    status: () => ipcRenderer.invoke('cloud:status') as Promise<CloudStatus | null>,
+    signIn: (serverUrl: string, email: string) => ipcRenderer.invoke('cloud:signIn', serverUrl, email) as Promise<void>,
+    cancelSignIn: () => ipcRenderer.invoke('cloud:cancelSignIn') as Promise<void>,
+    join: (mode: 'merge' | 'adopt') => ipcRenderer.invoke('cloud:join', mode) as Promise<void>,
+    devices: () => ipcRenderer.invoke('cloud:devices') as Promise<CloudDevice[]>,
+    revokeDevice: (id: string) => ipcRenderer.invoke('cloud:revokeDevice', id) as Promise<void>,
+    signOut: () => ipcRenderer.invoke('cloud:signOut') as Promise<void>
+  },
   mcp: {
     status: () => ipcRenderer.invoke('mcp:status') as Promise<McpStatus>,
     setEnabled: (enabled: boolean) => ipcRenderer.invoke('mcp:setEnabled', enabled) as Promise<McpStatus>,
@@ -66,4 +75,26 @@ export interface SyncInspect {
   devices: number
   segments: number
   encrypted: boolean
+}
+
+export interface CloudStatus {
+  enabled: boolean
+  serverUrl: string
+  email: string
+  deviceId: string
+  deviceName: string
+  state: 'off' | 'signing-in' | 'connecting' | 'connected' | 'offline' | 'error'
+  pending: number
+  lastSync: number | null
+  error: string | null
+  signIn: { email: string; expiresAt: number } | null
+  needsJoin: boolean
+}
+
+export interface CloudDevice {
+  id: string
+  name: string
+  createdAt: number
+  lastSeenAt: number
+  current: boolean
 }

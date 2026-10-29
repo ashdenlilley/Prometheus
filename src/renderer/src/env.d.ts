@@ -19,6 +19,28 @@ export interface SyncInspect {
   encrypted: boolean
 }
 
+export interface CloudStatus {
+  enabled: boolean
+  serverUrl: string
+  email: string
+  deviceId: string
+  deviceName: string
+  state: 'off' | 'signing-in' | 'connecting' | 'connected' | 'offline' | 'error'
+  pending: number
+  lastSync: number | null
+  error: string | null
+  signIn: { email: string; expiresAt: number } | null
+  needsJoin: boolean
+}
+
+export interface CloudDevice {
+  id: string
+  name: string
+  createdAt: number
+  lastSeenAt: number
+  current: boolean
+}
+
 export interface McpStatus {
   enabled: boolean
   running: boolean
@@ -47,6 +69,15 @@ declare global {
         unlock: (passphrase: string) => Promise<SyncStatus>
         disable: () => Promise<void>
         now: () => Promise<void>
+      }
+      cloud: {
+        status: () => Promise<CloudStatus | null>
+        signIn: (serverUrl: string, email: string) => Promise<void>
+        cancelSignIn: () => Promise<void>
+        join: (mode: 'merge' | 'adopt') => Promise<void>
+        devices: () => Promise<CloudDevice[]>
+        revokeDevice: (id: string) => Promise<void>
+        signOut: () => Promise<void>
       }
       mcp: {
         status: () => Promise<McpStatus>

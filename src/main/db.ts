@@ -185,6 +185,13 @@ export class Store {
     }))
   }
 
+  // Wipes the per-field clocks only. Cloud sync adopts the server's copy with this.
+  async clearClocks(): Promise<void> {
+    if (!this.db) return
+    this.db.run('DELETE FROM sync_clock')
+    return this.flush()
+  }
+
   // Wipes sync bookkeeping. Used when joining a folder and replaying it from scratch.
   resetSync() {
     if (!this.db) return

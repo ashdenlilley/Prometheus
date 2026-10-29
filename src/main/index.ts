@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, safeStorage, shell } from 'electron'
 import { join } from 'path'
-import { homedir } from 'os'
+import { homedir, hostname } from 'os'
 import { promises as fs } from 'fs'
 import type { AppData } from '../shared/types'
 import { reducer, type Action } from '../shared/model'
@@ -14,6 +14,8 @@ import { adoptPersonal } from '../shared/sync'
 import { McpController } from './mcp'
 import { Store } from './db'
 import { SyncEngine } from './sync'
+import { CloudSync, type CloudDevice, type CloudStatus } from './cloud'
+import { CredentialStore, type Sealer } from './credentials'
 import { installMenu } from './menu'
 
 // Live UI testing only: expose Chrome DevTools on localhost when PROMETHEUS_DEBUG_PORT is set.
@@ -30,13 +32,42 @@ let state: AppData | null = null
 let base: AppData | null = null
 let store: Store | null = null
 let sync: SyncEngine | null = null
+let cloud: CloudSync | null = null
+// False when no keychain sits behind safeStorage, so cloud sign-in is refused (see openStore).
+let cloudAllowed = false
+
+const NO_KEYCHAIN = 'Cloud sync needs the OS keychain, which is not available on this device.'
+const keychainSealer: Sealer = {
+  seal: async text => (await safeStorage.encryptStringAsync(text)).toString('base64'),
+  open: async sealed => {
+    try {
+      return (await safeStorage.decryptStringAsync(Buffer.from(sealed, 'base64'))).result
+    } catch {
+      return null
+    }
+  }
+}
+// Used when there is no keychain: nothing is written in plain text, so sign-in fails with a clear message.
+const noKeychain: Sealer = {
+  seal: async () => {
+    throw new Error(NO_KEYCHAIN)
+  },
+  open: async () => {
+    throw new Error(NO_KEYCHAIN)
+  }
+}
+
+async function keychainAvailable(): Promise<boolean> {
+  if (!(await safeStorage.isAsyncEncryptionAvailable())) return false
+  return process.platform !== 'linux' || safeStorage.getSelectedStorageBackend() !== 'basic_text'
+}
 
 async function openStore(): Promise<Store> {
   if (store) return store
   const next = new Store(join(dataDir(), 'prometheus.db'))
   await next.open()
   store = next
-  sync = new SyncEngine(dataDir(), next, {
+  const engine = new SyncEngine(dataDir(), next, {
     read: () => state!,
     write: applyRemote,
     keys: {
@@ -51,6 +82,18 @@ async function openStore(): Promise<Store> {
         }
       }
     }
+  })
+  sync = engine
+  const insecureTest = process.env.PROMETHEUS_CLOUD_ALLOW_INSECURE_TEST === '1' // test-only: plain-text credentials
+  const keychain = await keychainAvailable()
+  cloudAllowed = keychain || insecureTest
+  cloud = new CloudSync({
+    dir: dataDir(),
+    store: next,
+    clock: engine.clock,
+    clocks: engine.clocks,
+    hooks: { read: () => state!, write: applyRemote },
+    credentials: new CredentialStore(join(dataDir(), 'cloud-credentials.json'), keychain ? keychainSealer : insecureTest ? undefined : noKeychain)
   })
   return next
 }
@@ -119,6 +162,7 @@ const host = {
     state = next
     const ops = diffOps(prev, next, sync.clock)
     sync.record(ops)
+    cloud?.record(ops)
     audit(auditEntries(ops, 'mcp', new Date().toISOString(), action.type))
     // Notifications are deliberately left out of the sync op log, so they stay local to this device.
     state = subscriptionNotifications(prev, next, 'MCP')
@@ -134,6 +178,7 @@ ipcMain.handle('data:load', async () => {
   state = await loadInitial(db)
   base = state
   await sync!.init()
+  await cloud!.init()
   return state
 })
 
@@ -157,6 +202,7 @@ ipcMain.handle('data:save', (_event, incoming: AppData) => {
     return
   }
   sync.record(ops)
+  cloud?.record(ops)
   const merged = adoptPersonal(applyOps(state, ops).data, incoming)
   const remoteAhead = JSON.stringify(merged) !== JSON.stringify(incoming)
   state = merged
@@ -191,6 +237,8 @@ ipcMain.handle('sync:chooseFolder', async () => {
 })
 ipcMain.handle('sync:inspect', (_event, folder: string) => sync!.inspect(folder))
 ipcMain.handle('sync:join', async (_event, folder: string, mode: 'push' | 'adopt', passphrase: string) => {
+  const c = cloud?.getStatus()
+  if (c && (c.enabled || c.signIn)) throw new Error('Turn off cloud sync first.')
   await sync!.join(folder, mode, passphrase)
   return sync!.getStatus()
 })
@@ -200,6 +248,30 @@ ipcMain.handle('sync:unlock', async (_event, passphrase: string) => {
 })
 ipcMain.handle('sync:disable', () => sync!.disable())
 ipcMain.handle('sync:now', () => sync!.syncNow())
+
+// Cloud sync (OS-359). Only one of folder sync and cloud sync may be on: checked here and in sync:join.
+const requireCloud = (): CloudSync => {
+  if (!cloud) throw new Error('Prometheus has not loaded its data yet')
+  return cloud
+}
+ipcMain.handle('cloud:status', (): CloudStatus | null => cloud?.getStatus() ?? null)
+ipcMain.handle('cloud:signIn', async (_event, serverUrl: string, email: string) => {
+  if (typeof serverUrl !== 'string' || typeof email !== 'string') throw new Error('Enter a server URL and an email address.')
+  if (!cloudAllowed) throw new Error(NO_KEYCHAIN)
+  if (sync?.getStatus().enabled) throw new Error('Turn off folder sync first.')
+  await requireCloud().startSignIn(serverUrl, email, hostname())
+})
+ipcMain.handle('cloud:cancelSignIn', () => cloud?.cancelSignIn())
+ipcMain.handle('cloud:join', (_event, mode: 'merge' | 'adopt') => {
+  if (mode !== 'merge' && mode !== 'adopt') throw new Error('Unknown join mode.')
+  return requireCloud().join(mode)
+})
+ipcMain.handle('cloud:devices', (): Promise<CloudDevice[]> => requireCloud().devices())
+ipcMain.handle('cloud:revokeDevice', (_event, id: string) => {
+  if (typeof id !== 'string') throw new Error('Unknown device.')
+  return requireCloud().revokeDevice(id)
+})
+ipcMain.handle('cloud:signOut', () => requireCloud().signOut())
 
 ipcMain.handle('audit:list', (_event, filters: AuditFilter) => store?.readAudit(filters) ?? [])
 ipcMain.handle('audit:csv', (_event, filters: AuditFilter) =>
@@ -247,6 +319,7 @@ app.whenReady().then(async () => {
 app.on('before-quit', () => {
   void mcp.stop()
   void sync?.flushNow()
+  cloud?.stop()
 })
 
 app.on('window-all-closed', () => {
