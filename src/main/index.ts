@@ -97,8 +97,10 @@ const keychainSealer: Sealer = {
   }
 }
 // Linux's 'basic_text' backend is not a keychain. It is only accepted by the test-only flag.
+// Set once the app is ready: the async safeStorage API is what seals, so its availability is what counts.
+let asyncEncryption = false
 const keychainAvailable = () =>
-  safeStorage.isEncryptionAvailable() &&
+  asyncEncryption &&
   (process.platform !== 'linux' || safeStorage.getSelectedStorageBackend() !== 'basic_text' || process.env.PROMETHEUS_SLACK_ALLOW_INSECURE_TEST === '1')
 // Created on first use, because safeStorage can only be queried once the app is ready.
 function secrets(): CredentialStore {
@@ -336,6 +338,7 @@ function createWindow() {
 }
 
 app.whenReady().then(async () => {
+  asyncEncryption = await safeStorage.isAsyncEncryptionAvailable().catch(() => false)
   // Packaged builds take the icon from the bundle; dev runs need it set explicitly.
   if (isMac && !app.isPackaged) app.dock?.setIcon(join(__dirname, '../../build/icon.png'))
   installMenu(isMac)

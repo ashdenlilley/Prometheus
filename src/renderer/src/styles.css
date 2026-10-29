@@ -3618,3 +3618,7 @@ select.field-input:focus {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* Settings > Integrations: keep action buttons on one line each and let the row wrap */
+.integration-row .option-row { flex-wrap: wrap; gap: 6px; }
+.integration-row .option-row .btn { white-space: nowrap; }

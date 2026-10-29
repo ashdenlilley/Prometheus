@@ -44,15 +44,14 @@ export function IntegrationsSettings() {
       settings: channel.trim() ? { channel: channel.trim() } : {},
       createdAt: new Date().toISOString()
     }
-    // The main process reads integrations from the saved copy, so save before the URL goes in
+    // The URL goes in first, so a refused URL leaves nothing behind. Then the integration is saved and the status re-read,
+    // because the main process lists hints only for integrations in its saved copy.
+    const result = await callSetWebhook(integration.id, url.trim())
+    if ('ok' in result) return setAddError(result.error)
     dispatch({ type: 'addIntegration', integration })
     await window.api.save(reducer(data, { type: 'addIntegration', integration }))
-    const result = await callSetWebhook(integration.id, url.trim())
-    if ('ok' in result) {
-      dispatch({ type: 'removeIntegration', id: integration.id })
-      return setAddError(result.error)
-    }
-    setStatus(result)
+    const fresh = await window.api.integrations.status()
+    setStatus(fresh)
     setName('')
     setChannel('')
     setUrl('')
