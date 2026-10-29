@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { isLive } from '@shared/live'
+import { issueKey } from '@shared/model'
 import logo from './assets/logo.png'
 import { createIssue, useStore } from './store'
 import { ICONS } from './components/icons'
@@ -223,6 +224,13 @@ export default function App() {
         run: () => navigate({ spaceId: p.spaceId, projectId: p.id, view: 'issues' })
       }
     }),
+    ...data.teams.filter(t => !t.archivedAt).map(t => ({
+      id: `team-${t.id}`,
+      label: `Go to team ${t.name}`,
+      group: 'Teams',
+      hint: t.key,
+      run: () => navigate({ spaceId: t.spaceId, projectId: null, view: 'overview' })
+    })),
     ...PROJECT_VIEWS.filter(() => !!project).map(v => ({
       id: `view-${v.id}`,
       label: `Go to ${v.label}`,
@@ -287,7 +295,7 @@ export default function App() {
         id: `issue-${i.id}`,
         label: i.title,
         group: 'Issue',
-        hint: p ? `${p.key}-${i.number}` : undefined,
+        hint: p ? issueKey(data, i) : undefined,
         run: () => setOpenIssueId(i.id)
       }
     })

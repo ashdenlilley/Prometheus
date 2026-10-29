@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { CellValue, Column, DateRange, FileRef, Issue, Project, SelectOption } from '@shared/types'
 import { evaluateFormula, fieldValue, formatNumber, progressValue } from '@shared/query'
+import { issueKey } from '@shared/model'
 import { fromLocalInput, toLocalInput } from '@shared/datetime'
 import { formatLocation, parseLocation } from '@shared/location'
 import { elapsedHours, formatElapsed, startTimer, stopTimer } from '@shared/timetrack'
@@ -265,7 +266,7 @@ export function CellEditor({ column, project, value, issue, onChange, variant = 
       return <span className="muted">{issue ? issue.number : ''}</span>
 
     case 'item_id':
-      return <span className="muted">{issue && project ? `${project.key}-${issue.number}` : ''}</span>
+      return <span className="muted">{issue && project ? issueKey(data, issue) : ''}</span>
 
     case 'created':
       return <span className="muted">{issue ? new Date(issue.createdAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : ''}</span>
@@ -423,7 +424,7 @@ function IssuePicker({
   const pool = data.issues.filter(i => i.projectId === targetProject?.id && i.id !== currentId)
   const options: SelectOption[] = pool.map(i => ({
     id: i.id,
-    label: `${targetProject ? `${targetProject.key}-${i.number}` : ''} ${i.title}`,
+    label: `${targetProject ? issueKey(data, i) : ''} ${i.title}`,
     color: '#579bfc'
   }))
   if (column.type === 'board_relation' && !targetProject) return <span className="muted">Pick a project in column settings</span>

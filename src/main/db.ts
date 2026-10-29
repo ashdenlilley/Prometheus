@@ -8,14 +8,15 @@ import { AUDIT_LIMIT, type AuditEntry, type AuditFilter, type AuditRow } from '.
 // the entity as JSON with its parent id indexed. Saves diff against the last write, so only
 // changed rows are rewritten.
 
-type Table = 'spaces' | 'initiatives' | 'projects' | 'issues' | 'cycles' | 'automations' | 'triage_rules' | 'templates' | 'dashboards' | 'notifications' | 'docs'
+type Table = 'spaces' | 'initiatives' | 'teams' | 'projects' | 'issues' | 'cycles' | 'automations' | 'triage_rules' | 'templates' | 'dashboards' | 'notifications' | 'docs'
 
-const TABLES: Table[] = ['spaces', 'initiatives', 'projects', 'issues', 'cycles', 'automations', 'triage_rules', 'templates', 'dashboards', 'notifications', 'docs']
+const TABLES: Table[] = ['spaces', 'initiatives', 'teams', 'projects', 'issues', 'cycles', 'automations', 'triage_rules', 'templates', 'dashboards', 'notifications', 'docs']
 
 // AppData key for each table.
 const KEY: Record<Table, keyof AppData> = {
   spaces: 'spaces',
   initiatives: 'initiatives',
+  teams: 'teams',
   projects: 'projects',
   issues: 'issues',
   cycles: 'cycles',
@@ -30,6 +31,7 @@ const KEY: Record<Table, keyof AppData> = {
 // Parent column per table, used to index child lookups.
 const PARENT: Partial<Record<Table, string>> = {
   initiatives: 'space_id',
+  teams: 'space_id',
   projects: 'space_id',
   issues: 'project_id',
   cycles: 'project_id',
@@ -209,9 +211,10 @@ export class Store {
     const meta = this.db.exec("SELECT value FROM meta WHERE key = 'me'")
     const me = meta[0] ? String(meta[0].values[0][0]) : 'You'
     const data: AppData = {
-      version: 4,
+      version: 5,
       spaces: all('spaces') as AppData['spaces'],
       initiatives: all('initiatives') as AppData['initiatives'],
+      teams: all('teams') as AppData['teams'],
       projects: all('projects') as AppData['projects'],
       issues: all('issues') as AppData['issues'],
       cycles: all('cycles') as AppData['cycles'],
@@ -247,6 +250,7 @@ export class Store {
     const groups: Record<Table, { id: string; parent?: string; json: string }[]> = {
       spaces: data.spaces.map(r => ({ id: r.id, json: JSON.stringify(r) })),
       initiatives: data.initiatives.map(r => ({ id: r.id, parent: r.spaceId, json: JSON.stringify(r) })),
+      teams: data.teams.map(r => ({ id: r.id, parent: r.spaceId, json: JSON.stringify(r) })),
       projects: data.projects.map(r => ({ id: r.id, parent: r.spaceId, json: JSON.stringify(r) })),
       issues: data.issues.map(r => ({ id: r.id, parent: r.projectId, json: JSON.stringify(r) })),
       cycles: data.cycles.map(r => ({ id: r.id, parent: r.projectId, json: JSON.stringify(r) })),

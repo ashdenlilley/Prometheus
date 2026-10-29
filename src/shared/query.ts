@@ -1,4 +1,4 @@
-import { categoryOf, createIssue } from './model'
+import { categoryOf, createIssue, issueKey } from './model'
 import { PRIORITIES, type AppData, type Column, type Cycle, type Issue, type Project, type SavedView, type StatusDef } from './types'
 import { formatEstimate, parseEstimate } from './estimate'
 import { toISO } from './dates'
@@ -220,7 +220,7 @@ export function issuesToRows(data: AppData, project: Project, issues: Issue[]): 
           : c.type === 'subtasks' ? subtaskLabel(subtaskSummary(data, i.id))
             : customValue(i, c))
     return [
-      `${project.key}-${i.number}`,
+      `${i.key ?? project.key}-${i.number}`,
       i.title,
       project.statuses.find(s => s.id === i.status)?.label ?? i.status,
       PRIORITIES[i.priority],

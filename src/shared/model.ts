@@ -20,10 +20,12 @@ import type {
   Relation,
   Space,
   StatusCategory,
+  Team,
   Template,
   TriageRule
 } from './types'
 import { enforceLabelGroups } from './labels'
+import { canArchiveTeam, ensureTeams, moveProjectToTeam, nextIssueNumber, patchTeam, teamOf } from './teams'
 
 // Pure data layer shared by the renderer (UI actions) and the main process (MCP tools, DB).
 
@@ -40,6 +42,10 @@ export type Action =
   | { type: 'addInitiative'; initiative: Initiative }
   | { type: 'patchInitiative'; id: string; patch: Partial<Initiative> }
   | { type: 'deleteInitiative'; id: string }
+  | { type: 'addTeam'; team: Team }
+  | { type: 'patchTeam'; id: string; patch: Partial<Team> }
+  | { type: 'archiveTeam'; id: string }
+  | { type: 'moveProjectToTeam'; projectId: string; teamId: string }
   | { type: 'addProject'; project: Project }
   | { type: 'patchProject'; id: string; patch: Partial<Project> }
   | { type: 'deleteProject'; id: string }
@@ -108,10 +114,29 @@ export function statusLabel(project: Project | undefined, statusId: string): str
   return project?.statuses.find(s => s.id === statusId)?.label ?? statusId
 }
 
+// Keeps each team's sequence ahead of the keyed issues added to it (sync, import, MCP).
+function bumpTeams(s: AppData, added: Issue[]): AppData {
+  const next = new Map<string, number>()
+  for (const i of added) {
+    const team = teamOf(s, i.projectId)
+    if (team && i.key === team.key) next.set(team.id, Math.max(next.get(team.id) ?? 0, i.number + 1))
+  }
+  return { ...s, teams: s.teams.map(t => (next.has(t.id) ? { ...t, nextNumber: Math.max(t.nextNumber, next.get(t.id)!) } : t)) }
+}
+
 export function reducer(s: AppData, a: Action): AppData {
   switch (a.type) {
     case 'load':
-      return a.data
+      return ensureTeams(a.data)
+    case 'addTeam':
+      return { ...s, teams: [...s.teams, a.team] }
+    case 'patchTeam':
+      return patchTeam(s, a.id, a.patch)
+    case 'archiveTeam':
+      if (!canArchiveTeam(s, a.id)) return s
+      return { ...s, teams: s.teams.map(t => (t.id === a.id ? { ...t, archivedAt: new Date().toISOString() } : t)) }
+    case 'moveProjectToTeam':
+      return moveProjectToTeam(s, a.projectId, a.teamId)
     case 'addSpace':
       return { ...s, spaces: [...s.spaces, a.space] }
     case 'patchSpace':
@@ -123,6 +148,7 @@ export function reducer(s: AppData, a: Action): AppData {
         spaces: s.spaces.filter(sp => sp.id !== a.id),
         initiatives: s.initiatives.filter(i => i.spaceId !== a.id),
         dashboards: s.dashboards.filter(d => d.spaceId !== a.id),
+        teams: s.teams.filter(t => t.spaceId !== a.id),
         projects: s.projects.filter(p => p.spaceId !== a.id),
         issues: s.issues.filter(i => !projectIds.includes(i.projectId)),
         cycles: s.cycles.filter(c => !projectIds.includes(c.projectId)),
@@ -165,9 +191,14 @@ export function reducer(s: AppData, a: Action): AppData {
         projects: s.projects.map(p => (p.initiativeId === a.id ? { ...p, initiativeId: undefined } : p))
       }
     case 'addProject':
-      return { ...s, projects: [...s.projects, a.project] }
+      return ensureTeams({ ...s, projects: [...s.projects, a.project] })
     case 'patchProject': {
-      const out = mapProject(s, a.id, p => ({ ...p, ...a.patch }))
+      // Statuses and cycle settings belong to the team, so they are written to every project in it
+      const { statuses, cycleLength, autoCycles, autoRollOver, ...own } = a.patch
+      const shared = Object.fromEntries(Object.entries({ statuses, cycleLength, autoCycles, autoRollOver }).filter(([k]) => k in a.patch)) as Partial<Team>
+      const team = teamOf(s, a.id)
+      const base = team && Object.keys(shared).length ? patchTeam(s, team.id, shared) : s
+      const out = mapProject(base, a.id, p => ({ ...p, ...(team ? own : a.patch) }))
       const before = s.projects.find(p => p.id === a.id)
       if (!before || a.patch.status === undefined || a.patch.status === before.status) return out
       const rules = s.automations.filter(r => r.enabled && r.projectId === a.id && r.trigger.type === 'project_status_changed' && (r.trigger.to === undefined || r.trigger.to === a.patch.status))
@@ -222,14 +253,16 @@ export function reducer(s: AppData, a: Action): AppData {
     case 'addIssue': {
       const project = s.projects.find(p => p.id === a.issue.projectId)
       const issue = a.issue.subscribed === undefined && project?.autoSubscribe !== false ? { ...a.issue, subscribed: true } : a.issue
-      return { ...s, issues: [...s.issues, intake(s, issue)] }
+      const added = intake(s, issue)
+      return bumpTeams({ ...s, issues: [...s.issues, added] }, [added])
     }
     case 'addIssues': {
       const issues = a.issues.map(i => {
         const project = s.projects.find(p => p.id === i.projectId)
         return i.subscribed === undefined && project?.autoSubscribe !== false ? { ...i, subscribed: true } : i
       })
-      return { ...s, issues: [...s.issues, ...issues.map(i => intake(s, i))] }
+      const added = issues.map(i => intake(s, i))
+      return bumpTeams({ ...s, issues: [...s.issues, ...added] }, added)
     }
     case 'patchIssue':
       return updateIssue(s, a.id, a.patch)
@@ -309,13 +342,13 @@ export function reducer(s: AppData, a: Action): AppData {
     case 'markRolledOver':
       return markRolledOver(s, a.today)
     case 'addProjectFromTemplate':
-      return {
+      return ensureTeams({
         ...s,
         projects: [...s.projects, a.project],
         automations: [...s.automations, ...a.automations],
         triageRules: [...s.triageRules, ...a.triageRules],
         issues: [...s.issues, ...a.issues]
-      }
+      })
     case 'addAutomation':
       return { ...s, automations: [...s.automations, a.automation] }
     case 'patchAutomation':
@@ -695,11 +728,15 @@ export function runCycleRules(s: AppData, today: string): AppData {
 
 export function createIssue(data: AppData, projectId: string, title: string, patch: Partial<Issue> = {}): Issue {
   const now = new Date().toISOString()
-  const number = data.issues.filter(i => i.projectId === projectId).reduce((m, i) => Math.max(m, i.number), 0) + 1
+  const team = teamOf(data, projectId)
+  const project = data.projects.find(p => p.id === projectId)
+  const number = team ? nextIssueNumber(data, team.id) : data.issues.filter(i => i.projectId === projectId).reduce((m, i) => Math.max(m, i.number), 0) + 1
+  const key = team?.key ?? project?.key
   return {
     id: crypto.randomUUID(),
     projectId,
     number,
+    ...(key ? { key } : {}),
     title,
     description: '',
     status: 'backlog',
@@ -718,7 +755,7 @@ export function createIssue(data: AppData, projectId: string, title: string, pat
 
 export function issueKey(data: AppData, issue: Issue) {
   const project = data.projects.find(p => p.id === issue.projectId)
-  return `${project?.key ?? 'ISS'}-${issue.number}`
+  return `${issue.key ?? project?.key ?? 'ISS'}-${issue.number}`
 }
 
 export function withValue(values: Issue['values'], id: string, v: CellValue | undefined): Issue['values'] {

@@ -2068,6 +2068,14 @@ select.field-input:focus {
   gap: 4px;
 }
 
+.team-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 0;
+}
+
 .label-add {
   display: flex;
   flex-wrap: wrap;

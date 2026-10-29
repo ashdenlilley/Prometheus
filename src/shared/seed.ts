@@ -1,11 +1,13 @@
 import { createIssue } from './model'
 import { addDays, todayISO } from './dates'
 import { DEFAULT_STATUSES, type AppData, type Project } from './types'
+import { ensureTeams } from './teams'
 
 export const DEFAULT_SPACE_COLOR = '#5e6ad2'
 
 export function blankProject(init: Pick<Project, 'id' | 'spaceId' | 'name' | 'key' | 'color'> & Partial<Project>): Project {
   return {
+    teamId: '', // set by ensureTeams when the project is added
     status: 'planned',
     lead: '',
     members: [],
@@ -25,10 +27,11 @@ export function blankProject(init: Pick<Project, 'id' | 'spaceId' | 'name' | 'ke
 
 export function emptyData(): AppData {
   return {
-    version: 4,
+    version: 5,
     spaces: [],
     initiatives: [],
     projects: [],
+    teams: [],
     issues: [],
     cycles: [],
     automations: [],
@@ -48,7 +51,8 @@ export function seed(): AppData {
   const projectId = crypto.randomUUID()
   const estimate = crypto.randomUUID()
   const cycleId = crypto.randomUUID()
-  const base: AppData = {
+  // ensureTeams gives the project its team, so the sample issues take the team key
+  const base: AppData = ensureTeams({
     ...emptyData(),
     spaces: [{ id: spaceId, name: 'Prometheus', color: DEFAULT_SPACE_COLOR }],
     projects: [
@@ -65,7 +69,7 @@ export function seed(): AppData {
       })
     ],
     cycles: [{ id: cycleId, projectId, name: 'Cycle 1', startDate: today, endDate: addDays(today, 13) }]
-  }
+  })
   const samples: [string, string, number][] = [
     ['Set up project structure', 'done', 2],
     ['Build board view', 'in_progress', 5],
