@@ -1,4 +1,5 @@
-import type { AppData, Project, SavedView } from './types'
+import type { AppData, Doc, Project, SavedView } from './types'
+import { docConflictCopy, type IncomingBody } from './docs'
 
 // Row-level sync with per-field clocks. Pure functions only: no fs, no Electron.
 //
@@ -22,6 +23,7 @@ export type Table =
   | 'templates'
   | 'dashboards'
   | 'notifications'
+  | 'docs'
 
 export const TABLE_KEYS: [Table, keyof AppData][] = [
   ['spaces', 'spaces'],
@@ -33,7 +35,8 @@ export const TABLE_KEYS: [Table, keyof AppData][] = [
   ['triage_rules', 'triageRules'],
   ['templates', 'templates'],
   ['dashboards', 'dashboards'],
-  ['notifications', 'notifications']
+  ['notifications', 'notifications'],
+  ['docs', 'docs']
 ]
 
 export interface Op {
@@ -150,8 +153,8 @@ const outgoing = (table: Table, r: { id: string }) =>
 export function diffOps(prev: AppData, next: AppData, clock: Clock): Op[] {
   const ops: Op[] = []
   for (const [table, key] of TABLE_KEYS) {
-    const before = new Map((prev[key] as { id: string }[]).map(r => [r.id, outgoing(table, r)]))
-    const after = new Map((next[key] as { id: string }[]).map(r => [r.id, outgoing(table, r)]))
+    const before = new Map(((prev[key] ?? []) as { id: string }[]).map(r => [r.id, outgoing(table, r)]))
+    const after = new Map(((next[key] ?? []) as { id: string }[]).map(r => [r.id, outgoing(table, r)]))
     for (const [id, row] of after) {
       const old = before.get(id)
       if (!old) {
@@ -185,7 +188,7 @@ export function applyOps(data: AppData, ops: Op[], clocks?: Map<string, string>)
   for (const [table, key] of TABLE_KEYS) {
     const mine = ops.filter(o => o.table === table)
     if (mine.length === 0) continue
-    const rows: Rows = new Map((data[key] as { id: string }[]).map(r => [r.id, { ...(r as unknown as Record<string, unknown>) }]))
+    const rows: Rows = new Map(((data[key] ?? []) as { id: string }[]).map(r => [r.id, { ...(r as unknown as Record<string, unknown>) }]))
     const wins = (k: string, hlc: string) => {
       const cur = clocks?.get(k)
       return !clocks || cur === undefined || cur < hlc
@@ -216,6 +219,14 @@ export function applyOps(data: AppData, ops: Op[], clocks?: Map<string, string>)
       // Field ops need the row to exist. A deleted row ignores late field edits.
       const row = rows.get(op.id)
       if (!row) continue
+      // Concurrent body edits keep the later body; the loser is kept as a conflicted copy doc.
+      if (table === 'docs' && op.set && 'body' in op.set) {
+        const copy = docConflictCopy(row as unknown as Doc, op.set as IncomingBody, wins(rowKey(table, op.id, 'body'), op.hlc))
+        if (copy && !rows.has(copy.id)) {
+          rows.set(copy.id, { ...copy } as unknown as Record<string, unknown>)
+          applied++
+        }
+      }
       let touched = false
       for (const [f, v] of Object.entries(op.set ?? {})) {
         if (!wins(rowKey(table, op.id, f), op.hlc)) continue
@@ -242,7 +253,7 @@ export function snapshotOps(data: AppData, clocks: Map<string, string>, device: 
   const ops: Op[] = []
   const live = new Set<string>()
   for (const [table, key] of TABLE_KEYS) {
-    for (const r of data[key] as { id: string }[]) {
+    for (const r of (data[key] ?? []) as { id: string }[]) {
       const row = outgoing(table, r)
       live.add(rowKey(table, r.id, EXISTS))
       const existsHlc = clocks.get(rowKey(table, r.id, EXISTS)) ?? ZERO_HLC + device

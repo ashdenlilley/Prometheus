@@ -4,6 +4,8 @@ import { childrenOf, progress } from '@shared/query'
 import { DRAWER_SHORTCUTS, drawerShortcut } from '@shared/shortcuts'
 import { createIssue, issueKey, useStore, withValue } from '../store'
 import { inverseRelations } from '@shared/model'
+import { backlinks } from '@shared/docs'
+import type { Route } from '../route'
 import { availableLabels, labelGroups } from '@shared/labels'
 import { nextOccurrence } from '@shared/recurrence'
 import type { Recurrence } from '@shared/types'
@@ -27,7 +29,17 @@ const MAX_FILE = 5 * 1024 * 1024
 const REACTIONS = ['👍', '🎉', '❤️', '😄', '👀', '🚀']
 
 // Issue drawer: every field, sub-issues, relations, comments and activity.
-export function IssueDetail({ issueId, onClose, onOpen }: { issueId: string; onClose: () => void; onOpen: (id: string) => void }) {
+export function IssueDetail({
+  issueId,
+  onClose,
+  onOpen,
+  onNavigate
+}: {
+  issueId: string
+  onClose: () => void
+  onOpen: (id: string) => void
+  onNavigate: (route: Route) => void
+}) {
   const { data, dispatch } = useStore()
   const issue = data.issues.find(i => i.id === issueId)
   const project = data.projects.find(p => p.id === issue?.projectId)
@@ -92,6 +104,7 @@ export function IssueDetail({ issueId, onClose, onOpen }: { issueId: string; onC
   const childPct = progress(children, project.statuses)
   const parent = data.issues.find(i => i.id === issue.parentId)
   const inverse = inverseRelations(data, issue.id)
+  const docLinks = backlinks(issue.id, data)
   const pool = data.issues.filter(i => i.id !== issue.id)
   const key = (i: Issue) => issueKey(data, i)
 
@@ -511,6 +524,25 @@ export function IssueDetail({ issueId, onClose, onOpen }: { issueId: string; onC
             <button className="btn" onClick={addRelation} disabled={!relTarget}>Add</button>
           </div>
         </section>
+
+        {docLinks.length > 0 && (
+          <section className="drawer-section" data-testid="doc-backlinks">
+            <div className="section-title-row small">
+              <h3>Mentioned in docs</h3>
+            </div>
+            <div className="doc-backlinks">
+              {docLinks.map(d => (
+                <button
+                  key={d.id}
+                  className="chip neutral"
+                  onClick={() => onNavigate({ spaceId: d.spaceId, projectId: d.projectId ?? null, view: 'docs', docId: d.id })}
+                >
+                  {d.title}
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
 
         <section className="drawer-section">
           <div className="section-title-row small">

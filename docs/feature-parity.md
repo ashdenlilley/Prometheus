@@ -30,8 +30,8 @@ Last checked against the code: 2026-10-29.
 | Activity history per issue | Y (`shared/model.ts` describeChanges, `IssueDetail.tsx` Activity) |
 | Subscriptions and notifications (inbox) | Y (inbox from mentions, automation alerts and subscribed issues; issues are subscribed on create when the project auto-subscribes, and a bell in the drawer toggles it. Changes made locally do not notify; changes from sync or the MCP server do. `shared/subscriptions.ts`, `NotificationsPanel.tsx`) |
 | Favourites | Y (`shared/types.ts` Issue.favourite, `FavGutter.tsx`, `IssueDetail.tsx`) |
-| Templates (issue, project, document) | P (issue templates saved from `IssueDetail.tsx`; project templates saved from Project settings > Templates, with statuses, columns, views, automations, triage rules and optional starter issues, used from New project. `shared/projectTemplates.ts`, `NewProjectModal.tsx`; no document templates) |
-| Documents (project and team docs) | N |
+| Templates (issue, project, document) | P (issue templates saved from `IssueDetail.tsx`; project templates saved from Project settings > Templates, with statuses, columns, views, automations, triage rules and optional starter issues, used from New project. `shared/projectTemplates.ts`, `NewProjectModal.tsx`; doc templates saved with Save as template and used from the Docs view's From template menu) |
+| Documents (project and team docs) | P (Markdown docs under a space or project with a split editor and a sanitised live preview; `KEY-N` mentions link to issues and show as "Mentioned in docs" on the issue; synced, with a conflicted copy kept when two devices edit one body offline. `shared/docs.ts`, `DocsView.tsx`; no team docs UI yet, no rich text, images or co-editing) |
 | Asks and forms (intake) | N |
 | Recurring issues | Y (daily, weekly on chosen weekdays, monthly on a day, or every N days; the next copy is created on the app's tick with catch-up limited to one copy. Each copy has a deterministic ID from the template and period, so two synced devices create the same row and sync merges it. `shared/recurrence.ts`, `shared/model.ts` runRecurrences, `IssueDetail.tsx`) |
 
@@ -81,7 +81,7 @@ Last checked against the code: 2026-10-29.
 | Groups inside a board | Y (group by any column: `shared/query.ts` groupIssues, `FilterBar.tsx`) |
 | Items and subitems (nested table) | Y (sub-issues: `IssueDetail.tsx`, nested rows in `TableView.tsx`) |
 | Item updates (comments with @mentions and attachments) | Y (comments with @mention notifications, file attachments (5 MB cap, stored in the data file) and reactions. `shared/model.ts` addComment) |
-| Docs (rich pages, can embed boards) | N |
+| Docs (rich pages, can embed boards) | P (Markdown docs, see 1.1 Documents; no embedded boards) |
 | Forms (public intake to a board) | P (local intake forms per project; each submission becomes a triage item, also through MCP `submit_form`. `ProjectSettings.tsx` Forms tab, `FormModal.tsx`, `shared/forms.ts`; no public link) |
 
 ### 2.2 Column types
@@ -124,7 +124,7 @@ Columns the API lists, with Prometheus status.
 | Item ID | item_id | Y (`cells.tsx`, `columns.ts`) |
 | Button | button | Y (optional action on click: set status or priority, add a label, notify, create a sub-issue or move to the current cycle, as one undo step; otherwise a click counter. `cells.tsx`, `shared/model.ts` pressButton) |
 | Board relation | board_relation | Y (same as Connect boards, `cells.tsx`) |
-| Doc | — | N |
+| Doc | — | Y (links an issue to one or more docs; chips plus a picker. `cells.tsx`) |
 | Subtasks (as column) | subtasks | P (read-only done/total of sub-issues, sortable. `cells.tsx`, `shared/subtasks.ts`; the cell does not expand or open sub-issues) |
 | Integrations column (GitHub, Jira) | — | N |
 | Mirror and formula | mirror, formula | Y (`cells.tsx` MirrorValue and FormulaValue, `shared/formula.ts`) |
@@ -175,7 +175,7 @@ Column-level features: header rename, hide, reorder, resize, pin, sort, group-fo
 | Permissions per board and column | N |
 | Notifications and inbox | Y (`NotificationsPanel.tsx`, read state in `shared/model.ts` markNotifications) |
 | Activity log per item and board | Y (per item in `IssueDetail.tsx`, and a project-level Activity view with issue and field filters and paging. `views/ActivityView.tsx`, `shared/activity.ts`) |
-| Templates (board, doc, form) | P (issue templates and project (board) templates; no doc or form templates) |
+| Templates (board, doc, form) | P (issue, project (board) and doc templates; no form templates) |
 | Import and export (CSV, Excel) | Y (CSV and Excel (.xlsx) import and export in `TableView.tsx`, `xlsx.ts`, using read-excel-file and write-excel-file) |
 | Audit log | Y (append-only local log of every change with source (ui, mcp, sync), filters and CSV export; capped at 50,000 rows. Settings > Audit log, `main/db.ts`, `shared/audit.ts`) |
 
@@ -184,8 +184,7 @@ Column-level features: header rename, hide, reorder, resize, pin, sort, group-fo
 Full 1:1 with both products is a multi-quarter build and needs a multi-user backend. The local app already covers most single-user features. What is left is listed below.
 
 **Still missing, feasible locally (single user):**
-- Project and team documents (single user).
-- Document templates.
+- Team documents (needs OS-353) and images in docs.
 - Team entities with their own membership.
 - Cross-project item creation. Recipes.
 - Agent as an assignee type.
@@ -206,7 +205,7 @@ Each phase ends with typecheck passing and a manual check in the app. Phases are
 1. Sub-issues with parent progress roll-up. **Done.**
 2. Relations (blocks, blocked by, duplicate, related). **Done.**
 3. Comments and activity log per issue. **Done.** Reactions and subscriptions done.
-4. Favourites, estimates, and issue templates. **Done.** T-shirt estimate scale and project templates done. Open: document templates.
+4. Favourites, estimates, and issue templates. **Done.** T-shirt estimate scale and project templates done. Document templates done.
 5. Command menu (Cmd+K) and single-key shortcuts. **Done.** Drawer keys s, p, l, a and f.
 
 **Phase 2: views and filtering**
