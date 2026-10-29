@@ -34,6 +34,7 @@ declare global {
       save: (data: AppData) => Promise<void>
       openExternal: (url: string) => Promise<void>
       onExternal: (cb: (data: AppData) => void) => () => void
+      onEditCommand: (cb: (cmd: 'undo' | 'redo') => void) => () => void
       sync: {
         status: () => Promise<SyncStatus | null>
         defaultFolder: () => Promise<string>

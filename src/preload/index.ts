@@ -14,6 +14,14 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.removeListener('data:external', listener)
     }
   },
+  // Fires for the Edit menu's Undo/Redo (Cmd+Z). Returns an unsubscribe function.
+  onEditCommand: (cb: (cmd: 'undo' | 'redo') => void) => {
+    const listener = (_event: unknown, cmd: 'undo' | 'redo') => cb(cmd)
+    ipcRenderer.on('edit:command', listener)
+    return () => {
+      ipcRenderer.removeListener('edit:command', listener)
+    }
+  },
   sync: {
     status: () => ipcRenderer.invoke('sync:status') as Promise<SyncStatus | null>,
     defaultFolder: () => ipcRenderer.invoke('sync:defaultFolder') as Promise<string>,
