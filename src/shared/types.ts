@@ -54,6 +54,7 @@ export type ColumnType =
   | 'files'
   | 'world_clock'
   | 'time_tracking'
+  | 'subtasks'
 
 export interface SelectOption {
   id: string
@@ -90,6 +91,8 @@ export interface Column {
   required?: boolean
   // formula: expression over other numeric columns by name, e.g. "Estimate * 2"
   formula?: string
+  buttonAction?: AutomationAction // button: run this on click; unset = click counter only
+  buttonLabel?: string
   // progress: 'subissues' derives the value from sub-issues; manual (default, unset) uses the stored value
   progressMode?: 'manual' | 'subissues'
   // board_relation: target project id. mirror: relation column id + field to show.

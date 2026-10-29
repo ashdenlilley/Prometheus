@@ -1400,6 +1400,11 @@ select.field-input:focus {
   background: transparent;
 }
 
+.vote-btn.on {
+  color: var(--accent);
+  font-weight: 600;
+}
+
 /* ───────────── Cycles ───────────── */
 .cycle {
   margin-bottom: 14px;
