@@ -20,10 +20,10 @@ Last checked against the code: 2026-10-29.
 | Project updates (health, posts over time) | Y (`ProjectSettings.tsx` Updates tab, `shared/types.ts` ProjectUpdate) |
 | Milestones | Y (`ProjectSettings.tsx` Milestones tab, `IssueDetail.tsx` milestone field, `RoadmapView.tsx`) |
 | Initiatives (group of projects) | Y (`shared/types.ts` Initiative, `ProjectSettings.tsx` General tab, `RoadmapView.tsx`) |
-| Cycles (time-boxed, auto-create, auto-roll unfinished work) | P (create, optional auto-create on load via the project's `autoCycles` setting, progress, burndown; roll-over is a manual button, not automatic. `CyclesView.tsx`, `shared/model.ts` rollOverCycle) |
+| Cycles (time-boxed, auto-create, auto-roll unfinished work) | Y (create, optional auto-create via the project's `autoCycles` setting, optional automatic roll-over of unfinished issues when a cycle ends via `autoRollOver` (undoable), manual roll-over button, progress, burndown. `CyclesView.tsx`, `shared/model.ts` rollOverCycle and autoRollOverCycles) |
 | Labels (workspace and team) | P (per-project label column with coloured options; no workspace or team labels, no label groups or parent labels. `cells.tsx`) |
 | Priority (None, Urgent, High, Medium, Low) | Y (`shared/types.ts` PRIORITIES, `cells.tsx` PrioritySelect) |
-| Estimates (points or t-shirt) | P (numeric points only, no t-shirt scale. `shared/types.ts` Issue.estimate, `IssueDetail.tsx`) |
+| Estimates (points or t-shirt) | Y (per-project scale: points or t-shirt XS–XL stored as 1/2/3/5/8. `shared/estimate.ts`, `shared/types.ts` Project.estimateScale, `IssueDetail.tsx`) |
 | Relations: blocks, blocked by, duplicate, related | Y (`shared/types.ts` Relation, `shared/model.ts` inverseRelations, `IssueDetail.tsx`) |
 | Attachments | Y (Files column with 5 MB cap, stored in the data file. `cells.tsx` FilesEdit) |
 | Comments, reactions, mentions | P (comments and @mention notifications. `shared/model.ts` addComment, `IssueDetail.tsx`; no reactions) |
@@ -33,7 +33,7 @@ Last checked against the code: 2026-10-29.
 | Templates (issue, project, document) | P (issue templates saved from `IssueDetail.tsx`, applied in `TableView.tsx`; no project or document templates) |
 | Documents (project and team docs) | N |
 | Asks and forms (intake) | N |
-| Recurring issues | N |
+| Recurring issues | Y (daily, weekly on chosen weekdays, monthly on a day, or every N days; the next copy is created on the app's tick with catch-up limited to one copy. `shared/recurrence.ts`, `shared/model.ts` runRecurrences, `IssueDetail.tsx`) |
 
 ### 1.2 Workflow
 | Feature | Status |
@@ -45,7 +45,7 @@ Last checked against the code: 2026-10-29.
 | Auto-close and auto-archive rules | P (automations can set status on a status change or when a due date passes; no auto-close on inactivity, no auto-archive. `shared/model.ts`) |
 | Git branch names and PR status (GitHub, GitLab) | N |
 | Keyboard-first command menu (Cmd+K) | Y (`App.tsx` Cmd+K handler, `CommandPalette.tsx`) |
-| Single-key shortcuts for set status, priority, label, assignee | P (s, p and f keys in the issue drawer only; no label or assignee keys. `IssueDetail.tsx`) |
+| Single-key shortcuts for set status, priority, label, assignee | Y (s, p, l, a and f keys in the issue drawer. `IssueDetail.tsx`) |
 
 ### 1.3 Views
 | Feature | Status |
@@ -55,10 +55,10 @@ Last checked against the code: 2026-10-29.
 | Timeline (Gantt with dependencies) | Y (`TimelineView.tsx`: bars and arrows from blocks relations) |
 | Roadmap (projects over time) | Y (`RoadmapView.tsx`, scoped to space, zoom levels) |
 | Cycles view with graphs | Y (`CyclesView.tsx`: Burndown and velocity) |
-| Custom views (saved filters, shared, favourited) | P (saved views per project and view kind store filter, group, sort and hidden columns. `FilterBar.tsx`, `shared/types.ts` SavedView; not shared or favourited) |
+| Custom views (saved filters, shared, favourited) | P (saved views per project and view kind store filter, group, sort, hidden columns and chart type; a view can be starred and favourites are listed in the sidebar. `FilterBar.tsx`, `Sidebar.tsx`, `shared/views.ts`; not shared) |
 | Filters with AND and OR and any property | Y (`shared/filter.ts`, `shared/types.ts` FilterGroup match all or any, `FilterBar.tsx`) |
 | Display options (group by, sub-group by, order, show completed, show sub-issues, columns) | P (group by any field, sub-group by as board swimlanes (`rowsBy`), sort, a show-completed toggle in List, Board and Table that saved views keep, hide columns, sub-issues nested in `TableView.tsx`; column order and visibility are per project, not per view) |
-| Insights and charts (burndown, created vs completed, scope) | P (burndown and velocity, bar chart by any field; no created vs completed chart, no scope line. `CyclesView.tsx`, `ChartView.tsx`) |
+| Insights and charts (burndown, created vs completed, scope) | Y (burndown with a scope line, velocity, created vs completed per cycle or for the last 8 weeks, bar, pie and line charts by any field. `CyclesView.tsx`, `ChartView.tsx`, `shared/insights.ts`) |
 
 ### 1.4 Automation and integrations
 | Feature | Status |
@@ -94,7 +94,7 @@ Columns the API lists, with Prometheus status.
 | Priority | priority | Y (`cells.tsx` PrioritySelect, typed column) |
 | Dropdown (multi-select) | dropdown | Y (`cells.tsx` ChipPicker, multi-select) |
 | People (assignees, multi) | people | Y (`cells.tsx` TagsInput, suggestions from project members) |
-| Date (with time) | date | P (date only; time is a separate Hour column. `cells.tsx`) |
+| Date (with time) | date | Y (optional "Include time" per column, stored as ISO; filters and sort compare by timestamp. `cells.tsx`, `shared/datetime.ts`) |
 | Timeline | timeline | Y (`cells.tsx` date range) |
 | Numbers (sum, format) | number | Y (`shared/types.ts` numberFormat, currency and footer; `shared/query.ts` formatNumber and summarize) |
 | Text | text | Y (`cells.tsx`) |
@@ -105,7 +105,7 @@ Columns the API lists, with Prometheus status.
 | Email | email | Y (`cells.tsx`) |
 | Phone | phone | Y (`cells.tsx`; no click-to-call) |
 | Tags | tags | Y (`cells.tsx` TagsInput) |
-| Progress (formula-based in monday) | progress | P (manual 0–100 slider, not computed from sub-items or status. `cells.tsx` ProgressEdit) |
+| Progress (formula-based in monday) | progress | Y (manual 0–100 slider, or computed from sub-issues per column (`progressMode`). `cells.tsx` ProgressEdit, `shared/query.ts` progressValue) |
 | Creation log | created | Y (`cells.tsx`, `columns.ts`) |
 | Last updated | updated | Y (`cells.tsx`, `columns.ts`) |
 | Auto number | auto_number | Y (`cells.tsx`, `columns.ts`) |
@@ -139,7 +139,7 @@ Column-level features: header rename, hide, reorder, resize, pin, sort, group-fo
 | Timeline (Gantt, dependencies) | Y (`TimelineView.tsx`, arrows from blocks relations) |
 | Calendar | Y (`CalendarView.tsx`) |
 | Gantt | Y (same view as Timeline, `TimelineView.tsx`) |
-| Chart (bar, pie, line, sum over group) | P (bar chart of counts or estimate points by any field; no pie or line. `ChartView.tsx`) |
+| Chart (bar, pie, line, sum over group) | Y (bar, pie or line chart of counts or estimate points by any field; the type is saved with the view. `ChartView.tsx`, `shared/chart.ts`) |
 | Workload (hours per person over time) | P (workload widget per person on the dashboard; no workload view, no change over time. `DashboardView.tsx`) |
 | Map (Location column) | N |
 | Form view | N |
@@ -186,16 +186,15 @@ Full 1:1 with both products is a multi-quarter build and needs a multi-user back
 **Still missing, feasible locally (single user):**
 - Subscriptions and reactions on issues. A board-level activity log.
 - Project and team documents (single user).
-- Recurring issues. Intake forms for local use. Project-level and board-level templates.
-- Automatic cycle roll-over. Auto-close on inactivity and auto-archive rules.
+- Intake forms for local use. Project-level and board-level templates.
+- Auto-close on inactivity and auto-archive rules.
 - Automation triggers on project, cycle and initiative changes, and on column changes.
 - Per-view column order and visibility (order and hidden columns are per project). Sub-group by shipped as board swimlanes and the show-completed toggle has shipped.
 - Team entities with their own membership. Workspace-level labels and label groups.
-- Estimates on a t-shirt scale. A date-with-time column. A progress column computed from sub-items. A time-tracking timer. A map for Location. Button actions. Per-person votes.
-- Pie and line charts. Created vs completed chart and a scope line on the burndown. Calendar and portfolio dashboard widgets. A workload view over time. Map, gallery and personal views.
+- A time-tracking timer. A map for Location. Button actions. Per-person votes.
+- Calendar and portfolio dashboard widgets. A workload view over time. Map, gallery and personal views.
 - Cross-project item creation. Recipes.
 - Excel import and export. An audit log.
-- Single-key shortcuts for label and assignee.
 - Agent as an assignee type. Folders.
 
 **Needs a backend or multi-user:**
@@ -214,12 +213,12 @@ Each phase ends with typecheck passing and a manual check in the app. Phases are
 1. Sub-issues with parent progress roll-up. **Done.**
 2. Relations (blocks, blocked by, duplicate, related). **Done.**
 3. Comments and activity log per issue. **Done.** Open: reactions, subscriptions.
-4. Favourites, estimates, and issue templates. **Done.** Open: t-shirt estimate scale, project and document templates.
-5. Command menu (Cmd+K) and single-key shortcuts. **Command menu done.** Open: single-key shortcuts for label and assignee.
+4. Favourites, estimates, and issue templates. **Done.** T-shirt estimate scale done. Open: project and document templates.
+5. Command menu (Cmd+K) and single-key shortcuts. **Done.** Drawer keys s, p, l, a and f.
 
 **Phase 2: views and filtering**
 6. Filter model (AND and OR, any property) shared across Board, Table, Timeline and Cycles. **Partial.** Done for Board, Table, List and Chart. Open: Timeline and Cycles do not use the filter bar.
-7. Saved views with grouping on any field, sorting, and column show and hide. **Partial.** Done for saved views. Saved views also keep board rows (sub-group by) and the show-completed toggle. Open: column order and hidden columns are per project, not per view; shared or favourite views.
+7. Saved views with grouping on any field, sorting, and column show and hide. **Partial.** Done for saved views. Saved views also keep board rows (sub-group by), the show-completed toggle and the chart type, and can be favourited into the sidebar. Open: column order and hidden columns are per project, not per view; shared views.
 8. Triage inbox with accept, decline, and duplicate. **Done.**
 9. Bulk select and bulk edit on Table and Board. **Done** (also on List).
 
@@ -232,14 +231,14 @@ Each phase ends with typecheck passing and a manual check in the app. Phases are
 15. Files column (copy into app data folder). **Done** (stored in the data file, 5 MB cap; not copied to a separate folder).
 
 **Phase 4: planning**
-16. Cycle auto-create, auto-roll unfinished work, burndown and velocity. **Partial.** Done: auto-create, burndown, velocity. Open: automatic roll-over (manual button only); scope line on burndown.
+16. Cycle auto-create, auto-roll unfinished work, burndown and velocity. **Done.** Auto-create, automatic roll-over (opt-in per project), burndown with scope line, velocity, created vs completed.
 17. Project status, lead, members, milestones, and project updates. **Done.**
 18. Initiatives above projects. **Done.**
 19. Timeline dependencies and roadmap zoom levels. **Done.**
 
 **Phase 5: reporting and automation**
 20. Dashboard canvas with widgets (chart, numbers, progress, list, workload, calendar). **Partial.** Done: canvas and all widgets except calendar. Open: calendar widget, portfolio widget.
-21. Chart view and calendar view. **Partial.** Calendar done. Open: pie and line charts (chart view is bar only).
+21. Chart view and calendar view. **Done.** Calendar, and bar, pie and line charts.
 22. Automation engine: triggers (status, date, assignee, column changed) and actions (set field, notify, create item, move to cycle). **Partial.** Done: status, priority, assignee and due-date triggers; set field, notify, create sub-item, move to cycle. Open: column-changed trigger; project, cycle and initiative triggers.
 23. CSV import and export. **Done** (no Excel).
 
