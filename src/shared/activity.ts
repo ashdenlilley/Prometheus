@@ -1,4 +1,5 @@
 // Project activity log: every issue's history and comments merged newest first. Pure so the view and tests share it.
+import { isLive } from './live'
 import { issueKey } from './model'
 import { toISO } from './dates'
 import type { AppData } from './types'
@@ -43,7 +44,7 @@ export function projectActivity(
   opts: { issueId?: string; field?: string; from?: string; to?: string }
 ): ActivityItem[] {
   const items = data.issues
-    .filter(i => i.projectId === projectId && (!opts.issueId || i.id === opts.issueId))
+    .filter(i => i.projectId === projectId && isLive(i) && (!opts.issueId || i.id === opts.issueId))
     .flatMap(issue => {
       const base = { issueId: issue.id, key: issueKey(data, issue), title: issue.title }
       return [
