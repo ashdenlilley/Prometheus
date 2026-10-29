@@ -1,4 +1,5 @@
 import { DurableObject } from 'cloudflare:workers'
+import type { Role } from '../../src/shared/permissions'
 import { randomId, sha256Hex, signAccess, timingEqual } from './crypto'
 import type { Env } from './env'
 
@@ -17,7 +18,12 @@ const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS devices (id TEXT PRIMARY KEY, name TEXT NOT NULL, refresh_hash TEXT UNIQUE,
      created_at INTEGER NOT NULL, last_seen_at INTEGER NOT NULL, revoked_at INTEGER)`,
   // Every refresh token already rotated away. Presenting one again means it was stolen.
-  `CREATE TABLE IF NOT EXISTS retired_refresh (hash TEXT PRIMARY KEY, device_id TEXT NOT NULL, at INTEGER NOT NULL)`
+  `CREATE TABLE IF NOT EXISTS retired_refresh (hash TEXT PRIMARY KEY, device_id TEXT NOT NULL, at INTEGER NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE, name TEXT NOT NULL, role TEXT NOT NULL,
+     projects TEXT NOT NULL DEFAULT '[]', created_at INTEGER NOT NULL, removed_at INTEGER)`,
+  `CREATE TABLE IF NOT EXISTS invites (id TEXT PRIMARY KEY, token_hash TEXT NOT NULL UNIQUE, email TEXT NOT NULL, name TEXT NOT NULL,
+     role TEXT NOT NULL, projects TEXT NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL,
+     accepted_at INTEGER, revoked_at INTEGER)`
 ]
 
 type Sql = SqlStorage
@@ -33,6 +39,21 @@ export type PollResult =
   | { status: 'notfound' }
   | { status: 'ok'; refreshToken: string; accessToken: string; accessExpiresAt: number; deviceId: string }
 
+export interface Member {
+  userId: string
+  email: string
+  name: string
+  role: Role
+  projects: string[]
+}
+
+// Role and project grant for an invite or a member edit. Projects are kept only for guests.
+export function grant(role: unknown, projects: unknown): { role: Role; projects: string[] } | { error: string } {
+  if (role !== 'member' && role !== 'viewer' && role !== 'guest') return { error: 'bad_role' }
+  if (!Array.isArray(projects) || projects.length > 100 || !projects.every(p => typeof p === 'string' && p !== '')) return { error: 'bad_projects' }
+  return { role: role as Role, projects: role === 'guest' ? projects : [] }
+}
+
 // One instance named 'auth'. Storage calls are synchronous, so a check and the write after it
 // cannot interleave with another request (the awaits only hash or sign).
 export class Auth extends DurableObject<Env> {
@@ -40,6 +61,21 @@ export class Auth extends DurableObject<Env> {
     super(ctx, env)
     ctx.blockConcurrencyWhile(async () => {
       for (const s of SCHEMA) run(ctx.storage.sql, s)
+      // Tables created before OS-360 keep their old shape, so the new column is added by hand.
+      for (const t of ['devices', 'requests']) {
+        if (!rows<{ name: string }>(ctx.storage.sql, `PRAGMA table_info(${t})`).some(c => c.name === 'user_id')) {
+          run(ctx.storage.sql, `ALTER TABLE ${t} ADD COLUMN user_id TEXT`)
+        }
+      }
+      // The owner row follows OWNER_EMAIL. Its id is fixed, so there is never a second owner.
+      const email = (env.OWNER_EMAIL ?? '').trim().toLowerCase()
+      run(
+        ctx.storage.sql,
+        "INSERT INTO users (id, email, name, role, created_at) VALUES ('owner', ?, ?, 'owner', ?) ON CONFLICT (id) DO UPDATE SET email = excluded.email",
+        email,
+        email.split('@')[0],
+        Date.now()
+      )
       if (!(await ctx.storage.getAlarm())) await ctx.storage.setAlarm(Date.now() + HOUR)
     })
   }
@@ -48,37 +84,45 @@ export class Auth extends DurableObject<Env> {
     return this.ctx.storage.sql
   }
 
-  // Rate-limit counts run before any await, so concurrent starts cannot slip past the limit.
-  async startSignIn(i: { emailKey: string; ip: string; owner: boolean; deviceName: string }) {
+  // Records one hit per key and returns seconds until retry, or 0 when every key is under its limit.
+  // Counts run before any await, so concurrent calls cannot slip past the limit.
+  private hit(keys: string[], limits: number[]): number {
     const now = Date.now()
-    const keys = [`email:${i.emailKey}`, `ip:${i.ip}`]
-    const limits = [LIMIT_EMAIL, LIMIT_IP]
     let retry = 0
     for (let n = 0; n < keys.length; n++) {
       const hits = rows<{ n: number; first: number | null }>(this.sql, 'SELECT COUNT(*) AS n, MIN(at) AS first FROM starts WHERE key = ? AND at > ?', keys[n], now - WINDOW_MS)[0]
       if (hits.n >= limits[n]) retry = Math.max(retry, Math.ceil(((hits.first ?? now) + WINDOW_MS - now) / 1000))
     }
-    if (retry) return { limited: retry }
+    if (retry) return retry
     for (const key of keys) run(this.sql, 'INSERT INTO starts (key, at) VALUES (?, ?)', key, now)
     run(this.sql, 'DELETE FROM starts WHERE at < ?', now - WINDOW_MS)
+    return 0
+  }
 
-    // Non-owner requests are stored too, so the reply and poll look the same. They are never emailed.
+  // Requests for a non-member are stored too, so the reply and poll look the same. They are never emailed.
+  async startSignIn(i: { emailKey: string; email: string; ip: string; deviceName: string }) {
+    const retry = this.hit([`email:${i.emailKey}`, `ip:${i.ip}`], [LIMIT_EMAIL, LIMIT_IP])
+    if (retry) return { limited: retry }
+
+    const now = Date.now()
+    const user = rows<{ id: string }>(this.sql, 'SELECT id FROM users WHERE email = ? AND removed_at IS NULL', i.email)[0]
     const expiresAt = now + Number(this.env.LINK_TTL_SECONDS ?? 900) * 1000
     const requestId = randomId(16)
     const pollSecret = randomId(32)
     const token = randomId(32)
     run(
       this.sql,
-      'INSERT INTO requests (id, token_hash, secret_hash, device_name, owner, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO requests (id, token_hash, secret_hash, device_name, owner, created_at, expires_at, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
       requestId,
       await sha256Hex(token),
       await sha256Hex(pollSecret),
       i.deviceName,
-      i.owner ? 1 : 0,
+      user ? 1 : 0,
       now,
-      expiresAt
+      expiresAt,
+      user?.id ?? null
     )
-    return { requestId, pollSecret, expiresAt, token: i.owner ? token : null }
+    return { requestId, pollSecret, expiresAt, token: user ? token : null }
   }
 
   async verifyLink(tokenHash: string): Promise<boolean> {
@@ -89,9 +133,9 @@ export class Auth extends DurableObject<Env> {
   }
 
   async poll(requestId: string, secretHash: string): Promise<PollResult> {
-    const r = rows<{ secret_hash: string; device_name: string; verified: number; consumed: number; expires_at: number }>(
+    const r = rows<{ secret_hash: string; device_name: string; verified: number; consumed: number; expires_at: number; user_id: string }>(
       this.sql,
-      'SELECT secret_hash, device_name, verified, consumed, expires_at FROM requests WHERE id = ?',
+      "SELECT secret_hash, device_name, verified, consumed, expires_at, COALESCE(user_id, 'owner') AS user_id FROM requests WHERE id = ?",
       requestId
     )[0]
     if (!r || !timingEqual(r.secret_hash, secretHash)) return { status: 'notfound' }
@@ -105,12 +149,13 @@ export class Auth extends DurableObject<Env> {
     const refreshToken = randomId(32)
     run(
       this.sql,
-      'INSERT INTO devices (id, name, refresh_hash, created_at, last_seen_at) VALUES (?, ?, ?, ?, ?)',
+      'INSERT INTO devices (id, name, refresh_hash, created_at, last_seen_at, user_id) VALUES (?, ?, ?, ?, ?, ?)',
       deviceId,
       r.device_name,
       await sha256Hex(refreshToken),
       now,
-      now
+      now,
+      r.user_id
     )
     const access = await signAccess(this.env.JWT_SECRET ?? '', deviceId) // the Worker checks JWT_SECRET is set
     return { status: 'ok', refreshToken, deviceId, ...access }
@@ -134,30 +179,40 @@ export class Auth extends DurableObject<Env> {
     return { refreshToken: next, deviceId: d.id, ...access }
   }
 
-  // True when the device exists and is not revoked. Also records that it was seen.
-  async authorize(deviceId: string): Promise<boolean> {
-    const ok = rows<{ id: string }>(this.sql, 'SELECT id FROM devices WHERE id = ? AND revoked_at IS NULL', deviceId)[0]
-    if (ok) run(this.sql, 'UPDATE devices SET last_seen_at = ? WHERE id = ?', Date.now(), deviceId)
-    return ok !== undefined
+  // The device's member when the device and its user are both active. Also records that the device was seen.
+  async authorize(deviceId: string): Promise<Member | null> {
+    const m = rows<{ id: string; email: string; name: string; role: string; projects: string }>(
+      this.sql,
+      "SELECT u.id, u.email, u.name, u.role, u.projects FROM devices d JOIN users u ON u.id = COALESCE(d.user_id, 'owner') WHERE d.id = ? AND d.revoked_at IS NULL AND u.removed_at IS NULL",
+      deviceId
+    )[0]
+    if (!m) return null
+    run(this.sql, 'UPDATE devices SET last_seen_at = ? WHERE id = ?', Date.now(), deviceId)
+    return { userId: m.id, email: m.email, name: m.name, role: m.role as Role, projects: JSON.parse(m.projects) }
   }
 
-  async listDevices(currentId: string) {
+  async listDevices(currentId: string, userId: string) {
     return rows<{ id: string; name: string; created_at: number; last_seen_at: number }>(
       this.sql,
-      'SELECT id, name, created_at, last_seen_at FROM devices WHERE revoked_at IS NULL ORDER BY created_at'
+      "SELECT id, name, created_at, last_seen_at FROM devices WHERE revoked_at IS NULL AND COALESCE(user_id, 'owner') = ? ORDER BY created_at",
+      userId
     ).map(d => ({ id: d.id, name: d.name, createdAt: d.created_at, lastSeenAt: d.last_seen_at, current: d.id === currentId }))
   }
 
-  async revokeDevice(deviceId: string): Promise<boolean> {
-    if (!rows<{ id: string }>(this.sql, 'SELECT id FROM devices WHERE id = ? AND revoked_at IS NULL', deviceId)[0]) return false
+  async revokeDevice(deviceId: string, userId: string): Promise<boolean> {
+    if (!rows<{ id: string }>(this.sql, "SELECT id FROM devices WHERE id = ? AND revoked_at IS NULL AND COALESCE(user_id, 'owner') = ?", deviceId, userId)[0]) return false
     await this.revoke([deviceId])
     return true
   }
 
-  async revokeAll(): Promise<number> {
-    const ids = rows<{ id: string }>(this.sql, 'SELECT id FROM devices WHERE revoked_at IS NULL').map(d => d.id)
+  async revokeAll(userId: string): Promise<number> {
+    const ids = this.deviceIds(userId)
     await this.revoke(ids)
     return ids.length
+  }
+
+  private deviceIds(userId: string): string[] {
+    return rows<{ id: string }>(this.sql, "SELECT id FROM devices WHERE revoked_at IS NULL AND COALESCE(user_id, 'owner') = ?", userId).map(d => d.id)
   }
 
   // Revoked devices lose their refresh token at once, and their open sockets are closed by Workspace.
@@ -166,12 +221,113 @@ export class Auth extends DurableObject<Env> {
     if (ids.length) await this.env.WORKSPACE.getByName('default').closeDevices(ids)
   }
 
-  // Cleans expired sign-in requests, old rate-limit rows and retired refresh tokens.
+  // Invites are created by the owner. Expiry and the rate limits come from the same clock as sign-in.
+  async createInvite(i: { emailKey: string; email: string; name: string; role: unknown; projects: unknown; ip: string }) {
+    const g = grant(i.role, i.projects)
+    if ('error' in g) return g
+    // The token is hashed before the synchronous block, so the checks and writes below cannot interleave.
+    const token = randomId(32)
+    const tokenHash = await sha256Hex(token)
+    const retry = this.hit([`invite:${i.emailKey}`, `invite-ip:${i.ip}`], [LIMIT_EMAIL, LIMIT_IP])
+    if (retry) return { limited: retry }
+    if (rows<{ id: string }>(this.sql, 'SELECT id FROM users WHERE email = ? AND removed_at IS NULL', i.email)[0]) return { error: 'already_member' }
+
+    const now = Date.now()
+    // Only the newest invite for an address works.
+    run(this.sql, 'UPDATE invites SET revoked_at = ? WHERE email = ? AND accepted_at IS NULL AND revoked_at IS NULL', now, i.email)
+    const id = randomId(12)
+    const expiresAt = now + Number(this.env.INVITE_TTL_SECONDS ?? 7 * 86400) * 1000
+    run(
+      this.sql,
+      'INSERT INTO invites (id, token_hash, email, name, role, projects, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      id,
+      tokenHash,
+      i.email,
+      i.name,
+      g.role,
+      JSON.stringify(g.projects),
+      now,
+      expiresAt
+    )
+    return { id, token, expiresAt }
+  }
+
+  // The pending invite behind a token, or null. Does not consume it.
+  async inviteInfo(tokenHash: string) {
+    return (
+      rows<{ email: string; name: string; role: string }>(
+        this.sql,
+        'SELECT email, name, role FROM invites WHERE token_hash = ? AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at > ?',
+        tokenHash,
+        Date.now()
+      )[0] ?? null
+    )
+  }
+
+  // Single use: marks the invite accepted and adds the user (or reactivates a removed one).
+  async acceptInvite(tokenHash: string): Promise<{ email: string } | null> {
+    const now = Date.now()
+    const inv = rows<{ id: string; email: string; name: string; role: string; projects: string }>(
+      this.sql,
+      'SELECT id, email, name, role, projects FROM invites WHERE token_hash = ? AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at > ?',
+      tokenHash,
+      now
+    )[0]
+    if (!inv) return null
+    run(this.sql, 'UPDATE invites SET accepted_at = ? WHERE id = ?', now, inv.id)
+    const user = rows<{ id: string }>(this.sql, 'SELECT id FROM users WHERE email = ?', inv.email)[0]
+    if (user) {
+      run(this.sql, 'UPDATE users SET name = ?, role = ?, projects = ?, removed_at = NULL WHERE id = ? AND id <> \'owner\'', inv.name, inv.role, inv.projects, user.id)
+    } else {
+      run(this.sql, 'INSERT INTO users (id, email, name, role, projects, created_at) VALUES (?, ?, ?, ?, ?, ?)', randomId(12), inv.email, inv.name, inv.role, inv.projects, now)
+    }
+    return { email: inv.email }
+  }
+
+  async listMembers() {
+    const members = rows<{ id: string; email: string; name: string; role: string; projects: string; created_at: number }>(
+      this.sql,
+      'SELECT id, email, name, role, projects, created_at FROM users WHERE removed_at IS NULL ORDER BY created_at'
+    ).map(u => ({ id: u.id, email: u.email, name: u.name, role: u.role, projects: JSON.parse(u.projects), createdAt: u.created_at }))
+    const invites = rows<{ id: string; email: string; name: string; role: string; projects: string; expires_at: number }>(
+      this.sql,
+      'SELECT id, email, name, role, projects, expires_at FROM invites WHERE accepted_at IS NULL AND revoked_at IS NULL AND expires_at > ? ORDER BY created_at',
+      Date.now()
+    ).map(v => ({ id: v.id, email: v.email, name: v.name, role: v.role, projects: JSON.parse(v.projects), expiresAt: v.expires_at }))
+    return { members, invites }
+  }
+
+  // false: no such member (or the owner). { error }: the new role or projects are not allowed. true: saved and their sockets closed.
+  async updateMember(id: string, p: { role?: unknown; projects?: unknown; name?: string }): Promise<boolean | { error: string }> {
+    const u = rows<{ role: string; projects: string; name: string }>(this.sql, 'SELECT role, projects, name FROM users WHERE id = ? AND removed_at IS NULL', id)[0]
+    if (id === 'owner' || !u) return false
+    const g = grant(p.role ?? u.role, p.projects ?? JSON.parse(u.projects))
+    if ('error' in g) return g
+    run(this.sql, 'UPDATE users SET role = ?, projects = ?, name = ? WHERE id = ?', g.role, JSON.stringify(g.projects), p.name ?? u.name, id)
+    await this.env.WORKSPACE.getByName('default').closeUser(id, 4003, 'access changed')
+    return true
+  }
+
+  // Signs the member out everywhere and drops their pending invites. The owner cannot be removed.
+  async removeMember(id: string): Promise<boolean> {
+    if (id === 'owner' || !rows<{ id: string }>(this.sql, 'SELECT id FROM users WHERE id = ? AND removed_at IS NULL', id)[0]) return false
+    run(this.sql, 'UPDATE users SET removed_at = ? WHERE id = ?', Date.now(), id)
+    run(this.sql, 'UPDATE invites SET revoked_at = ? WHERE accepted_at IS NULL AND revoked_at IS NULL AND email = (SELECT email FROM users WHERE id = ?)', Date.now(), id)
+    await this.revoke(this.deviceIds(id))
+    return true
+  }
+
+  async revokeInvite(id: string): Promise<boolean> {
+    return rows<{ id: string }>(this.sql, 'UPDATE invites SET revoked_at = ? WHERE id = ? AND accepted_at IS NULL AND revoked_at IS NULL RETURNING id', Date.now(), id).length > 0
+  }
+
+  // Cleans expired sign-in requests, old rate-limit rows, retired refresh tokens and long-expired invites.
   async alarm() {
     const now = Date.now()
     run(this.sql, 'DELETE FROM requests WHERE expires_at < ?', now - DAY)
     run(this.sql, 'DELETE FROM starts WHERE at < ?', now - WINDOW_MS)
     run(this.sql, 'DELETE FROM retired_refresh WHERE at < ?', now - 90 * DAY)
+    run(this.sql, 'DELETE FROM invites WHERE expires_at < ?', now - 30 * DAY)
     await this.ctx.storage.setAlarm(now + HOUR)
   }
 }

@@ -30,3 +30,19 @@ export const signedInPage = () =>
 
 export const invalidLinkPage = () =>
   page('<h1>Link invalid</h1><p>This sign-in link is invalid or has expired. Start sign-in again in Prometheus.</p>', 400)
+
+export const inviteConfirmPage = (token: string, info: { email: string; role: string }) =>
+  page(
+    `<h1>Join Prometheus</h1><p>${escapeHtml(info.email)} is invited to Prometheus sync as a ${escapeHtml(info.role)}.</p>` +
+      `<form method="post" action="/invite"><input type="hidden" name="t" value="${escapeHtml(token)}">` +
+      `<button type="submit">Accept invite</button></form>`
+  )
+
+export const inviteAcceptedPage = (email: string, publicUrl: string) =>
+  page(
+    `<h1>Invite accepted</h1><p>Next, open Prometheus, go to Settings &gt; Cloud sync, enter the server address ${escapeHtml(publicUrl)} ` +
+      `and sign in with ${escapeHtml(email)}.</p>`
+  )
+
+export const invalidInvitePage = () =>
+  page('<h1>Invite invalid</h1><p>This invite is invalid, has already been used or has expired. Ask the owner for a new one.</p>', 400)

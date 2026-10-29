@@ -2,6 +2,7 @@
 import type { Agent, AppData, PendingPost, Webhook, WebhookEvent } from '@shared/types'
 import type { AuditFilter, AuditRow } from '@shared/audit'
 import type { WebhookDelivery } from '@shared/webhooks'
+import type { Role } from '@shared/permissions'
 
 export interface SyncStatus {
   enabled: boolean
@@ -32,6 +33,10 @@ export interface CloudStatus {
   error: string | null
   signIn: { email: string; expiresAt: number } | null
   needsJoin: boolean
+  userId: string | null
+  role: Role | null
+  presence: { userId: string; name: string; issueId?: string }[]
+  backup: string | null
 }
 
 export interface CloudDevice {
@@ -40,6 +45,29 @@ export interface CloudDevice {
   createdAt: number
   lastSeenAt: number
   current: boolean
+}
+
+export interface CloudMember {
+  id: string
+  name: string
+  role: Role
+  email?: string
+  projects?: string[]
+  createdAt?: number
+}
+
+export interface CloudInvite {
+  id: string
+  email: string
+  name: string
+  role: Role
+  projects: string[]
+  expiresAt: number
+}
+
+export interface CloudMembers {
+  members: CloudMember[]
+  invites: CloudInvite[]
 }
 
 export interface IntegrationStatus {
@@ -97,6 +125,12 @@ declare global {
         devices: () => Promise<CloudDevice[]>
         revokeDevice: (id: string) => Promise<void>
         signOut: () => Promise<void>
+        members: () => Promise<CloudMembers>
+        invite: (body: { email: string; name?: string; role: Role; projects?: string[] }) => Promise<void>
+        updateMember: (id: string, patch: { role?: Role; projects?: string[]; name?: string }) => Promise<void>
+        removeMember: (id: string) => Promise<void>
+        revokeInvite: (id: string) => Promise<void>
+        setPresence: (issueId: string | null) => Promise<void>
       }
 
       createAgent: (name: string, color: string, level: Agent['level']) => Promise<{ agent: Agent; token: string }>

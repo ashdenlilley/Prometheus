@@ -60,7 +60,20 @@ export function IssueDetail({
   const assigneeRef = useRef<HTMLInputElement>(null)
   const [sent, setSent] = useState('')
   const [copied, setCopied] = useState(false)
+  const [viewers, setViewers] = useState<string[]>([])
   useEscape(onClose)
+
+  // Other users with this issue open (cloud presence). Polled, since the server only pushes on sync.
+  useEffect(() => {
+    const poll = () =>
+      window.api.cloud
+        .status()
+        .then(cloud => setViewers((cloud?.presence ?? []).filter(p => p.issueId === issueId).map(p => p.name)))
+        .catch(() => setViewers([]))
+    poll()
+    const timer = setInterval(poll, 3000)
+    return () => clearInterval(timer)
+  }, [issueId])
 
   // Single-key shortcuts while not typing (see DRAWER_SHORTCUTS): s status, p priority, f favourite, l labels, a assignee.
   useEffect(() => {
@@ -302,6 +315,7 @@ export function IssueDetail({
             <button className="icon-btn" onClick={onClose} aria-label="Close">{ICONS.close}</button>
           </div>
         </div>
+        {viewers.length > 0 && <div className="muted small" role="status">Also viewing: {viewers.join(', ')}</div>}
         {sent && <div className="muted small">Sent to {sent}</div>}
         <div className="muted small drawer-keys">
           {DRAWER_SHORTCUTS.map((s, i) => (

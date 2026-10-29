@@ -75,14 +75,33 @@ export function lastToken(w) {
   return new URL(link).searchParams.get('t')
 }
 
-// Full owner sign-in on one device: start, confirm the emailed link, poll for tokens.
-export async function signIn(w, deviceName = 'Laptop') {
+// Full sign-in on one device: start, confirm the emailed link, poll for tokens. Defaults to the owner.
+export async function signIn(w, deviceName = 'Laptop', email = OWNER) {
   const before = w.emails.length
-  const start = await (await call(w, '/auth/start', { method: 'POST', body: { email: OWNER, deviceName } })).json()
+  const start = await (await call(w, '/auth/start', { method: 'POST', body: { email, deviceName } })).json()
   await waitFor(() => w.emails.length > before)
   await call(w, '/auth/verify', { method: 'POST', form: { t: lastToken(w) } })
   const res = await call(w, '/auth/poll', { method: 'POST', body: { requestId: start.requestId, pollSecret: start.pollSecret } })
   return res.json()
+}
+
+// Owner invites someone. Waits for the invite email and returns its token (null when the request was refused).
+export async function invite(w, ownerAccess, body) {
+  const before = w.emails.length
+  const res = await call(w, '/invites', { method: 'POST', body, headers: { authorization: `Bearer ${ownerAccess}` } })
+  if (res.status !== 201) return { res, token: null }
+  await waitFor(() => w.emails.length > before)
+  return { res, token: new URL(/https?:\/\/\S+/.exec(w.emails.at(-1).body.text)[0]).searchParams.get('t') }
+}
+
+export const accept = (w, token) => call(w, '/invite', { method: 'POST', form: { t: token } })
+
+// Owner invites, the invitee accepts, then signs in as them. Returns the invitee's tokens.
+export async function join(w, email, role, projects) {
+  const owner = await signIn(w)
+  const { token } = await invite(w, owner.accessToken, { email, role, projects })
+  await accept(w, token)
+  return signIn(w, 'Laptop', email)
 }
 
 // Opens a sync socket with a bearer token. Returns { status } if the upgrade is refused.

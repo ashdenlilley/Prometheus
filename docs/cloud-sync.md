@@ -187,6 +187,26 @@ Only one can be on. The check lives in main, not only in the UI:
 - "This device was signed out. Sign in again." after a `4001` close (the device was revoked elsewhere), or after a refresh returns `401`. The refresh token is deleted, and local data stays.
 - Sign-in messages: the link expired or was already used (`410`), the request was not found (`404`), it timed out after 15 minutes, or too many links were requested (`429`).
 
+## Collaboration and permissions (OS-360, first slice)
+
+Design: `docs/design/OS-360-permissions.md`. Rules live in `src/shared/permissions.ts` and are enforced by the Workspace Durable Object on every push; the client UI only hides what the server would refuse.
+
+**Roles.** `owner` (the `OWNER_EMAIL` account; everything), `member` (read/write every visible project), `guest` (read/write issues, docs and git links only in the projects in their grant; can read spaces and teams), `viewer` (read-only; every push is refused). Webhooks, integrations, agents and project access settings are owner-only. Only the owner invites people, changes roles and removes members.
+
+**Invites.** `POST /invites {email, name?, role, projects?}` (owner) emails a single-use link (`kind: invite`; the log provider prints `invite link for <email>: <url>`). It expires after 7 days (`INVITE_TTL_SECONDS`). Opening the link shows a confirm page; accepting creates the user, who then signs in with the normal magic link. Rate limits: 5 invites per address and 20 per IP per 15 minutes. `GET /members` lists members (emails for the owner only) and pending invites; `PATCH`/`DELETE /members/:id` and `DELETE /invites/:id` manage them. Removing a member revokes all their devices (close 4001).
+
+**Project visibility.** A project with `access: {mode: 'restricted', users: [...]}` is invisible (not just locked) to everyone except the owner and the listed users; guests additionally need the project in their grant. Rows are filtered per user in snapshots, history and live broadcasts by the row's current project (issues, cycles, docs, automations, ...; git links and notifications via their issue).
+
+**Refusals.** A refused push batch is rolled back atomically and answered with `{type:'error', code:'forbidden', index, message}`; the client drops that batch and reloads from the server, so the local edit is undone and the user sees "Not allowed: ...". Refusals are logged server-side (`GET /audit/denials`, owner only, last 1000).
+
+**Access changes.** When a role, grant or project visibility changes, affected non-owner sockets close with code 4003. The client clears its local copy and resyncs from 0, then re-applies unsent outbox edits on top. Owners are never affected.
+
+**Presence.** After `ready` the client sends `{type:'presence', issueId}`; the server broadcasts `{type:'presence', users}` (only users who can see the issue get its id). The issue panel shows "Also viewing", and settings show "Online now".
+
+**Joining as an invited user.** A non-owner whose device has data must replace it with the workspace copy; a backup (`cloud-backup-<ms>.json` in the data folder) is written before every adopt.
+
+**Known limitations.** Downgrading a user does not purge data already on their device (removing them signs them out). Changing `OWNER_EMAIL` to an existing member's address is not supported. Read-only guests and team-based visibility are follow-ups.
+
 ## Testing
 
 ```sh

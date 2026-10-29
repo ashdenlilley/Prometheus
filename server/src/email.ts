@@ -2,7 +2,7 @@ import type { Env } from './env'
 import { escapeHtml } from './pages'
 
 export interface EmailSender {
-  send(msg: { to: string; from: string; subject: string; text: string; html: string }): Promise<void>
+  send(msg: { to: string; from: string; subject: string; text: string; html: string; kind?: 'sign-in' | 'invite' }): Promise<void>
 }
 
 // Picks the sender by EMAIL_PROVIDER. Config problems throw; the messages never include a link or a provider reply.
@@ -54,7 +54,7 @@ function logSender(env: Env): EmailSender {
   }
   return {
     async send(msg) {
-      console.log(`sign-in link for ${msg.to}: ${msg.text.match(/https?:\/\/\S+/)?.[0]}`)
+      console.log(`${msg.kind ?? 'sign-in'} link for ${msg.to}: ${msg.text.match(/https?:\/\/\S+/)?.[0]}`)
     }
   }
 }
@@ -64,4 +64,12 @@ export async function sendMagicLink(env: Env, to: string, link: string): Promise
   const text = `Sign in to Prometheus sync:\n\n${link}\n\nThis link works once and expires in 15 minutes. If you did not ask for it, ignore this email.`
   const html = `<p>Sign in to Prometheus sync:</p><p><a href="${escapeHtml(link)}">Sign in</a></p><p>This link works once and expires in 15 minutes. If you did not ask for it, ignore this email.</p>`
   await emailSender(env).send({ from: env.EMAIL_FROM!, to, subject: 'Sign in to Prometheus', text, html })
+}
+
+// Sends the invite link. The link must stay the first URL in the text (the log sender and tests read it from there).
+export async function sendInvite(env: Env, to: string, link: string, role: string): Promise<void> {
+  const note = `The link works once and expires in 7 days. Then open Prometheus, go to Settings > Cloud sync, enter the server address ${env.PUBLIC_URL} and sign in with this email address.`
+  const text = `You've been invited to Prometheus sync as a ${role}.\n\nAccept the invite:\n\n${link}\n\n${note}`
+  const html = `<p>${escapeHtml(`You've been invited to Prometheus sync as a ${role}.`)}</p><p><a href="${escapeHtml(link)}">Accept the invite</a></p><p>${escapeHtml(note)}</p>`
+  await emailSender(env).send({ from: env.EMAIL_FROM!, to, subject: "You're invited to Prometheus", text, html, kind: 'invite' })
 }
