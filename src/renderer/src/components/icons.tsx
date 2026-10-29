@@ -28,6 +28,7 @@ export const ICONS = {
   triage: <Svg><path d="M2.5 9.5l1.5-5h8l1.5 5v3h-11z" /><path d="M2.5 9.5h3l1 1.5h3l1-1.5h3" /></Svg>,
   chart: <Svg><path d="M3 13.5h10.5" /><rect x="4" y="8" width="2" height="5" rx=".5" /><rect x="7.5" y="5" width="2" height="8" rx=".5" /><rect x="11" y="3" width="2" height="10" rx=".5" /></Svg>,
   calendar: <Svg><rect x="2.5" y="3.5" width="11" height="10" rx="2" /><path d="M2.5 6.5h11M5.5 2v2.5M10.5 2v2.5" /></Svg>,
+  activity: <Svg><path d="M1.75 8.5h2.75l1.75-4.5 3.25 8.5 1.75-4h3" /></Svg>,
   dashboard: <Svg><rect x="2.5" y="2.5" width="4.5" height="6" rx="1" /><rect x="9" y="2.5" width="4.5" height="3" rx="1" /><rect x="9" y="7.5" width="4.5" height="6" rx="1" /><rect x="2.5" y="10" width="4.5" height="3.5" rx="1" /></Svg>,
   bell: <Svg><path d="M4 11V7.5a4 4 0 0 1 8 0V11l1 1.5H3z" /><path d="M6.5 13.5a1.5 1.5 0 0 0 3 0" /></Svg>,
   search: <Svg><circle cx="7" cy="7" r="4.25" /><path d="M10.25 10.25L13.5 13.5" /></Svg>

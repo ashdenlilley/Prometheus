@@ -1,7 +1,9 @@
 import { useState } from 'react'
-import type { Dashboard, Issue, Space, Widget, WidgetType } from '@shared/types'
+import type { Dashboard, Issue, ProjectStatus, ProjectUpdate, Space, Widget, WidgetType } from '@shared/types'
 import { categoryOf } from '@shared/model'
 import { progress } from '@shared/query'
+import { monthGrid, parseISO } from '@shared/dates'
+import { portfolioRows, type PortfolioRow } from '@shared/insights'
 import { Burndown } from './CyclesView'
 import { issueKey, useStore } from '../store'
 import { ICONS } from '../components/icons'
@@ -16,11 +18,23 @@ const WIDGET_TYPES: { type: WidgetType; label: string }[] = [
   { type: 'overdue', label: 'Overdue' },
   { type: 'list', label: 'Open issues' },
   { type: 'milestones', label: 'Milestones' },
-  { type: 'cycle', label: 'Active cycle' }
+  { type: 'cycle', label: 'Active cycle' },
+  { type: 'calendar', label: 'Calendar (due dates)' },
+  { type: 'portfolio', label: 'Portfolio' }
 ]
 
+const PROJECT_STATUS_LABEL: Record<ProjectStatus, string> = {
+  planned: 'Planned',
+  in_progress: 'In progress',
+  paused: 'Paused',
+  completed: 'Completed',
+  canceled: 'Canceled'
+}
+
+const HEALTH_LABEL: Record<ProjectUpdate['health'], string> = { on_track: 'On track', at_risk: 'At risk', off_track: 'Off track' }
+
 // Space dashboards: widgets over every project in the space, or one project.
-export function DashboardView({ space }: { space: Space }) {
+export function DashboardView({ space, onOpen }: { space: Space; onOpen: (id: string) => void }) {
   const { data, dispatch } = useStore()
   const boards = data.dashboards.filter(d => d.spaceId === space.id)
   const [activeId, setActiveId] = useState<string | null>(boards[0]?.id ?? null)
@@ -78,7 +92,7 @@ export function DashboardView({ space }: { space: Space }) {
                 <span>{w.title}</span>
                 <button className="icon-btn" aria-label="Remove widget" onClick={() => removeWidget(w)}>{ICONS.close}</button>
               </div>
-              <WidgetBody widget={w} spaceId={space.id} />
+              <WidgetBody widget={w} spaceId={space.id} onOpen={onOpen} />
             </section>
           ))}
           {board.widgets.length === 0 && <div className="muted">Add a widget to start.</div>}
@@ -95,7 +109,7 @@ function scopeIssues(data: { issues: Issue[]; projects: { id: string; spaceId: s
   return data.issues.filter(i => ids.includes(i.projectId) && !i.triage && !i.archivedAt)
 }
 
-function WidgetBody({ widget, spaceId }: { widget: Widget; spaceId: string }) {
+function WidgetBody({ widget, spaceId, onOpen }: { widget: Widget; spaceId: string; onOpen: (id: string) => void }) {
   const { data } = useStore()
   const issues = scopeIssues(data, spaceId, widget.projectId)
   const projects = data.projects.filter(p => p.spaceId === spaceId && (!widget.projectId || p.id === widget.projectId))
@@ -206,6 +220,10 @@ function WidgetBody({ widget, spaceId }: { widget: Widget; spaceId: string }) {
         </div>
       )
     }
+    case 'calendar':
+      return <DueCalendar issues={issues} onOpen={onOpen} />
+    case 'portfolio':
+      return <PortfolioTable rows={portfolioRows(data, spaceId, widget.projectId)} />
     case 'overdue':
       return <IssueList issues={overdue} projectOf={i => data.projects.find(p => p.id === i.projectId)} extra={i => fmtDate(i.dueDate!)} emptyText="Nothing overdue." />
     case 'list':
@@ -298,5 +316,71 @@ function AddWidget({ boardId, spaceId, onClose }: { boardId: string; spaceId: st
         <button className="btn primary" onClick={add}>Add</button>
       </div>
     </Modal>
+  )
+}
+
+// Month grid of due dates for the widget's scope. The shown month is local to the widget.
+function DueCalendar({ issues, onOpen }: { issues: Issue[]; onOpen: (id: string) => void }) {
+  const { data } = useStore()
+  const now = parseISO(todayISO())
+  const [ym, setYm] = useState({ y: now.getFullYear(), m: now.getMonth() + 1 })
+  const monthKey = `${ym.y}-${String(ym.m).padStart(2, '0')}`
+  const today = todayISO()
+  const shift = (n: number) => setYm(({ y, m }) => {
+    const d = new Date(y, m - 1 + n, 1)
+    return { y: d.getFullYear(), m: d.getMonth() + 1 }
+  })
+
+  return (
+    <div>
+      <div className="toolbar">
+        <button className="btn" aria-label="Previous month" onClick={() => shift(-1)}>‹</button>
+        <strong className="grow">{new Date(ym.y, ym.m - 1).toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}</strong>
+        <button className="btn" aria-label="Next month" onClick={() => shift(1)}>›</button>
+      </div>
+      <div className="cal-grid">
+        {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(d => (
+          <div key={d} className="cal-head muted small">{d}</div>
+        ))}
+        {monthGrid(ym.y, ym.m).map(d => {
+          const items = issues.filter(i => i.dueDate === d)
+          return (
+            <div key={d} className={clsx('cal-cell', !d.startsWith(monthKey) && 'out', d === today && 'today')}>
+              <div className="cal-day small">{parseISO(d).getDate()}</div>
+              {items.slice(0, 3).map(i => (
+                <button key={i.id} className="cal-item" onClick={() => onOpen(i.id)}>{issueKey(data, i)} {i.title}</button>
+              ))}
+              {items.length > 3 && <span className="muted small">+{items.length - 3} more</span>}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function PortfolioTable({ rows }: { rows: PortfolioRow[] }) {
+  if (rows.length === 0) return <div className="muted small">No projects.</div>
+  return (
+    <div className="portfolio">
+      <div className="portfolio-row muted small">
+        <span>Name</span>
+        <span>Status</span>
+        <span>Lead</span>
+        <span>Progress</span>
+        <span>Target</span>
+        <span>Health</span>
+      </div>
+      {rows.map(r => (
+        <div key={r.id} className="portfolio-row">
+          <span className="ellipsis">{r.name}</span>
+          <span className="muted small">{PROJECT_STATUS_LABEL[r.status]}</span>
+          <span className="muted small ellipsis">{r.lead || '—'}</span>
+          <span className="muted small">{r.pct}%</span>
+          <span className="muted small">{r.targetDate ? fmtDate(r.targetDate) : '—'}</span>
+          <span className="muted small">{r.health ? HEALTH_LABEL[r.health] : '—'}</span>
+        </div>
+      ))}
+    </div>
   )
 }

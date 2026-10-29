@@ -22,6 +22,7 @@ import { TimelineView } from './views/TimelineView'
 import { CyclesView } from './views/CyclesView'
 import { ChartView } from './views/ChartView'
 import { CalendarView } from './views/CalendarView'
+import { ActivityView } from './views/ActivityView'
 import { RoadmapView } from './views/RoadmapView'
 import { DashboardView } from './views/DashboardView'
 import { PROJECT_VIEWS, VIEW_LABEL, type Route, type ViewId } from './route'
@@ -132,7 +133,7 @@ export default function App() {
     if (route.view === 'roadmap') {
       return <RoadmapView projects={spaceProjects} initiatives={data.initiatives.filter(i => i.spaceId === space.id)} />
     }
-    if (route.view === 'dashboard') return <DashboardView space={space} />
+    if (route.view === 'dashboard') return <DashboardView space={space} onOpen={setOpenIssueId} />
 
     if (!project || route.view === 'overview') {
       return (
@@ -165,6 +166,8 @@ export default function App() {
         return <ChartView project={project} />
       case 'calendar':
         return <CalendarView project={project} onOpen={setOpenIssueId} />
+      case 'activity':
+        return <ActivityView project={project} onOpen={setOpenIssueId} />
       default:
         return null
     }
