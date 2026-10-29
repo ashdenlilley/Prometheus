@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { Agent, AppData, Webhook, WebhookEvent } from '../shared/types'
+import type { Agent, AppData, PendingPost, Webhook, WebhookEvent } from '../shared/types'
 import type { AuditFilter, AuditRow } from '../shared/audit'
 import type { WebhookDelivery } from '../shared/webhooks'
 
@@ -60,8 +60,24 @@ contextBridge.exposeInMainWorld('api', {
     test: (id: string) => ipcRenderer.invoke('webhooks:test', id) as Promise<string>,
     deliveries: (id: string) => ipcRenderer.invoke('webhooks:deliveries', id) as Promise<WebhookDelivery[]>,
     redeliver: (deliveryId: string) => ipcRenderer.invoke('webhooks:redeliver', deliveryId) as Promise<string>
+  },
+  integrations: {
+    status: () => ipcRenderer.invoke('integrations:status') as Promise<IntegrationStatus>,
+    setWebhook: (integrationId: string, url: string) =>
+      ipcRenderer.invoke('integrations:setWebhook', integrationId, url) as Promise<IntegrationStatus | { ok: false; error: string }>,
+    clearWebhook: (integrationId: string) => ipcRenderer.invoke('integrations:clearWebhook', integrationId) as Promise<IntegrationStatus>,
+    test: (integrationId: string) => ipcRenderer.invoke('integrations:test', integrationId) as Promise<IntegrationTestResult>,
+    post: (posts: PendingPost[]) => ipcRenderer.invoke('integrations:post', posts) as Promise<void>
   }
 })
+
+export interface IntegrationStatus {
+  keychain: boolean
+  configured: Record<string, { hint: string }> // integration id -> masked webhook URL
+}
+
+export type IntegrationTestResult = { ok: true } | { ok: false; status?: number; error: string }
+
 
 export interface GitStatus {
   hasToken: boolean

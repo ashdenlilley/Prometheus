@@ -33,6 +33,7 @@ export type ColumnType =
   | 'checkbox'
   | 'tags'
   | 'link'
+  | 'integrations'
   | 'email'
   | 'phone'
   | 'rating'
@@ -74,7 +75,39 @@ export interface FileRef {
   dataUrl: string
 }
 
-export type CellValue = string | number | boolean | string[] | DateRange | FileRef[]
+export type CellValue = string | number | boolean | string[] | DateRange | FileRef[] | IntegrationLink[]
+
+export type LinkProvider = 'slack' | 'figma' | 'sentry' | 'zendesk' | 'jira' | 'google' | 'teams' | 'github' | 'other'
+
+// A link to an external item, stored in an 'integrations' column.
+export interface IntegrationLink {
+  url: string
+  provider: LinkProvider
+  title?: string
+}
+
+export type IntegrationProvider = 'slack'
+
+// An outgoing connection. Its webhook URL is a per-device secret and is never stored here.
+export interface Integration {
+  id: string
+  provider: IntegrationProvider
+  name: string
+  scope: 'space' | 'project'
+  scopeId: string
+  settings: { channel?: string /* display label only */ }
+  createdAt: string
+}
+
+// A message waiting for the device that made the change to send it. Never persisted or synced.
+export interface PendingPost {
+  id: string
+  integrationId: string
+  issueId: string
+  reason: string // e.g. 'Automation "X"' or 'Shared'
+  template?: string
+  at: string
+}
 
 export interface Column {
   id: string
@@ -212,6 +245,7 @@ export type AutomationAction =
   | { type: 'move_to_cycle' }
   | { type: 'create_issue'; title: string; status?: string; projectId?: string }
   | { type: 'notify'; message: string }
+  | { type: 'post_slack'; integrationId: string; template?: string }
 
 export interface Automation {
   id: string
@@ -538,4 +572,7 @@ export interface AppData {
   gitLinks?: GitLink[]
   // Display name for the local user. Used for comment authors and notifications.
   me: string
+  // Optional so older data loads unchanged. Tolerate undefined everywhere.
+  integrations?: Integration[]
+  pendingPosts?: PendingPost[] // transient: never persisted, synced or undone
 }

@@ -7,6 +7,7 @@ import { clsx, fmtDate } from '../util'
 import { ICONS } from './icons'
 import { Modal } from './ui'
 import { SyncSettings } from './SyncSettings'
+import { IntegrationsSettings } from './IntegrationsSettings'
 import { GitHubSettings } from './GitHubSettings'
 
 // Settings: sync across devices, and the local MCP endpoint for Claude Code, Codex and other local agents.
@@ -42,6 +43,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   return (
     <Modal title="Settings" onClose={onClose}>
       <SyncSettings />
+      <IntegrationsSettings />
       <GitHubSettings />
 
       <section className="settings-section">

@@ -61,6 +61,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return () => clearTimeout(timer)
   }, [data, ready])
 
+  // Posts queued by this window's own changes are sent from here. Changes from sync never carry posts.
+  useEffect(() => {
+    if (!ready || !data.pendingPosts?.length) return
+    const posts = data.pendingPosts
+    // Save first, so the main process finds the change that queued each post
+    window.api.save(data)
+    window.api.integrations.post(posts)
+    dispatch({ type: 'clearPendingPosts', ids: posts.map(p => p.id) })
+  }, [data, ready])
+
   // Flush the pending change when the window closes.
   useEffect(() => {
     const flush = () => {

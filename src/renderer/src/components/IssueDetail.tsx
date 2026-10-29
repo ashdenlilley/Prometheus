@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import type { ActivityEntry, Comment, FileRef, Issue, Relation, RelationType } from '@shared/types'
+import type { ActivityEntry, Comment, FileRef, Integration, Issue, Relation, RelationType } from '@shared/types'
 import { childrenOf, progress } from '@shared/query'
+import { integrationsFor } from '@shared/integrations'
 import { DRAWER_SHORTCUTS, drawerShortcut, isCopyBranchShortcut } from '@shared/shortcuts'
 import { branchName } from '@shared/git'
 import { createIssue, issueKey, useStore, withValue } from '../store'
@@ -16,7 +17,7 @@ import { CellEditor } from './cells'
 import { EstimateSelect, PrioritySelect, StatusDot, StatusSelect } from './fields'
 import { PrPill } from './PrPill'
 import { ICONS } from './icons'
-import { askText, useEscape } from './ui'
+import { askText, Menu, useEscape, type MenuItem } from './ui'
 import { clsx, fmtDate, parseISO, todayISO, uid } from '../util'
 
 const REL_LABEL: Record<RelationType | 'blocked_by' | 'duplicated_by', string> = {
@@ -57,6 +58,7 @@ export function IssueDetail({
   const [relTarget, setRelTarget] = useState('')
   const labelsRef = useRef<HTMLInputElement>(null)
   const assigneeRef = useRef<HTMLInputElement>(null)
+  const [sent, setSent] = useState('')
   const [copied, setCopied] = useState(false)
   useEscape(onClose)
 
@@ -93,6 +95,15 @@ export function IssueDetail({
   }, [issue, project, dispatch])
 
   if (!issue || !project) return null
+
+  const slack = integrationsFor(data, issue.projectId)
+  const share = (i: Integration) => {
+    dispatch({ type: 'shareToSlack', issueId: issue.id, integrationId: i.id })
+    setSent(i.name)
+  }
+  const shareItems: MenuItem[] = slack.length
+    ? slack.map(i => ({ label: slack.length > 1 ? `Share to ${i.name}` : 'Share to Slack', onSelect: () => share(i) }))
+    : [{ label: 'Share to Slack', disabled: true, title: 'Add a Slack integration in Settings > Integrations', onSelect: () => {} }]
 
   const patch = (p: Partial<Issue>) => dispatch({ type: 'patchIssue', id: issue.id, patch: p })
   const rec = issue.recurrence
@@ -285,11 +296,13 @@ export function IssueDetail({
             >
               {issue.favourite ? '★' : '☆'}
             </button>
+            <Menu label="Issue actions" align="right" items={shareItems} />
             <button className="btn ghost" onClick={saveTemplate}>Save as template</button>
             <button className="btn danger" onClick={remove}>{ICONS.trash} Delete</button>
             <button className="icon-btn" onClick={onClose} aria-label="Close">{ICONS.close}</button>
           </div>
         </div>
+        {sent && <div className="muted small">Sent to {sent}</div>}
         <div className="muted small drawer-keys">
           {DRAWER_SHORTCUTS.map((s, i) => (
             <span key={s.key}>

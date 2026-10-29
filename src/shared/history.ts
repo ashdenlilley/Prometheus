@@ -22,7 +22,8 @@ export const COLLECTIONS = [
   'docs',
   'agents',
   'webhooks',
-  'gitLinks'
+  'gitLinks',
+  'integrations'
 ] as const
 // Notifications are left out: they are a feed, not user data.
 export type Collection = (typeof COLLECTIONS)[number]
@@ -134,7 +135,15 @@ export const emptyHistory = (): History => ({ past: [], future: [], lastKey: nul
 
 // Not undoable: loads (startup, MCP or sync replacing the copy), timed automations, the roll-over bookkeeping flag
 // and the notification feed.
-const NOT_UNDOABLE = new Set<Action['type']>(['load', 'tick', 'markRolledOver', 'notify', 'markNotifications'])
+const NOT_UNDOABLE = new Set<Action['type']>([
+  'load',
+  'tick',
+  'markRolledOver',
+  'notify',
+  'markNotifications',
+  'shareToSlack', // queues a post that has already gone out; undo cannot unsend it
+  'clearPendingPosts'
+])
 
 export const LIMIT = 100
 // Edits with the same key this close together merge, e.g. one keystroke per patchIssue while typing a title.

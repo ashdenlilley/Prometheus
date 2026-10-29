@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import type { CellValue, Column, DateRange, FileRef, Issue, Project, SelectOption } from '@shared/types'
+import type { CellValue, Column, DateRange, FileRef, Issue, IntegrationLink, Project, SelectOption } from '@shared/types'
 import { evaluateFormula, fieldValue, formatNumber, progressValue } from '@shared/query'
+import { parseIntegrationLink } from '@shared/integrations'
 import { issueKey } from '@shared/model'
 import { fromLocalInput, toLocalInput } from '@shared/datetime'
 import { formatLocation, parseLocation } from '@shared/location'
@@ -10,6 +11,7 @@ import { toggleVote, voters } from '@shared/votes'
 import { useStore } from '../store'
 import { PillSelect, PrioritySelect } from './fields'
 import { ICONS } from './icons'
+import { ProviderBadge } from './ProviderBadge'
 import { askText, useOutside } from './ui'
 import { clsx, fmtDate } from '../util'
 
@@ -207,6 +209,19 @@ export function CellEditor({ column, project, value, issue, onChange, variant = 
           )}
         </div>
       )
+
+    case 'integrations': {
+      const links = Array.isArray(value) ? (value as unknown as IntegrationLink[]) : []
+      // Table cells are read-only; the issue panel adds and removes links through the reducer
+      if (!issue || variant === 'cell') return <LinkChips links={links} compact />
+      return (
+        <LinksEdit
+          links={links}
+          onAdd={url => dispatch({ type: 'addIntegrationLink', issueId: issue.id, columnId: column.id, url })}
+          onRemove={url => dispatch({ type: 'removeIntegrationLink', issueId: issue.id, columnId: column.id, url })}
+        />
+      )
+    }
 
     case 'email':
       return <input className={cls} type="email" value={str} placeholder="name@company.com" onChange={e => onChange(e.target.value || undefined)} />
@@ -458,6 +473,59 @@ function FormulaValue({ column, project, issue }: { column: Column; project: Pro
   if (!issue || !column.formula) return <span className="muted">—</span>
   const n = evaluateFormula(column.formula, issue, project)
   return <span className="formula-text">{n === undefined ? 'Error' : formatNumber(n, column)}</span>
+}
+
+// Links to external items. Clicking opens them in the browser.
+function LinkChips({ links, compact, onRemove }: { links: IntegrationLink[]; compact?: boolean; onRemove?: (url: string) => void }) {
+  if (links.length === 0) return <span className="muted">—</span>
+  return (
+    <div className="link-chips">
+      {links.map(l => (
+        <span key={l.url} className={clsx('chip neutral', compact && 'compact')}>
+          <button type="button" className="link-chip" title={l.url} onClick={e => { e.stopPropagation(); window.api.openExternal(l.url) }}>
+            <ProviderBadge provider={l.provider} />
+            <span className="chip-label">{l.title ?? l.url}</span>
+          </button>
+          {onRemove && (
+            <button type="button" className="chip-x" aria-label={`Remove ${l.title ?? l.url}`} onClick={() => onRemove(l.url)}>
+              ×
+            </button>
+          )}
+        </span>
+      ))}
+    </div>
+  )
+}
+
+function LinksEdit({ links, onAdd, onRemove }: { links: IntegrationLink[]; onAdd: (url: string) => void; onRemove: (url: string) => void }) {
+  const [text, setText] = useState('')
+  const [error, setError] = useState('')
+  const add = () => {
+    if (!text.trim()) return
+    if (!parseIntegrationLink(text)) return setError('Paste a full http:// or https:// link')
+    onAdd(text.trim())
+    setText('')
+    setError('')
+  }
+  return (
+    <div className="links-edit">
+      <LinkChips links={links} onRemove={onRemove} />
+      <input
+        className="field-input"
+        value={text}
+        placeholder="Paste a link"
+        aria-label="Add link"
+        onChange={e => {
+          setText(e.target.value)
+          setError('')
+        }}
+        onKeyDown={e => {
+          if (e.key === 'Enter') add()
+        }}
+      />
+      {error && <span className="error small">{error}</span>}
+    </div>
+  )
 }
 
 function FilesEdit({ value, onChange }: { value: FileRef[]; onChange: (v: CellValue | undefined) => void }) {

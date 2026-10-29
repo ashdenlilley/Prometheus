@@ -203,7 +203,15 @@ export { evaluateFormula } from './formula'
 // ───────────── Tabular export and import ─────────────
 
 // Cell text shared by CSV and XLSX: arrays join with '; ', objects become JSON, empty is ''.
-const cellText = (v: unknown) => (v === undefined || v === null ? '' : Array.isArray(v) ? v.join('; ') : typeof v === 'object' ? JSON.stringify(v) : String(v))
+// Integration links export as their URLs.
+const cellText = (v: unknown) =>
+  v === undefined || v === null
+    ? ''
+    : Array.isArray(v)
+      ? v.map(x => (typeof x === 'object' && x !== null && 'url' in x ? (x as { url: string }).url : String(x))).join('; ')
+      : typeof v === 'object'
+        ? JSON.stringify(v)
+        : String(v)
 
 const csvCell = (v: unknown) => {
   const s = cellText(v)

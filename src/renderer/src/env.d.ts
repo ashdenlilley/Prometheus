@@ -1,5 +1,5 @@
 /// <reference types="vite/client" />
-import type { Agent, AppData, Webhook, WebhookEvent } from '@shared/types'
+import type { Agent, AppData, PendingPost, Webhook, WebhookEvent } from '@shared/types'
 import type { AuditFilter, AuditRow } from '@shared/audit'
 import type { WebhookDelivery } from '@shared/webhooks'
 
@@ -19,6 +19,13 @@ export interface SyncInspect {
   segments: number
   encrypted: boolean
 }
+
+export interface IntegrationStatus {
+  keychain: boolean
+  configured: Record<string, { hint: string }> // integration id -> masked webhook URL
+}
+
+export type IntegrationTestResult = { ok: true } | { ok: false; status?: number; error: string }
 
 export interface McpStatus {
   enabled: boolean
@@ -81,6 +88,13 @@ declare global {
         test: (id: string) => Promise<string>
         deliveries: (id: string) => Promise<WebhookDelivery[]>
         redeliver: (deliveryId: string) => Promise<string>
+      }
+      integrations: {
+        status: () => Promise<IntegrationStatus>
+        setWebhook: (integrationId: string, url: string) => Promise<IntegrationStatus | { ok: false; error: string }>
+        clearWebhook: (integrationId: string) => Promise<IntegrationStatus>
+        test: (integrationId: string) => Promise<IntegrationTestResult>
+        post: (posts: PendingPost[]) => Promise<void>
       }
     }
   }
