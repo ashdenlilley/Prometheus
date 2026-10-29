@@ -68,7 +68,8 @@ export class SyncEngine {
   readonly clock: Clock
   private config: Config = { folder: null, deviceId: '', keyEnc: null }
   private key: Buffer | null = null
-  private clocks = new Map<string, string>()
+  // Shared with the cloud client, so both engines see every field's winning hlc.
+  readonly clocks = new Map<string, string>()
   private applied = new Set<string>()
   private outbox: Op[] = []
   private status: { lastSync: number | null; error: string | null } = { lastSync: null, error: null }
@@ -94,7 +95,7 @@ export class SyncEngine {
     this.clock.setDevice(this.config.deviceId)
     this.key = this.config.keyEnc ? await this.hooks.keys.open(this.config.keyEnc) : null
     await this.saveConfig()
-    this.clocks = this.store.clocks()
+    for (const [key, hlc] of this.store.clocks()) this.clocks.set(key, hlc)
     for (const hlc of this.clocks.values()) this.clock.observe(hlc)
     this.applied = this.store.appliedNames()
     if (this.config.folder && this.key) this.startPolling()

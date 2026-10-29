@@ -20,6 +20,28 @@ export interface SyncInspect {
   encrypted: boolean
 }
 
+export interface CloudStatus {
+  enabled: boolean
+  serverUrl: string
+  email: string
+  deviceId: string
+  deviceName: string
+  state: 'off' | 'signing-in' | 'connecting' | 'connected' | 'offline' | 'error'
+  pending: number
+  lastSync: number | null
+  error: string | null
+  signIn: { email: string; expiresAt: number } | null
+  needsJoin: boolean
+}
+
+export interface CloudDevice {
+  id: string
+  name: string
+  createdAt: number
+  lastSeenAt: number
+  current: boolean
+}
+
 export interface IntegrationStatus {
   keychain: boolean
   configured: Record<string, { hint: string }> // integration id -> masked webhook URL
@@ -67,6 +89,16 @@ declare global {
         disable: () => Promise<void>
         now: () => Promise<void>
       }
+      cloud: {
+        status: () => Promise<CloudStatus | null>
+        signIn: (serverUrl: string, email: string) => Promise<void>
+        cancelSignIn: () => Promise<void>
+        join: (mode: 'merge' | 'adopt') => Promise<void>
+        devices: () => Promise<CloudDevice[]>
+        revokeDevice: (id: string) => Promise<void>
+        signOut: () => Promise<void>
+      }
+
       createAgent: (name: string, color: string, level: Agent['level']) => Promise<{ agent: Agent; token: string }>
       mcp: {
         status: () => Promise<McpStatus>

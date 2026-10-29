@@ -1,7 +1,7 @@
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
 import { emptyFilter } from '../../src/shared/query'
-import { blankProject, emptyData } from '../../src/shared/seed'
+import { blankProject, emptyData, seed } from '../../src/shared/seed'
 import { adoptPersonal, applyOps, Clock, diffOps, snapshotOps, type Op } from '../../src/shared/sync'
 import type { AppData, Project, SavedView } from '../../src/shared/types'
 
@@ -68,4 +68,12 @@ describe('adoptPersonal', () => {
     assert.deepEqual(adopted.projects[0].views, [mine])
     assert.equal(adoptPersonal(adopted, incoming), adopted)
   })
+})
+
+test('a snapshot applied onto empty data creates projects with their views', () => {
+  const source = seed()
+  const result = applyOps(emptyData(), snapshotOps(source, new Map(), 'dev'))
+  assert.equal(result.data.projects.length, source.projects.length)
+  assert.equal(result.data.issues.length, source.issues.length)
+  assert.deepEqual(result.data.projects[0].views, source.projects[0].views.filter(v => !v.personal))
 })

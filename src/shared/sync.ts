@@ -241,7 +241,7 @@ export function applyOps(data: AppData, ops: Op[], clocks?: Map<string, string>)
       for (const [f, v] of Object.entries(op.set ?? {})) {
         if (!wins(rowKey(table, op.id, f), op.hlc)) continue
         stamp(rowKey(table, op.id, f), op.hlc)
-        row[f] = table === 'projects' && f === 'views' ? keepPersonal(row.views as SavedView[], v as SavedView[]) : v
+        row[f] = table === 'projects' && f === 'views' ? keepPersonal((row.views ?? []) as SavedView[], v as SavedView[]) : v
         touched = true
       }
       for (const f of op.unset ?? []) {

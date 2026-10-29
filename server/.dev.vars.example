@@ -1,0 +1,10 @@
+# Copy to .dev.vars for `npx wrangler dev`. .dev.vars is gitignored. Placeholders only.
+JWT_SECRET=replace-with-64-random-hex-chars
+EMAIL_API_KEY=replace-with-email-api-key
+# Local development only: prints the sign-in link to the `wrangler dev` console instead of emailing it.
+# Refused unless PUBLIC_URL starts with http://127.0.0.1 or http://localhost.
+# EMAIL_PROVIDER=log
+# For a fully local run with EMAIL_PROVIDER=log, also override the placeholders from wrangler.toml:
+# PUBLIC_URL=http://127.0.0.1:8787
+# OWNER_EMAIL=me@example.org   (any address other than the placeholder; only this one can sign in)
+# EMAIL_FROM=Prometheus <signin@example.com>

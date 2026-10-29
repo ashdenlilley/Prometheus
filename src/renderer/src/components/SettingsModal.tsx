@@ -7,6 +7,7 @@ import { clsx, fmtDate } from '../util'
 import { ICONS } from './icons'
 import { Modal } from './ui'
 import { SyncSettings } from './SyncSettings'
+import { CloudSyncSettings } from './CloudSyncSettings'
 import { IntegrationsSettings } from './IntegrationsSettings'
 import { GitHubSettings } from './GitHubSettings'
 
@@ -43,6 +44,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   return (
     <Modal title="Settings" onClose={onClose}>
       <SyncSettings />
+      <CloudSyncSettings />
       <IntegrationsSettings />
       <GitHubSettings />
 
