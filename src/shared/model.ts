@@ -21,6 +21,7 @@ import type {
   Template,
   TriageRule
 } from './types'
+import { enforceLabelGroups } from './labels'
 
 // Pure data layer shared by the renderer (UI actions) and the main process (MCP tools, DB).
 
@@ -54,6 +55,7 @@ export type Action =
   | { type: 'rollOverCycle'; cycleId: string; toCycleId: string }
   | { type: 'autoRollOver'; today: string }
   | { type: 'markRolledOver'; today: string }
+  | { type: 'addProjectFromTemplate'; project: Project; automations: Automation[]; triageRules: TriageRule[]; issues: Issue[] }
   | { type: 'addAutomation'; automation: Automation }
   | { type: 'patchAutomation'; id: string; patch: Partial<Automation> }
   | { type: 'deleteAutomation'; id: string }
@@ -207,6 +209,14 @@ export function reducer(s: AppData, a: Action): AppData {
       return autoRollOverCycles(s, a.today)
     case 'markRolledOver':
       return markRolledOver(s, a.today)
+    case 'addProjectFromTemplate':
+      return {
+        ...s,
+        projects: [...s.projects, a.project],
+        automations: [...s.automations, ...a.automations],
+        triageRules: [...s.triageRules, ...a.triageRules],
+        issues: [...s.issues, ...a.issues]
+      }
     case 'addAutomation':
       return { ...s, automations: [...s.automations, a.automation] }
     case 'patchAutomation':
@@ -355,6 +365,8 @@ function updateIssue(s: AppData, id: string, patch: Partial<Issue>, rules = true
   if (!before) return s
   const now = new Date().toISOString()
   const project = s.projects.find(p => p.id === before.projectId)
+  const space = s.spaces.find(sp => sp.id === project?.spaceId)
+  if (patch.labels && space?.labels) patch = { ...patch, labels: enforceLabelGroups(before.labels, patch.labels, space.labels) }
   const next: Issue = { ...before, ...patch, updatedAt: now }
 
   if (patch.status !== undefined && patch.status !== before.status) {
