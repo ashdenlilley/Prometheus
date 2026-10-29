@@ -126,6 +126,11 @@ export default function App() {
     else redo()
   }), [undo, redo])
 
+  // Tells the cloud server which issue this device has open, so others can see it. Errors are ignored: presence is best effort.
+  useEffect(() => {
+    window.api.cloud.setPresence(openIssueId).catch(() => undefined)
+  }, [openIssueId])
+
   const renderBody = () => {
     if (!space) {
       return (

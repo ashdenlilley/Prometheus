@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { triggerDefault } from '@shared/live'
 import { OBJECT_TRIGGERS, integrationsFor } from '@shared/integrations'
-import type { Automation, AutomationAction, AutomationTrigger, Project, ProjectStatus, StatusCategory, StatusDef } from '@shared/types'
+import type { Automation, AutomationAction, AutomationTrigger, Project, ProjectAccess, ProjectStatus, StatusCategory, StatusDef } from '@shared/types'
+import type { CloudMember } from '../env'
 import { issueKey, useStore } from '../store'
 import { fieldOptions } from './FilterBar'
 import { GitSection } from './GitSection'
@@ -207,7 +208,56 @@ function General({ project }: { project: Project }) {
         </button>
       </div>
       <div className="muted small">{initiatives.map(i => i.name).join(', ') || 'No initiatives in this space yet.'}</div>
+      <Access project={project} />
     </div>
+  )
+}
+
+// Shown only to the owner of a cloud workspace; restricting a project limits which members can see it.
+function Access({ project }: { project: Project }) {
+  const { dispatch } = useStore()
+  const [members, setMembers] = useState<CloudMember[] | null>(null)
+  const access: ProjectAccess = project.access ?? { mode: 'open', users: [] }
+  const patch = (next: ProjectAccess) => dispatch({ type: 'patchProject', id: project.id, patch: { access: next } })
+
+  useEffect(() => {
+    window.api.cloud
+      .status()
+      .then(cloud => (cloud?.enabled && cloud.role === 'owner' ? window.api.cloud.members() : null))
+      .then(list => list && setMembers(list.members))
+      .catch(() => setMembers(null))
+  }, [])
+
+  if (!members) return null
+  const others = members.filter(m => m.role !== 'owner')
+  return (
+    <>
+      <div className="section-title-row small">
+        <h3>Access</h3>
+      </div>
+      <label className="check-field">
+        <input
+          type="checkbox"
+          aria-label="Restrict project"
+          checked={access.mode === 'restricted'}
+          onChange={e => patch({ ...access, mode: e.target.checked ? 'restricted' : 'open' })}
+        />
+        Only selected people can see this project
+      </label>
+      {access.mode === 'restricted' &&
+        others.map(m => (
+          <label key={m.id} className="check-field">
+            <input
+              type="checkbox"
+              aria-label={`Access for ${m.name}`}
+              checked={access.users.includes(m.id)}
+              onChange={e => patch({ ...access, users: e.target.checked ? [...access.users, m.id] : access.users.filter(u => u !== m.id) })}
+            />
+            {m.name}
+          </label>
+        ))}
+      <p className="muted small">Owners always see every project. Guests also need the project in their own grant.</p>
+    </>
   )
 }
 
