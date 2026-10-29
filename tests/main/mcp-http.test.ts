@@ -205,21 +205,35 @@ describe('MCP HTTP layer', () => {
       assert.equal((res.json as Rpc).error?.code, -32600)
     })
 
-    // JSON null parses fine, then handle() reads msg.id on null and throws inside the async request handler.
-    // Its own server is started here so the unhandled rejection is attributed to this test, not the shared before hook.
-    test('a JSON null body gets an error reply', { skip: 'BUG: body "null" throws in handle() (unhandled rejection, no response); skipped rather than todo so the crash cannot leak into other tests' }, async () => {
-      const dirNull = mkdtempSync(join(tmpdir(), 'mcp-null-'))
-      const portNull = randomPort()
-      writeConfig(dirNull, portNull)
-      const server = new McpController(dirNull, fakeHost().host)
-      await server.start()
-      try {
-        const res = await post(portNull, 'null')
-        assert.equal(res.status, 400)
-      } finally {
-        await server.stop()
-        rmSync(dirNull, { recursive: true, force: true })
+    test('a JSON null body gets a -32600 Invalid Request reply (OS-306)', async () => {
+      const res = await post(port, 'null')
+      assert.equal(res.status, 400)
+      assert.equal((res.json as Rpc).error?.code, -32600)
+    })
+
+    test('a non-object body (number or string) gets a -32600 reply (OS-306)', async () => {
+      for (const body of ['5', '"ping"']) {
+        const res = await post(port, body)
+        assert.equal(res.status, 400, body)
+        assert.equal((res.json as Rpc).error?.code, -32600, body)
       }
+    })
+
+    test('null entries in a batch get -32600 replies alongside the valid ones (OS-306)', async () => {
+      const res = await post(port, [null, { jsonrpc: '2.0', id: 7, method: 'ping' }])
+      assert.equal(res.status, 200)
+      const replies = res.json as Rpc[]
+      assert.equal(replies.length, 2)
+      assert.equal(replies[0].error?.code, -32600)
+      assert.equal(replies[1].id, 7)
+      assert.deepEqual(replies[1].result, {})
+    })
+
+    test('the server keeps answering after a null body (OS-306)', async () => {
+      await post(port, 'null')
+      const res = await post(port, { jsonrpc: '2.0', id: 8, method: 'ping' })
+      assert.equal(res.status, 200)
+      assert.equal((res.json as Rpc).id, 8)
     })
   })
 

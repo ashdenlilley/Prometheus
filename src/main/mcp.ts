@@ -512,7 +512,10 @@ interface RpcMessage {
 const ok = (id: RpcMessage['id'], result: unknown) => ({ jsonrpc: '2.0', id, result })
 const fail = (id: RpcMessage['id'], code: number, message: string) => ({ jsonrpc: '2.0', id, error: { code, message } })
 
+const isMessage = (m: unknown): m is RpcMessage => typeof m === 'object' && m !== null && !Array.isArray(m)
+
 function handle(msg: RpcMessage, host: McpHost): unknown | null {
+  if (!isMessage(msg)) return fail(null, -32600, 'Invalid Request')
   // Notifications carry no id and get no response.
   if (msg.id === undefined || msg.method === undefined) return null
   const id = msg.id
@@ -595,30 +598,40 @@ function send(res: http.ServerResponse, status: number, body?: unknown) {
 }
 
 function createServer(token: string, host: McpHost) {
-  return http.createServer(async (req, res) => {
-    // Reject DNS-rebinding and cross-site requests before anything else.
-    if (!isLocalHost(req.headers.host)) return send(res, 403, fail(null, -32000, 'Forbidden host'))
-    if (req.headers.origin && !isLocalOrigin(req.headers.origin)) {
-      return send(res, 403, fail(null, -32000, 'Forbidden origin'))
-    }
-    if (req.url !== '/mcp') return send(res, 404)
-    if (!tokenMatches(req.headers.authorization, token)) {
-      return send(res, 401, fail(null, -32001, 'Missing or invalid bearer token'))
-    }
-    if (req.method !== 'POST') return send(res, 405)
-
-    let parsed: RpcMessage | RpcMessage[]
-    try {
-      parsed = JSON.parse(await readBody(req))
-    } catch {
-      return send(res, 400, fail(null, -32700, 'Parse error'))
-    }
-
-    const batch = Array.isArray(parsed) ? parsed : [parsed]
-    const replies = batch.map(m => handle(m, host)).filter(r => r !== null)
-    if (replies.length === 0) return send(res, 202)
-    return send(res, 200, Array.isArray(parsed) ? replies : replies[0])
+  return http.createServer((req, res) => {
+    // Never let a request reject unhandled in the main process.
+    route(req, res, token, host).catch(() => {
+      if (!res.headersSent) send(res, 500, fail(null, -32603, 'Internal error'))
+      else res.end()
+    })
   })
+}
+
+async function route(req: http.IncomingMessage, res: http.ServerResponse, token: string, host: McpHost) {
+  // Reject DNS-rebinding and cross-site requests before anything else.
+  if (!isLocalHost(req.headers.host)) return send(res, 403, fail(null, -32000, 'Forbidden host'))
+  if (req.headers.origin && !isLocalOrigin(req.headers.origin)) {
+    return send(res, 403, fail(null, -32000, 'Forbidden origin'))
+  }
+  if (req.url !== '/mcp') return send(res, 404)
+  if (!tokenMatches(req.headers.authorization, token)) {
+    return send(res, 401, fail(null, -32001, 'Missing or invalid bearer token'))
+  }
+  if (req.method !== 'POST') return send(res, 405)
+
+  let parsed: RpcMessage | RpcMessage[]
+  try {
+    parsed = JSON.parse(await readBody(req))
+  } catch {
+    return send(res, 400, fail(null, -32700, 'Parse error'))
+  }
+  // A single message must be an object; null, numbers and strings are Invalid Request.
+  if (!Array.isArray(parsed) && !isMessage(parsed)) return send(res, 400, fail(null, -32600, 'Invalid Request'))
+
+  const batch = Array.isArray(parsed) ? parsed : [parsed]
+  const replies = batch.map(m => handle(m, host)).filter(r => r !== null)
+  if (replies.length === 0) return send(res, 202)
+  return send(res, 200, Array.isArray(parsed) ? replies : replies[0])
 }
 
 // ───────────── Controller ─────────────
