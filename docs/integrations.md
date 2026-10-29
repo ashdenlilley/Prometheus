@@ -4,7 +4,7 @@ Status: Slack, with the backend and UI built. Design: [design/OS-358-integration
 
 ## UI
 
-- **Settings > Integrations** (`IntegrationsSettings.tsx`): add a Slack integration (name, scope, optional channel label, webhook URL). Each row shows whether this device has a webhook, sends a test message, replaces or removes the webhook, or deletes the integration. Adding saves the integration first, then sets the URL. If the URL is refused, the integration is removed again.
+- **Settings > Integrations** (`IntegrationsSettings.tsx`): add a Slack integration (name, scope, optional channel label, webhook URL). Each row shows whether this device has a webhook, sends a test message, replaces or removes the webhook, or deletes the integration. Adding sets the URL first and only saves the integration once the URL is accepted, so a refused URL leaves nothing behind.
 - **Automations** (project settings): "Post to Slack" picks an integration in scope, with an optional message template. Not offered for object or cycle triggers.
 - **Issue drawer**: the actions menu has "Share to Slack". With several integrations in scope, it lists one item per integration. With none, the item is disabled.
 - **Integrations column** (`integrations` type): paste a link to add it, and remove it with ×. Table cells show read-only chips. CSV and XLSX export the URLs.
