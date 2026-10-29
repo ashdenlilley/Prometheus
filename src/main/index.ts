@@ -4,7 +4,8 @@ import { homedir } from 'os'
 import { promises as fs } from 'fs'
 import type { AppData } from '../shared/types'
 import { reducer, type Action } from '../shared/model'
-import { applyOps, diffOps } from '../shared/sync'
+import { applyOps, Clock, diffOps } from '../shared/sync'
+import { AUDIT_LIMIT, auditEntries, toCsv, type AuditEntry, type AuditFilter } from '../shared/audit'
 import { subscriptionNotifications } from '../shared/subscriptions'
 import { migrate } from '../shared/migrate'
 import { seed } from '../shared/seed'
@@ -73,6 +74,16 @@ function persist(data: AppData) {
   return store.save(data)
 }
 
+// Called before persist() in each change path, so the rows are in the database for that write.
+// Audit must never break a change, so failures are only logged.
+function audit(entries: AuditEntry[]) {
+  try {
+    store?.appendAudit(entries)
+  } catch (err) {
+    console.warn('audit write failed', err)
+  }
+}
+
 function broadcast(data: AppData) {
   base = data
   for (const win of BrowserWindow.getAllWindows()) {
@@ -82,8 +93,11 @@ function broadcast(data: AppData) {
 
 // Remote changes from the sync engine. Same path as MCP writes: live copy, disk, renderer.
 function applyRemote(next: AppData) {
+  const prev = state
   if (state) next = subscriptionNotifications(state, next, 'sync')
   state = next
+  // A throwaway clock: auditing must not advance the sync clock.
+  if (prev) audit(auditEntries(diffOps(prev, next, new Clock('audit')), 'sync', new Date().toISOString()))
   void persist(next)
   broadcast(next)
 }
@@ -96,7 +110,9 @@ const host = {
     const next = reducer(prev, action)
     if (next === prev) return
     state = next
-    sync.record(diffOps(prev, next, sync.clock))
+    const ops = diffOps(prev, next, sync.clock)
+    sync.record(ops)
+    audit(auditEntries(ops, 'mcp', new Date().toISOString(), action.type))
     // Notifications are deliberately left out of the sync op log, so they stay local to this device.
     state = subscriptionNotifications(prev, next, 'MCP')
     void persist(state)
@@ -131,6 +147,7 @@ ipcMain.handle('data:save', (_event, incoming: AppData) => {
   const merged = applyOps(state, ops).data
   const remoteAhead = JSON.stringify(merged) !== JSON.stringify(incoming)
   state = merged
+  audit(auditEntries(ops, 'ui', new Date().toISOString()))
   void persist(merged)
   if (remoteAhead) broadcast(merged)
   else base = incoming
@@ -170,6 +187,11 @@ ipcMain.handle('sync:unlock', async (_event, passphrase: string) => {
 })
 ipcMain.handle('sync:disable', () => sync!.disable())
 ipcMain.handle('sync:now', () => sync!.syncNow())
+
+ipcMain.handle('audit:list', (_event, filters: AuditFilter) => store?.readAudit(filters) ?? [])
+ipcMain.handle('audit:csv', (_event, filters: AuditFilter) =>
+  toCsv(store?.readAudit({ ...filters, limit: AUDIT_LIMIT }) ?? [])
+)
 
 function createWindow() {
   const win = new BrowserWindow({

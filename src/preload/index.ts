@@ -1,11 +1,14 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { AppData } from '../shared/types'
+import type { AuditFilter, AuditRow } from '../shared/audit'
 
 contextBridge.exposeInMainWorld('api', {
   platform: process.platform,
   load: () => ipcRenderer.invoke('data:load') as Promise<AppData | null>,
   save: (data: AppData) => ipcRenderer.invoke('data:save', data) as Promise<void>,
   openExternal: (url: string) => ipcRenderer.invoke('shell:open', url) as Promise<void>,
+  auditList: (filters: AuditFilter) => ipcRenderer.invoke('audit:list', filters) as Promise<AuditRow[]>,
+  auditCsv: (filters: AuditFilter) => ipcRenderer.invoke('audit:csv', filters) as Promise<string>,
   // Fires when the main process changes data (MCP tools). Returns an unsubscribe function.
   onExternal: (cb: (data: AppData) => void) => {
     const listener = (_event: unknown, data: AppData) => cb(data)

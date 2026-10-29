@@ -1996,6 +1996,26 @@ select.field-input:focus {
   height: 28px;
 }
 
+/* Audit log in Settings: filter row, then a scrollable compact table. */
+.audit-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.audit-list {
+  max-height: 260px;
+  overflow: auto;
+  font-size: 12px;
+}
+
+.audit-list th,
+.audit-list td {
+  padding: 4px 8px;
+  text-align: left;
+  white-space: nowrap;
+}
+
 /* ───────────── Space overview ───────────── */
 .space-home {
   display: flex;
