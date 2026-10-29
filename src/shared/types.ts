@@ -301,6 +301,8 @@ export interface ActivityEntry {
   id: string
   at: string
   text: string
+  // "me", "agent:<id>", "agent:legacy" (shared MCP token) or "sync:<device>". Absent on older entries.
+  actor?: string
 }
 
 export interface Issue {
@@ -414,6 +416,17 @@ export interface Notification {
   read: boolean
 }
 
+// An MCP client that acts on issues. Its token is shown once; only the SHA-256 hash is stored.
+export interface Agent {
+  id: string
+  name: string
+  color: string
+  level: 'read' | 'comment' | 'write'
+  tokenHash: string
+  createdAt: string
+  revokedAt?: string
+}
+
 export interface AppData {
   version: 4
   spaces: Space[]
@@ -426,6 +439,7 @@ export interface AppData {
   templates: Template[]
   dashboards: Dashboard[]
   notifications: Notification[]
+  agents?: Agent[]
   // Display name for the local user. Used for comment authors and notifications.
   me: string
 }

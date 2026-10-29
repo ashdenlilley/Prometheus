@@ -2438,6 +2438,47 @@ select.field-input:focus {
   white-space: nowrap;
 }
 
+.agent-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 1px 8px;
+  border: 1px solid var(--line);
+  border-left-width: 3px;
+  border-radius: 999px;
+  background: var(--panel2);
+  color: var(--text);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.agent-badge-revoked {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.agent-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.agent-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.agent-dot {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
 .code-block {
   position: relative;
   border-radius: 10px;

@@ -2,6 +2,7 @@ import type { AppData, Column, ColumnType, Issue, Project } from '@shared/types'
 import { FIXED_FIELDS, fieldValue, customValue, type FixedField } from '@shared/query'
 import { categoryOf } from '@shared/model'
 import { dateValueMs } from '@shared/datetime'
+import { isAgentAssignee } from '@shared/agents'
 import { subtaskSummary } from '@shared/subtasks'
 import { voteCount } from '@shared/votes'
 
@@ -100,6 +101,8 @@ export function fixedSortValue(key: FixedKey, i: Issue, project: Project): strin
       return i.milestoneId ?? ''
     case 'favourite':
       return i.favourite ? 0 : 1
+    case 'assigneeType':
+      return i.assignee ? (isAgentAssignee(i.assignee) ? 'agent' : 'person') : ''
   }
 }
 

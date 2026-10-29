@@ -2,7 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, safeStorage, shell } from 'electro
 import { join } from 'path'
 import { homedir } from 'os'
 import { promises as fs } from 'fs'
-import type { AppData } from '../shared/types'
+import type { Agent, AppData } from '../shared/types'
 import { reducer, type Action } from '../shared/model'
 import { applyOps, Clock, diffOps } from '../shared/sync'
 import { AUDIT_LIMIT, auditEntries, toCsv, type AuditEntry, type AuditFilter } from '../shared/audit'
@@ -10,7 +10,8 @@ import { subscriptionNotifications } from '../shared/subscriptions'
 import { migrate } from '../shared/migrate'
 import { seed } from '../shared/seed'
 import { adoptPersonal } from '../shared/sync'
-import { McpController } from './mcp'
+import { McpController, type McpKeys } from './mcp'
+import { LEGACY_AGENT, agentAssignee, displayAssignee, isAgentAssignee, stampActor } from '../shared/agents'
 import { Store } from './db'
 import { SyncEngine } from './sync'
 import { installMenu } from './menu'
@@ -105,23 +106,48 @@ function applyRemote(next: AppData) {
 
 const host = {
   read: () => state,
-  apply(action: Action) {
+  apply(action: Action, actor?: string) {
     if (!state || !sync) throw new Error('Prometheus has not loaded its data yet')
     const prev = state
     const next = reducer(prev, action)
     if (next === prev) return
-    state = next
-    const ops = diffOps(prev, next, sync.clock)
+    // Activity written here is attributed to the calling agent. Without an actor, that is the shared token.
+    const who = actor ?? agentAssignee(LEGACY_AGENT.id)
+    const stamped = stampActor(prev, next, who)
+    state = stamped
+    const ops = diffOps(prev, stamped, sync.clock)
     sync.record(ops)
     audit(auditEntries(ops, 'mcp', new Date().toISOString(), action.type))
     // Notifications are deliberately left out of the sync op log, so they stay local to this device.
-    state = subscriptionNotifications(prev, next, 'MCP')
+    state = subscriptionNotifications(prev, stamped, isAgentAssignee(who) ? displayAssignee(prev, who) : 'MCP')
     void persist(state)
     broadcast(state)
   }
 }
 
-const mcp = new McpController(dataDir(), host)
+// The keychain is only reliable once the app is ready (Linux reports it unavailable before that),
+// so the controller is created in whenReady.
+let mcp: McpController | undefined
+function mcpReady(): McpController {
+  if (!mcp) throw new Error('MCP is not ready yet')
+  return mcp
+}
+
+// Sealing uses the OS keychain. Without it, the token stays in plain text in mcp.json.
+function mcpKeys(): McpKeys | undefined {
+  if (!safeStorage.isEncryptionAvailable()) return undefined
+  return {
+    seal: async token => (await safeStorage.encryptStringAsync(token)).toString('base64'),
+    open: async sealed => {
+      try {
+        const { result } = await safeStorage.decryptStringAsync(Buffer.from(sealed, 'base64'))
+        return result
+      } catch {
+        return null
+      }
+    }
+  }
+}
 
 ipcMain.handle('data:load', async () => {
   const db = await openStore()
@@ -165,9 +191,19 @@ ipcMain.handle('shell:open', (_event, url: string) => {
   if (/^https?:\/\//i.test(url)) return shell.openExternal(url)
 })
 
-ipcMain.handle('mcp:status', () => mcp.status())
-ipcMain.handle('mcp:setEnabled', (_event, enabled: boolean) => mcp.setEnabled(enabled))
-ipcMain.handle('mcp:regenerate', () => mcp.regenerateToken())
+ipcMain.handle('mcp:status', () => mcpReady().status())
+ipcMain.handle('mcp:setEnabled', (_event, enabled: boolean) => mcpReady().setEnabled(enabled))
+ipcMain.handle('mcp:regenerate', () => mcpReady().regenerateToken())
+
+// The token is returned once, here, and never stored in plain text. Only its hash goes into data.
+ipcMain.handle('agents:create', (_event, name: string, color: string, level: Agent['level']) => {
+  if (typeof name !== 'string' || !name.trim() || !['read', 'comment', 'write'].includes(level)) {
+    throw new Error('An agent needs a name and a level of read, comment or write')
+  }
+  const created = mcpReady().createAgent(name.trim(), String(color), level)
+  host.apply({ type: 'addAgent', agent: created.agent }, 'me')
+  return created
+})
 
 // Sync folder. The default is the iCloud Drive folder on each platform; the user can pick any folder.
 function defaultSyncFolder() {
@@ -227,6 +263,7 @@ app.whenReady().then(async () => {
   // Packaged builds take the icon from the bundle; dev runs need it set explicitly.
   if (isMac && !app.isPackaged) app.dock?.setIcon(join(__dirname, '../../build/icon.png'))
   installMenu(isMac)
+  mcp = new McpController(dataDir(), host, mcpKeys())
   createWindow()
   try {
     await mcp.start()
@@ -239,7 +276,7 @@ app.whenReady().then(async () => {
 })
 
 app.on('before-quit', () => {
-  void mcp.stop()
+  void mcp?.stop()
   void sync?.flushNow()
 })
 
