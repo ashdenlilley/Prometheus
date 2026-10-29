@@ -36,6 +36,8 @@ Local-first project management for a single user, on macOS and Windows. Linear-s
 - Automations triggered by status, priority, assignee or due-date.
 - Command palette (Cmd/Ctrl+K).
 - Local MCP server for coding agents such as Claude Code and Codex (streamable HTTP on 127.0.0.1, default port 7878, bearer token).
+- Slack integration backend: "Post to Slack" automation action and "Share to Slack" via incoming webhooks, with Block Kit messages and retries. The settings screen is not built yet; see [docs/integrations.md](docs/integrations.md).
+- Integration links: an `integrations` cell type that stores links to Slack, Figma, Sentry, Zendesk, Jira, Google, Teams and GitHub items, detected by URL. The column picker is not built yet.
 
 For gaps compared with Linear and monday.com, see [docs/feature-parity.md](docs/feature-parity.md).
 

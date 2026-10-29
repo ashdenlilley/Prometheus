@@ -3,6 +3,7 @@ import { FIXED_FIELDS, fieldValue, customValue, type FixedField } from '@shared/
 import { categoryOf } from '@shared/model'
 import { dateValueMs } from '@shared/datetime'
 import { subtaskSummary } from '@shared/subtasks'
+import { linkUrls } from '@shared/integrations'
 import { voteCount } from '@shared/votes'
 
 export const COLUMN_TYPE_INFO: { type: ColumnType; label: string; glyph: string; group: string }[] = [
@@ -27,6 +28,7 @@ export const COLUMN_TYPE_INFO: { type: ColumnType; label: string; glyph: string;
   { type: 'time_tracking', label: 'Time tracking', glyph: '◷', group: 'Time' },
   { type: 'world_clock', label: 'World clock', glyph: '🌐', group: 'Time' },
   { type: 'link', label: 'Link', glyph: '↗', group: 'Contact' },
+  { type: 'integrations', label: 'Integrations', glyph: '🔗', group: 'Contact' },
   { type: 'email', label: 'Email', glyph: '✉', group: 'Contact' },
   { type: 'phone', label: 'Phone', glyph: '☎', group: 'Contact' },
   { type: 'location', label: 'Location', glyph: '⌖', group: 'Contact' },
@@ -63,6 +65,7 @@ export function defaultWidth(c: Column) {
     case 'timeline':
     case 'people':
     case 'files':
+    case 'integrations':
       return 220
     case 'checkbox':
     case 'rating':
@@ -109,6 +112,7 @@ export function customSortValue(col: Column, i: Issue, project: Project, data: A
   if (col.type === 'auto_number' || col.type === 'item_id') return i.number
   if (col.type === 'vote') return voteCount(i.values[col.id])
   if (col.type === 'subtasks') return subtaskSummary(data, i.id).ratio
+  if (col.type === 'integrations') return linkUrls(i.values[col.id]).join(',').toLowerCase()
   const v = customValue(i, col)
   if (typeof v === 'number') return v
   if (typeof v === 'boolean') return v ? 1 : 0

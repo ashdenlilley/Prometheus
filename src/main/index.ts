@@ -2,9 +2,12 @@ import { app, BrowserWindow, dialog, ipcMain, safeStorage, shell } from 'electro
 import { join } from 'path'
 import { homedir } from 'os'
 import { promises as fs } from 'fs'
-import type { AppData } from '../shared/types'
+import type { AppData, PendingPost } from '../shared/types'
 import { reducer, type Action } from '../shared/model'
+import { slackMessage, stripPendingPosts } from '../shared/integrations'
 import { applyOps, Clock, diffOps } from '../shared/sync'
+import { CredentialStore, type Sealer } from './credentials'
+import { SlackSender, allowedWebhookUrl, webhookCredential, webhookHint } from './slack'
 import { AUDIT_LIMIT, auditEntries, toCsv, type AuditEntry, type AuditFilter } from '../shared/audit'
 import { subscriptionNotifications } from '../shared/subscriptions'
 import { migrate } from '../shared/migrate'
@@ -81,6 +84,71 @@ function persist(data: AppData) {
   return store.save(data)
 }
 
+// Per-device secrets (Slack webhook URLs). Sealed by the OS keychain; never in AppData or sync.
+let secretStore: CredentialStore | null = null
+const keychainSealer: Sealer = {
+  seal: async text => (await safeStorage.encryptStringAsync(text)).toString('base64'),
+  open: async sealed => {
+    try {
+      return (await safeStorage.decryptStringAsync(Buffer.from(sealed, 'base64'))).result
+    } catch {
+      return null
+    }
+  }
+}
+// Linux's 'basic_text' backend is not a keychain. It is only accepted by the test-only flag.
+const keychainAvailable = () =>
+  safeStorage.isEncryptionAvailable() &&
+  (process.platform !== 'linux' || safeStorage.getSelectedStorageBackend() !== 'basic_text' || process.env.PROMETHEUS_SLACK_ALLOW_INSECURE_TEST === '1')
+// Created on first use, because safeStorage can only be queried once the app is ready.
+function secrets(): CredentialStore {
+  secretStore ??= new CredentialStore(join(dataDir(), 'integration-secrets.json'), keychainAvailable() ? keychainSealer : undefined)
+  return secretStore
+}
+
+const slack = new SlackSender({
+  allow: allowedWebhookUrl,
+  onFailure: ({ name, error, at }) => notifyLocal(`Slack post to ${name} failed: ${error}`, at)
+})
+
+// Notices about this device's own sends. Goes through apply so it reaches the renderer like any change.
+function notifyLocal(text: string, at = new Date().toISOString()) {
+  host.apply({ type: 'notify', notification: { id: crypto.randomUUID(), at, text, read: false } })
+}
+
+// Sends posts queued by this device. Each is resolved against the data it was queued from.
+async function postPending(data: AppData, posts: PendingPost[]) {
+  for (const post of posts) {
+    const integration = data.integrations?.find(i => i.id === post.integrationId)
+    const issue = data.issues.find(i => i.id === post.issueId)
+    if (!integration || !issue) continue
+    const url = await secrets().get(webhookCredential(integration.id))
+    if (!url) {
+      notifyLocal(`Slack integration ${integration.name} is not set up on this device`)
+      continue
+    }
+    slack.enqueue({ name: integration.name, url, message: slackMessage(data, issue, { reason: post.reason, template: post.template }) })
+  }
+}
+
+// A removed integration takes its webhook URL with it, on this device.
+function dropRemovedWebhooks(prev: AppData | null, next: AppData) {
+  const kept = new Set((next.integrations ?? []).map(i => i.id))
+  for (const i of prev?.integrations ?? []) {
+    if (!kept.has(i.id)) void secrets().delete(webhookCredential(i.id))
+  }
+}
+
+async function integrationStatus() {
+  const store = secrets()
+  const configured: Record<string, { hint: string }> = {}
+  for (const i of state?.integrations ?? []) {
+    const url = await store.get(webhookCredential(i.id))
+    if (url) configured[i.id] = { hint: webhookHint(url) }
+  }
+  return { keychain: store.sealed, configured }
+}
+
 // Called before persist() in each change path, so the rows are in the database for that write.
 // Audit must never break a change, so failures are only logged.
 function audit(entries: AuditEntry[]) {
@@ -102,6 +170,8 @@ function broadcast(data: AppData) {
 function applyRemote(next: AppData) {
   const prev = state
   if (state) next = subscriptionNotifications(state, next, 'sync')
+  dropRemovedWebhooks(prev, next)
+  // Changes that arrive by sync never post: pendingPosts is not synced, so they cannot arrive here.
   state = next
   // A throwaway clock: auditing must not advance the sync clock.
   if (prev) audit(auditEntries(diffOps(prev, next, new Clock('audit')), 'sync', new Date().toISOString()))
@@ -114,8 +184,14 @@ const host = {
   apply(action: Action) {
     if (!state || !sync) throw new Error('Prometheus has not loaded its data yet')
     const prev = state
-    const next = reducer(prev, action)
+    let next = reducer(prev, action)
     if (next === prev) return
+    // Posts queued by this change are sent by this device, then cleared before anything is stored
+    const posts = next.pendingPosts ?? []
+    if (posts.length) {
+      void postPending(next, posts)
+      next = reducer(next, { type: 'clearPendingPosts', ids: posts.map(p => p.id) })
+    }
     state = next
     const ops = diffOps(prev, next, sync.clock)
     sync.record(ops)
@@ -139,7 +215,10 @@ ipcMain.handle('data:load', async () => {
 
 // The renderer sends its whole working copy. Only the rows it changed since `base` become ops,
 // and those are merged onto the live state. Rows changed remotely stay as they are.
-ipcMain.handle('data:save', (_event, incoming: AppData) => {
+ipcMain.handle('data:save', (_event, received: AppData) => {
+  // Pending posts belong to the window that queued them. They are never stored.
+  const incoming = stripPendingPosts(received)
+  dropRemovedWebhooks(state, incoming)
   if (!state || !sync) {
     state = incoming
     base = incoming
@@ -169,6 +248,33 @@ ipcMain.handle('data:save', (_event, incoming: AppData) => {
 // Only web links leave the app; anything else is ignored.
 ipcMain.handle('shell:open', (_event, url: string) => {
   if (/^https?:\/\//i.test(url)) return shell.openExternal(url)
+})
+
+// Slack webhooks. The URL only goes in and never comes back out: the UI gets a hint.
+ipcMain.handle('integrations:status', () => integrationStatus())
+ipcMain.handle('integrations:setWebhook', async (_event, integrationId: string, url: string) => {
+  if (!secrets().sealed) {
+    return { ok: false, error: 'Secure storage is not available on this device, so the webhook URL cannot be saved.' }
+  }
+  if (!allowedWebhookUrl(url)) {
+    return { ok: false, error: 'That is not a Slack incoming webhook URL (https://hooks.slack.com/services/…).' }
+  }
+  await secrets().set(webhookCredential(integrationId), url)
+  return integrationStatus()
+})
+ipcMain.handle('integrations:clearWebhook', async (_event, integrationId: string) => {
+  await secrets().delete(webhookCredential(integrationId))
+  return integrationStatus()
+})
+ipcMain.handle('integrations:test', async (_event, integrationId: string) => {
+  const url = await secrets().get(webhookCredential(integrationId))
+  if (!url) return { ok: false, error: 'No webhook URL is set up on this device' }
+  const text = 'Test message from Prometheus'
+  return slack.send(url, { text, blocks: [{ type: 'section', text: { type: 'mrkdwn', text } }] })
+})
+// The renderer saves its change before it sends posts, so the change is in `state` by now.
+ipcMain.handle('integrations:post', (_event, posts: PendingPost[]) => {
+  if (state) void postPending(state, posts)
 })
 
 ipcMain.handle('mcp:status', () => mcp.status())

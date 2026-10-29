@@ -1,5 +1,5 @@
 /// <reference types="vite/client" />
-import type { AppData } from '@shared/types'
+import type { AppData, PendingPost } from '@shared/types'
 import type { AuditFilter, AuditRow } from '@shared/audit'
 
 export interface SyncStatus {
@@ -18,6 +18,13 @@ export interface SyncInspect {
   segments: number
   encrypted: boolean
 }
+
+export interface IntegrationStatus {
+  keychain: boolean
+  configured: Record<string, { hint: string }> // integration id -> masked webhook URL
+}
+
+export type IntegrationTestResult = { ok: true } | { ok: false; status?: number; error: string }
 
 export interface McpStatus {
   enabled: boolean
@@ -52,6 +59,13 @@ declare global {
         status: () => Promise<McpStatus>
         setEnabled: (enabled: boolean) => Promise<McpStatus>
         regenerate: () => Promise<McpStatus>
+      }
+      integrations: {
+        status: () => Promise<IntegrationStatus>
+        setWebhook: (integrationId: string, url: string) => Promise<IntegrationStatus | { ok: false; error: string }>
+        clearWebhook: (integrationId: string) => Promise<IntegrationStatus>
+        test: (integrationId: string) => Promise<IntegrationTestResult>
+        post: (posts: PendingPost[]) => Promise<void>
       }
     }
   }

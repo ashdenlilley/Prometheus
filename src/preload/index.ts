@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { AppData } from '../shared/types'
+import type { AppData, PendingPost } from '../shared/types'
 import type { AuditFilter, AuditRow } from '../shared/audit'
 
 contextBridge.exposeInMainWorld('api', {
@@ -40,8 +40,23 @@ contextBridge.exposeInMainWorld('api', {
     status: () => ipcRenderer.invoke('mcp:status') as Promise<McpStatus>,
     setEnabled: (enabled: boolean) => ipcRenderer.invoke('mcp:setEnabled', enabled) as Promise<McpStatus>,
     regenerate: () => ipcRenderer.invoke('mcp:regenerate') as Promise<McpStatus>
+  },
+  integrations: {
+    status: () => ipcRenderer.invoke('integrations:status') as Promise<IntegrationStatus>,
+    setWebhook: (integrationId: string, url: string) =>
+      ipcRenderer.invoke('integrations:setWebhook', integrationId, url) as Promise<IntegrationStatus | { ok: false; error: string }>,
+    clearWebhook: (integrationId: string) => ipcRenderer.invoke('integrations:clearWebhook', integrationId) as Promise<IntegrationStatus>,
+    test: (integrationId: string) => ipcRenderer.invoke('integrations:test', integrationId) as Promise<IntegrationTestResult>,
+    post: (posts: PendingPost[]) => ipcRenderer.invoke('integrations:post', posts) as Promise<void>
   }
 })
+
+export interface IntegrationStatus {
+  keychain: boolean
+  configured: Record<string, { hint: string }> // integration id -> masked webhook URL
+}
+
+export type IntegrationTestResult = { ok: true } | { ok: false; status?: number; error: string }
 
 export interface McpStatus {
   enabled: boolean

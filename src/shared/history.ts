@@ -18,7 +18,8 @@ export const COLLECTIONS = [
   'automations',
   'triageRules',
   'templates',
-  'dashboards'
+  'dashboards',
+  'integrations'
 ] as const
 // Notifications are left out: they are a feed, not user data.
 export type Collection = (typeof COLLECTIONS)[number]
@@ -39,7 +40,7 @@ export interface Patch {
   me?: { before: string; after: string }
 }
 
-const rowsOf = (d: AppData, c: Collection) => d[c] as unknown as Row[]
+const rowsOf = (d: AppData, c: Collection) => (d[c] ?? []) as unknown as Row[]
 
 /** The rows that differ between two versions of the data. Unchanged rows keep their reference in the reducer. */
 export function diffData(prev: AppData, next: AppData): Patch {
@@ -130,7 +131,15 @@ export const emptyHistory = (): History => ({ past: [], future: [], lastKey: nul
 
 // Not undoable: loads (startup, MCP or sync replacing the copy), timed automations, the roll-over bookkeeping flag
 // and the notification feed.
-const NOT_UNDOABLE = new Set<Action['type']>(['load', 'tick', 'markRolledOver', 'notify', 'markNotifications'])
+const NOT_UNDOABLE = new Set<Action['type']>([
+  'load',
+  'tick',
+  'markRolledOver',
+  'notify',
+  'markNotifications',
+  'shareToSlack', // queues a post that has already gone out; undo cannot unsend it
+  'clearPendingPosts'
+])
 
 export const LIMIT = 100
 // Edits with the same key this close together merge, e.g. one keystroke per patchIssue while typing a title.

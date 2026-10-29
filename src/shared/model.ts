@@ -13,8 +13,11 @@ import type {
   Dashboard,
   Folder,
   Initiative,
+  Integration,
   Issue,
+  IntegrationLink,
   Notification,
+  PendingPost,
   Project,
   Relation,
   Space,
@@ -24,6 +27,7 @@ import type {
   TriageRule
 } from './types'
 import { enforceLabelGroups } from './labels'
+import { integrationsFor, parseIntegrationLink } from './integrations'
 import { canArchiveTeam, ensureTeams, moveProjectToTeam, nextIssueNumber, patchTeam, teamOf } from './teams'
 
 // Pure data layer shared by the renderer (UI actions) and the main process (MCP tools, DB).
@@ -84,6 +88,13 @@ export type Action =
   | { type: 'notify'; notification: Notification }
   | { type: 'markNotifications'; read: boolean }
   | { type: 'tick'; today: string }
+  | { type: 'addIntegration'; integration: Integration }
+  | { type: 'updateIntegration'; id: string; patch: Partial<Pick<Integration, 'name' | 'scope' | 'scopeId' | 'settings'>> }
+  | { type: 'removeIntegration'; id: string }
+  | { type: 'shareToSlack'; issueId: string; integrationId: string }
+  | { type: 'clearPendingPosts'; ids: string[] }
+  | { type: 'addIntegrationLink'; issueId: string; columnId: string; url: string }
+  | { type: 'removeIntegrationLink'; issueId: string; columnId: string; url: string }
 
 const mapProject = (s: AppData, id: string, fn: (p: Project) => Project): AppData => ({
   ...s,
@@ -352,6 +363,57 @@ export function reducer(s: AppData, a: Action): AppData {
       return { ...s, notifications: [a.notification, ...s.notifications].slice(0, 200) }
     case 'markNotifications':
       return { ...s, notifications: s.notifications.map(n => ({ ...n, read: a.read })) }
+    case 'addIntegration':
+      return { ...s, integrations: [...(s.integrations ?? []), a.integration] }
+    case 'updateIntegration':
+      return { ...s, integrations: (s.integrations ?? []).map(i => (i.id === a.id ? { ...i, ...a.patch } : i)) }
+    case 'removeIntegration': {
+      // Rules that post to it can no longer run, so they are disabled with a notice, as for a missing project
+      let out: AppData = {
+        ...s,
+        integrations: (s.integrations ?? []).filter(i => i.id !== a.id)
+      }
+      for (const rule of s.automations) {
+        if (rule.action.type === 'post_slack' && rule.action.integrationId === a.id) out = disableAutomation(out, rule, 'its Slack integration was removed')
+      }
+      return out
+    }
+    case 'shareToSlack':
+      return queuePost(s, a.issueId, a.integrationId, { reason: 'Shared', by: 'you' })
+    case 'clearPendingPosts': {
+      const left = (s.pendingPosts ?? []).filter(p => !a.ids.includes(p.id))
+      // Drop the key when empty so a drained copy equals one that never had posts
+      const { pendingPosts: _drained, ...rest } = s
+      return left.length ? { ...rest, pendingPosts: left } : rest
+    }
+    case 'addIntegrationLink': {
+      const issue = s.issues.find(i => i.id === a.issueId)
+      const link = parseIntegrationLink(a.url)
+      const current = (issue?.values[a.columnId] as IntegrationLink[] | undefined) ?? []
+      if (!issue || !link || current.some(l => l.url === link.url)) return s
+      return updateIssue(s, a.issueId, { values: withValue(issue.values, a.columnId, [...current, link]) })
+    }
+    case 'removeIntegrationLink': {
+      const issue = s.issues.find(i => i.id === a.issueId)
+      const current = (issue?.values[a.columnId] as IntegrationLink[] | undefined) ?? []
+      if (!issue || !current.some(l => l.url === a.url)) return s
+      const next = current.filter(l => l.url !== a.url)
+      return updateIssue(s, a.issueId, { values: withValue(issue.values, a.columnId, next.length ? next : undefined) })
+    }
+  }
+}
+
+// Queues a post for the device that made the change, and notes it on the issue's activity.
+function queuePost(s: AppData, issueId: string, integrationId: string, post: { reason: string; by: string; template?: string }): AppData {
+  const issue = s.issues.find(i => i.id === issueId)
+  const integration = issue && integrationsFor(s, issue.projectId).find(i => i.id === integrationId)
+  if (!issue || !integration) return s
+  const now = new Date().toISOString()
+  const pending: PendingPost = { id: crypto.randomUUID(), integrationId, issueId, reason: post.reason, template: post.template, at: now }
+  const entry: ActivityEntry = { id: crypto.randomUUID(), at: now, text: `Posted to Slack (${integration.name}) by ${post.by}` }
+  return {
+    ...mapIssue(s, issueId, i => ({ ...i, activity: [...i.activity, entry].slice(-200) })),
+    pendingPosts: [...(s.pendingPosts ?? []), pending]
   }
 }
 
@@ -634,15 +696,23 @@ function applyAction(s: AppData, issueId: string, rule: Automation): AppData {
           ...s.notifications
         ].slice(0, 200)
       }
+    case 'post_slack': {
+      // Object-trigger rules never reach here (applyObjectAction skips post_slack), so only issue triggers post
+      const integration = s.integrations?.find(i => i.id === action.integrationId)
+      if (!integration || !integrationsFor(s, issue.projectId).includes(integration)) {
+        return disableAutomation(s, rule, 'its Slack integration is missing or out of scope')
+      }
+      return queuePost(s, issueId, action.integrationId, { reason: `Automation "${rule.name}"`, by: `automation ${rule.name}`, template: action.template })
+    }
   }
 }
 
-function disableAutomation(s: AppData, rule: Automation): AppData {
+function disableAutomation(s: AppData, rule: Automation, reason = 'its target project no longer exists'): AppData {
   return {
     ...s,
     automations: s.automations.map(x => (x.id === rule.id ? { ...x, enabled: false } : x)),
     notifications: [
-      { id: crypto.randomUUID(), at: new Date().toISOString(), text: `Automation "${rule.name}" was disabled: its target project no longer exists`, read: false },
+      { id: crypto.randomUUID(), at: new Date().toISOString(), text: `Automation "${rule.name}" was disabled: ${reason}`, read: false },
       ...s.notifications
     ].slice(0, 200)
   }

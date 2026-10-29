@@ -8,9 +8,9 @@ import { AUDIT_LIMIT, type AuditEntry, type AuditFilter, type AuditRow } from '.
 // the entity as JSON with its parent id indexed. Saves diff against the last write, so only
 // changed rows are rewritten.
 
-type Table = 'spaces' | 'initiatives' | 'teams' | 'projects' | 'issues' | 'cycles' | 'automations' | 'triage_rules' | 'templates' | 'dashboards' | 'notifications'
+type Table = 'spaces' | 'initiatives' | 'teams' | 'projects' | 'issues' | 'cycles' | 'automations' | 'triage_rules' | 'templates' | 'dashboards' | 'notifications' | 'integrations'
 
-const TABLES: Table[] = ['spaces', 'initiatives', 'teams', 'projects', 'issues', 'cycles', 'automations', 'triage_rules', 'templates', 'dashboards', 'notifications']
+const TABLES: Table[] = ['spaces', 'initiatives', 'teams', 'projects', 'issues', 'cycles', 'automations', 'triage_rules', 'templates', 'dashboards', 'notifications', 'integrations']
 
 // AppData key for each table.
 const KEY: Record<Table, keyof AppData> = {
@@ -24,7 +24,8 @@ const KEY: Record<Table, keyof AppData> = {
   triage_rules: 'triageRules',
   templates: 'templates',
   dashboards: 'dashboards',
-  notifications: 'notifications'
+  notifications: 'notifications',
+  integrations: 'integrations'
 }
 
 // Parent column per table, used to index child lookups.
@@ -221,6 +222,7 @@ export class Store {
       templates: all('templates') as AppData['templates'],
       dashboards: all('dashboards') as AppData['dashboards'],
       notifications: all('notifications') as AppData['notifications'],
+      integrations: all('integrations') as AppData['integrations'],
       me
     }
     this.primeCache(data)
@@ -255,7 +257,8 @@ export class Store {
       triage_rules: data.triageRules.map(r => ({ id: r.id, parent: r.projectId, json: JSON.stringify(r) })),
       templates: data.templates.map(r => ({ id: r.id, parent: r.projectId, json: JSON.stringify(r) })),
       dashboards: data.dashboards.map(r => ({ id: r.id, parent: r.spaceId, json: JSON.stringify(r) })),
-      notifications: data.notifications.map(r => ({ id: r.id, json: JSON.stringify(r) }))
+      notifications: data.notifications.map(r => ({ id: r.id, json: JSON.stringify(r) })),
+      integrations: (data.integrations ?? []).map(r => ({ id: r.id, json: JSON.stringify(r) }))
     }
 
     db.run('BEGIN')

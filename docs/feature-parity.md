@@ -65,7 +65,7 @@ Last checked against the code: 2026-10-29.
 |---|---|
 | Built-in automation (auto-close, auto-archive, auto-add to cycle) | Y (`shared/model.ts` runAutomations, applyAction and runHousekeeping; move to current cycle, auto-close on inactivity and auto-archive) |
 | Triggers on issue, project, cycle and initiative changes | Y (issue triggers: status, priority, assignee, due date and custom column changed; project status changed, cycle started or ended, initiative status changed. `shared/types.ts` AutomationTrigger, `shared/model.ts`) |
-| Slack, GitHub, GitLab, Figma, Sentry, Zendesk and similar | N |
+| Slack, GitHub, GitLab, Figma, Sentry, Zendesk and similar | P (Slack incoming-webhook backend: post from automations and share an issue, `src/main/slack.ts`, `src/shared/integrations.ts`; settings UI not built. Other providers: link detection only, `parseIntegrationLink`. See [integrations.md](integrations.md)) |
 | API and webhooks | P (local HTTP MCP server for agents, `src/main/mcp.ts`; no webhooks, no public REST API) |
 | Import from Jira, Asana, CSV | Y (CSV import and export, plus file import of a Jira CSV export and an Asana CSV or JSON export with a preview and status mapping. `ImportModal.tsx`, `shared/importers.ts`; no live API import) |
 | Agents assigned to issues | N (MCP exists for local agents, but assignee is free text and there is no agent assignee type) |
@@ -126,7 +126,7 @@ Columns the API lists, with Prometheus status.
 | Board relation | board_relation | Y (same as Connect boards, `cells.tsx`) |
 | Doc | — | N |
 | Subtasks (as column) | subtasks | P (read-only done/total of sub-issues, sortable. `cells.tsx`, `shared/subtasks.ts`; the cell does not expand or open sub-issues) |
-| Integrations column (GitHub, Jira) | — | N |
+| Integrations column (GitHub, Jira) | — | P (data type and URL detection, no column picker yet) |
 | Mirror and formula | mirror, formula | Y (`cells.tsx` MirrorValue and FormulaValue, `shared/formula.ts`) |
 
 Column-level features: header rename, hide, reorder, resize, pin, sort, group-footer summary (sum, average, count, min, max), per-column description, column default value, column validation (required, unique), column automations. These are listed as prose, not as table rows, so they are not given a status here. Most are present in code (`shared/types.ts` Column has footer, required and description; `TableView.tsx` handles resize, order, sort and hide).
@@ -155,7 +155,7 @@ Column-level features: header rename, hide, reorder, resize, pin, sort, group-fo
 | Trigger-action automations ("when status changes, notify person") | Y (`shared/model.ts` runAutomations, `ProjectSettings.tsx` Automations with built-in recipes from `shared/recipes.ts`; create item can target another project in the same space; notify goes to the local user) |
 | Recipes (templated automations) | N |
 | Cross-board item creation | N (the create-issue action only creates items in the same project) |
-| Integrations (Slack, Teams, GitHub, Jira, Gmail, and others) | N |
+| Integrations (Slack, Teams, GitHub, Jira, Gmail, and others) | P (Slack webhook backend only; see [integrations.md](integrations.md)) |
 | Webhooks and API | P (local HTTP MCP server, `src/main/mcp.ts`; no webhooks, no REST API) |
 | Formula and mirror columns | Y (`shared/formula.ts`, `cells.tsx`) |
 

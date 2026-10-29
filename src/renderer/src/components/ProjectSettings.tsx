@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { triggerDefault } from '@shared/live'
+import { OBJECT_TRIGGERS, integrationsFor } from '@shared/integrations'
 import type { Automation, AutomationAction, AutomationTrigger, Project, ProjectStatus, StatusCategory, StatusDef } from '@shared/types'
 import { issueKey, useStore } from '../store'
 import { fieldOptions } from './FilterBar'
@@ -362,7 +363,6 @@ const TRIGGERS: { value: AutomationTrigger['type']; label: string }[] = [
 ]
 
 // Object triggers act on a set of issues, so they only offer the actions that make sense for that
-const OBJECT_TRIGGERS: AutomationTrigger['type'][] = ['project_status_changed', 'cycle_started', 'cycle_ended', 'initiative_status_changed']
 const OBJECT_ACTIONS: AutomationAction['type'][] = ['notify', 'set_status', 'set_priority', 'set_assignee', 'add_label']
 const INITIATIVE_STATUSES: Initiative['status'][] = ['planned', 'active', 'done']
 
@@ -373,8 +373,11 @@ const ACTIONS: { value: AutomationAction['type']; label: string }[] = [
   { value: 'add_label', label: 'Add label' },
   { value: 'move_to_cycle', label: 'Move to the current cycle' },
   { value: 'create_issue', label: 'Create follow-up sub-issue' },
+  { value: 'post_slack', label: 'Post to Slack' },
   { value: 'notify', label: 'Notify me' }
 ]
+
+const TEMPLATE_KEYS = '{key} {title} {status} {assignee} {project}'
 
 function Automations({ project }: { project: Project }) {
   const { data, dispatch } = useStore()
@@ -385,6 +388,9 @@ function Automations({ project }: { project: Project }) {
   const [action, setAction] = useState<AutomationAction['type']>('set_status')
   const [actionValue, setActionValue] = useState('')
   const [actionProject, setActionProject] = useState('')
+  const slackOptions = integrationsFor(data, project.id)
+  const [slackId, setSlackId] = useState('')
+  const slackTarget = slackOptions.some(i => i.id === slackId) ? slackId : (slackOptions[0]?.id ?? '')
   const [triggerColumn, setTriggerColumn] = useState(project.columns[0]?.id ?? '')
   const [triggerColumnValue, setTriggerColumnValue] = useState('')
   const [triggerProjectStatus, setTriggerProjectStatus] = useState<ProjectStatus | ''>('')
@@ -429,7 +435,9 @@ function Automations({ project }: { project: Project }) {
         return { type: 'move_to_cycle' }
       case 'create_issue':
         return { type: 'create_issue', title: actionValue || 'Follow up', projectId: actionProject || undefined }
-      case 'notify':
+      case 'post_slack':
+        return { type: 'post_slack', integrationId: slackTarget, template: actionValue.trim() || undefined }
+      default:
         return { type: 'notify', message: actionValue || 'Automation ran' }
     }
   }
@@ -592,16 +600,27 @@ function Automations({ project }: { project: Project }) {
               ))}
             </select>
           )}
-          {(action === 'set_assignee' || action === 'add_label' || action === 'notify' || action === 'create_issue') && (
+          {action === 'post_slack' &&
+            (slackOptions.length === 0 ? (
+              <span className="muted small">Add a Slack integration in Settings first</span>
+            ) : (
+              <select aria-label="Slack integration" className="field-input" value={slackTarget} onChange={e => setSlackId(e.target.value)}>
+                {slackOptions.map(i => (
+                  <option key={i.id} value={i.id}>{i.name}</option>
+                ))}
+              </select>
+            ))}
+          {(action === 'set_assignee' || action === 'add_label' || action === 'notify' || action === 'create_issue' || action === 'post_slack') && (
             <input
               className="field-input"
-              placeholder={{ notify: 'Message', add_label: 'Label', set_assignee: 'Person', create_issue: 'Sub-issue title' }[action]}
+              placeholder={{ notify: 'Message', add_label: 'Label', set_assignee: 'Person', create_issue: 'Sub-issue title', post_slack: 'Message template (optional)' }[action]}
               value={actionValue}
               onChange={e => setActionValue(e.target.value)}
             />
           )}
         </div>
-        <button className="btn primary" onClick={create} disabled={!name.trim()}>Add automation</button>
+        {action === 'post_slack' && <div className="muted small">Placeholders: {TEMPLATE_KEYS}</div>}
+        <button className="btn primary" onClick={create} disabled={!name.trim() || (action === 'post_slack' && !slackTarget)}>Add automation</button>
       </div>
     </div>
   )
