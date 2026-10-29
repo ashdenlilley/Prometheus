@@ -64,6 +64,15 @@ function General({ project }: { project: Project }) {
   const canceled = project.statuses.filter(s => s.category === 'canceled')
   return (
     <div className="settings-form">
+      <label className="check-field">
+        <input
+          type="checkbox"
+          aria-label="Auto-subscribe to new issues"
+          checked={project.autoSubscribe !== false}
+          onChange={e => patch({ autoSubscribe: e.target.checked })}
+        />
+        Auto-subscribe me to new issues
+      </label>
       <label className="field">
         Status
         <select className="field-input" value={project.status} onChange={e => patch({ status: e.target.value as ProjectStatus })}>

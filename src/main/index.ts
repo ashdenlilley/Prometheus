@@ -5,6 +5,7 @@ import { promises as fs } from 'fs'
 import type { AppData } from '../shared/types'
 import { reducer, type Action } from '../shared/model'
 import { applyOps, diffOps } from '../shared/sync'
+import { subscriptionNotifications } from '../shared/subscriptions'
 import { migrate } from '../shared/migrate'
 import { seed } from '../shared/seed'
 import { McpController } from './mcp'
@@ -81,6 +82,7 @@ function broadcast(data: AppData) {
 
 // Remote changes from the sync engine. Same path as MCP writes: live copy, disk, renderer.
 function applyRemote(next: AppData) {
+  if (state) next = subscriptionNotifications(state, next, 'sync')
   state = next
   void persist(next)
   broadcast(next)
@@ -95,8 +97,10 @@ const host = {
     if (next === prev) return
     state = next
     sync.record(diffOps(prev, next, sync.clock))
-    void persist(next)
-    broadcast(next)
+    // Notifications are deliberately left out of the sync op log, so they stay local to this device.
+    state = subscriptionNotifications(prev, next, 'MCP')
+    void persist(state)
+    broadcast(state)
   }
 }
 
