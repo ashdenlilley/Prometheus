@@ -42,7 +42,7 @@ Last checked against the code: 2026-10-29.
 | Per-team workflow editing | Y (statuses are edited per project in `ProjectSettings.tsx`; a project is the team here) |
 | Triage inbox with accept, decline, duplicate | Y (`TriageView.tsx`, `IssueDetail.tsx` Accept and Decline) |
 | Triage rules (auto-assign team, status, labels, priority) | Y (`shared/types.ts` TriageRule, `shared/model.ts` intake, `ProjectSettings.tsx` Triage rules; sets assignee, status, priority, labels, cycle) |
-| Auto-close and auto-archive rules | Y (per project: cancel open issues untouched for N days, archive completed or canceled issues untouched for N days; archived issues are listed and restored in Project settings > Archive. `shared/model.ts` runHousekeeping) |
+| Auto-close and auto-archive rules | Y (per project: cancel open issues untouched for N days, archive completed or canceled issues untouched for N days; archived issues are listed and restored in Project settings > Archive, and hidden from Cycles, Triage, command search, dashboard widgets and Activity. `shared/model.ts` runHousekeeping, `shared/live.ts`) |
 | Git branch names and PR status (GitHub, GitLab) | N |
 | Keyboard-first command menu (Cmd+K) | Y (`App.tsx` Cmd+K handler, `CommandPalette.tsx`) |
 | Single-key shortcuts for set status, priority, label, assignee | Y (s, p, l, a and f keys in the issue drawer. `IssueDetail.tsx`) |
@@ -67,7 +67,7 @@ Last checked against the code: 2026-10-29.
 | Triggers on issue, project, cycle and initiative changes | Y (issue triggers: status, priority, assignee, due date and custom column changed; project status changed, cycle started or ended, initiative status changed. `shared/types.ts` AutomationTrigger, `shared/model.ts`) |
 | Slack, GitHub, GitLab, Figma, Sentry, Zendesk and similar | N |
 | API and webhooks | P (local HTTP MCP server for agents, `src/main/mcp.ts`; no webhooks, no public REST API) |
-| Import from Jira, Asana, CSV | P (CSV import and export, `TableView.tsx` with `shared/query.ts` parseCSV and issuesToCSV; no Jira or Asana import) |
+| Import from Jira, Asana, CSV | Y (CSV import and export, plus file import of a Jira CSV export and an Asana CSV or JSON export with a preview and status mapping. `ImportModal.tsx`, `shared/importers.ts`; no live API import) |
 | Agents assigned to issues | N (MCP exists for local agents, but assignee is free text and there is no agent assignee type) |
 
 ## 2. monday.com
@@ -76,13 +76,13 @@ Last checked against the code: 2026-10-29.
 | Feature | Status |
 |---|---|
 | Workspaces | Y (`shared/types.ts` Space, `NewSpaceModal.tsx`, `SpaceHome.tsx`) |
-| Folders | N |
+| Folders | Y (one level of folders per space; collapse, rename, delete, drag or pick a project into a folder. `Sidebar.tsx`, `shared/model.ts` addFolder and moveProjectToFolder) |
 | Boards (one per list of items) | Y (projects with their own columns, statuses and views. `shared/types.ts` Project) |
 | Groups inside a board | Y (group by any column: `shared/query.ts` groupIssues, `FilterBar.tsx`) |
 | Items and subitems (nested table) | Y (sub-issues: `IssueDetail.tsx`, nested rows in `TableView.tsx`) |
 | Item updates (comments with @mentions and attachments) | Y (comments with @mention notifications, file attachments (5 MB cap, stored in the data file) and reactions. `shared/model.ts` addComment) |
 | Docs (rich pages, can embed boards) | N |
-| Forms (public intake to a board) | N |
+| Forms (public intake to a board) | P (local intake forms per project; each submission becomes a triage item, also through MCP `submit_form`. `ProjectSettings.tsx` Forms tab, `FormModal.tsx`, `shared/forms.ts`; no public link) |
 
 ### 2.2 Column types
 Columns the API lists, with Prometheus status.
@@ -110,22 +110,22 @@ Columns the API lists, with Prometheus status.
 | Last updated | updated | Y (`cells.tsx`, `columns.ts`) |
 | Auto number | auto_number | Y (`cells.tsx`, `columns.ts`) |
 | Files | files | Y (`cells.tsx` FilesEdit, 5 MB cap, stored in the data file) |
-| Location | location | P (free-text address; no map or coordinates. `cells.tsx`) |
+| Location | location | Y (address with optional coordinates, shown in the Map view. `cells.tsx`, `shared/location.ts`, `MapView.tsx`; no geocoding) |
 | Hour | hour | Y (`cells.tsx`, time input) |
 | Week | week | Y (`cells.tsx`, week input) |
 | World clock | world_clock | Y (`cells.tsx` WorldClock, fixed list of zones) |
 | Color picker | color | Y (`cells.tsx`, coloured options) |
-| Vote | vote | P (click adds a count; no per-person votes or un-vote. `cells.tsx`) |
+| Vote | vote | Y (one vote per person, click again to un-vote; voters on hover. `cells.tsx`, `shared/votes.ts`) |
 | Time tracking | time_tracking | Y (manual hours entry plus a start/stop timer that survives a restart and adds to the hours, rounded to 0.01 h. `cells.tsx`, `shared/timetrack.ts`) |
 | Formula | formula | Y (`shared/formula.ts` evaluateFormula, `cells.tsx` FormulaValue) |
 | Mirror (show values from linked board) | mirror | Y (`cells.tsx` MirrorValue, read-only) |
 | Connect boards (link items across boards) | board_relation | Y (`cells.tsx` IssuePicker, `shared/types.ts` linkProjectId) |
 | Dependency | dependency | Y (`cells.tsx` IssuePicker) |
 | Item ID | item_id | Y (`cells.tsx`, `columns.ts`) |
-| Button | button | P (click counter only; no action. `cells.tsx`) |
+| Button | button | Y (optional action on click: set status or priority, add a label, notify, create a sub-issue or move to the current cycle, as one undo step; otherwise a click counter. `cells.tsx`, `shared/model.ts` pressButton) |
 | Board relation | board_relation | Y (same as Connect boards, `cells.tsx`) |
 | Doc | — | N |
-| Subtasks (as column) | — | N |
+| Subtasks (as column) | subtasks | P (read-only done/total of sub-issues, sortable. `cells.tsx`, `shared/subtasks.ts`; the cell does not expand or open sub-issues) |
 | Integrations column (GitHub, Jira) | — | N |
 | Mirror and formula | mirror, formula | Y (`cells.tsx` MirrorValue and FormulaValue, `shared/formula.ts`) |
 
@@ -140,11 +140,11 @@ Column-level features: header rename, hide, reorder, resize, pin, sort, group-fo
 | Calendar | Y (`CalendarView.tsx`) |
 | Gantt | Y (same view as Timeline, `TimelineView.tsx`) |
 | Chart (bar, pie, line, sum over group) | Y (bar, pie or line chart of counts or estimate points by any field; the type is saved with the view. `ChartView.tsx`, `shared/chart.ts`) |
-| Workload (hours per person over time) | P (workload widget per person on the dashboard; no workload view, no change over time. `DashboardView.tsx`) |
-| Map (Location column) | N |
+| Workload (hours per person over time) | Y (Workload view: points or issue count per person per week with optional capacity. `WorkloadView.tsx`, `shared/workload.ts`; issues need a due date) |
+| Map (Location column) | Y (offline map of pins from a Location column; optional tile URL, off by default. `MapView.tsx`, `shared/location.ts`) |
 | Form view | N |
-| Files gallery | N |
-| Private view and personal views | N |
+| Files gallery | Y (Files view: Files-column and comment attachments with the Issues filters. `FilesView.tsx`, `shared/files.ts`) |
+| Private view and personal views | Y (personal saved views stay on this device and are never synced. `FilterBar.tsx`, `shared/sync.ts` stripPersonal) |
 | Saved filters and sorts per view | Y (`FilterBar.tsx` saveView stores filter, group, sort and hidden columns. `shared/types.ts` SavedView) |
 | Group by any column | Y (`shared/query.ts` groupIssues, `FilterBar.tsx`) |
 | Hide, show, and reorder columns per view | Y (with a saved table view active, hiding and reordering apply to that view; otherwise to the project. `TableView.tsx`, `shared/views.ts` resolveColumnLayout) |
@@ -166,7 +166,7 @@ Column-level features: header rename, hide, reorder, resize, pin, sort, group-fo
 | Widgets: chart, battery (progress), numbers, calendar, list, workload, status, portfolio | Y (chart by status, progress, numbers, list, workload, overdue, milestones, cycle, a due-date calendar and a portfolio table. `DashboardView.tsx`, `shared/insights.ts`) |
 | Cross-board dashboard | Y (widgets scoped to the whole space or one project. `shared/types.ts` Widget.projectId) |
 | Reports (burndown, velocity for dev) | Y (`CyclesView.tsx` Burndown and velocity) |
-| Sprint planning and burndown (monday dev) | P (cycles with burndown and velocity; no sprint planning view or capacity) |
+| Sprint planning and burndown (monday dev) | Y (cycles with burndown and velocity, plus a Planning view with cycle capacity, a velocity suggestion and backlog moves. `PlanningView.tsx`, `shared/planning.ts`) |
 
 ### 2.6 Collaboration and admin
 | Feature | Status |
@@ -177,7 +177,7 @@ Column-level features: header rename, hide, reorder, resize, pin, sort, group-fo
 | Activity log per item and board | Y (per item in `IssueDetail.tsx`, and a project-level Activity view with issue and field filters and paging. `views/ActivityView.tsx`, `shared/activity.ts`) |
 | Templates (board, doc, form) | P (issue templates and project (board) templates; no doc or form templates) |
 | Import and export (CSV, Excel) | Y (CSV and Excel (.xlsx) import and export in `TableView.tsx`, `xlsx.ts`, using read-excel-file and write-excel-file) |
-| Audit log | N |
+| Audit log | Y (append-only local log of every change with source (ui, mcp, sync), filters and CSV export; capped at 50,000 rows. Settings > Audit log, `main/db.ts`, `shared/audit.ts`) |
 
 ## 3. Gap summary (what 1:1 means here)
 
@@ -185,13 +185,10 @@ Full 1:1 with both products is a multi-quarter build and needs a multi-user back
 
 **Still missing, feasible locally (single user):**
 - Project and team documents (single user).
-- Intake forms for local use. Document templates.
+- Document templates.
 - Team entities with their own membership.
-- A map for Location. Button actions. Per-person votes.
-- A workload view over time. Map, gallery and personal views.
 - Cross-project item creation. Recipes.
-- Excel import and export. An audit log.
-- Agent as an assignee type. Folders.
+- Agent as an assignee type.
 
 **Needs a backend or multi-user:**
 - Accounts, guests, roles, permissions, sharing.
@@ -221,13 +218,13 @@ Each phase ends with typecheck passing and a manual check in the app. Phases are
 **Phase 3: columns**
 10. People column (multi), dropdown (multi-select), label column. **Done.**
 11. Numbers formats and footer summaries (sum, average, count, min, max). **Done.**
-12. Dependency, auto number, item ID, week, hour, world clock, color picker, vote, and button columns. **Done** as typed columns. Open: vote is a count only; button has no action; location has no map.
+12. Dependency, auto number, item ID, week, hour, world clock, color picker, vote, and button columns. **Done** as typed columns. Vote is per person, button can run an action, location has a map, and there is a subtasks column.
 13. Formula column (expression over other columns in the same board). **Done.**
 14. Mirror and connect-boards columns (references between local boards). **Done.**
 15. Files column (copy into app data folder). **Done** (stored in the data file, 5 MB cap; not copied to a separate folder).
 
 **Phase 4: planning**
-16. Cycle auto-create, auto-roll unfinished work, burndown and velocity. **Done.** Auto-create, automatic roll-over (opt-in per project), burndown with scope line, velocity, created vs completed.
+16. Cycle auto-create, auto-roll unfinished work, burndown and velocity. **Done.** Auto-create, automatic roll-over (opt-in per project), burndown with scope line, velocity, created vs completed. Sprint planning view with capacity, and a workload view over time.
 17. Project status, lead, members, milestones, and project updates. **Done.**
 18. Initiatives above projects. **Done.**
 19. Timeline dependencies and roadmap zoom levels. **Done.**
