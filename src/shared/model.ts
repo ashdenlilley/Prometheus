@@ -1,6 +1,6 @@
-import { addDays } from './dates'
+import { addDays, dayDiff, toISO } from './dates'
 import { applyFilter } from './filter'
-import { nextOccurrence } from './recurrence'
+import { nextOccurrence, recurrenceCopyId } from './recurrence'
 import type {
   ActivityEntry,
   AppData,
@@ -220,7 +220,7 @@ export function reducer(s: AppData, a: Action): AppData {
     case 'deleteTriageRule':
       return { ...s, triageRules: s.triageRules.filter(r => r.id !== a.id) }
     case 'tick':
-      return runRecurrences(runTimedRules(s, a.today), a.today)
+      return runHousekeeping(runRecurrences(runTimedRules(s, a.today), a.today), a.today)
     case 'addTemplate':
       return { ...s, templates: [...s.templates, a.template] }
     case 'deleteTemplate':
@@ -318,6 +318,7 @@ export function runRecurrences(s: AppData, today: string): AppData {
     if (!r || r.next > today) continue
     const now = new Date().toISOString()
     const copy = createIssue(out, src.projectId, src.title, {
+      id: recurrenceCopyId(src.id, r.next),
       description: src.description,
       labels: [...src.labels],
       priority: src.priority,
@@ -326,9 +327,49 @@ export function runRecurrences(s: AppData, today: string): AppData {
       dueDate: r.dueInDays === undefined ? undefined : addDays(today, r.dueInDays),
       activity: [{ id: crypto.randomUUID(), at: now, text: `Created from ${issueKey(out, src)} (recurring)` }]
     })
+    // Another device may already have made this period's copy under the same id; then only the rule advances.
+    const exists = out.issues.some(i => i.id === copy.id)
     out = {
       ...out,
-      issues: [...out.issues.map(i => (i.id === src.id ? { ...i, recurrence: { ...r, next: nextOccurrence(r, today) } } : i)), copy]
+      issues: [...out.issues.map(i => (i.id === src.id ? { ...i, recurrence: { ...r, next: nextOccurrence(r, today) } } : i)), ...(exists ? [] : [copy])]
+    }
+  }
+  return out
+}
+
+// Auto-close moves stale open issues to a canceled status; auto-archive hides old completed/canceled ones.
+// Each rule only picks issues that still match it, so running it again changes nothing.
+// Age is measured in local calendar days, the same calendar as `today`.
+export function runHousekeeping(s: AppData, today: string): AppData {
+  let out = s
+  const now = new Date().toISOString()
+  for (const p of s.projects) {
+    const close = p.autoClose
+    if (!close || close.days < 1 || !p.statuses.some(st => st.id === close.status && st.category === 'canceled')) continue
+    for (const issue of s.issues) {
+      if (issue.projectId !== p.id || issue.triage || issue.archivedAt) continue
+      const cat = categoryOf(p, issue.status)
+      if (cat === 'completed' || cat === 'canceled' || dayDiff(toISO(new Date(issue.updatedAt)), today) < close.days) continue
+      out = updateIssue(out, issue.id, { status: close.status }, false)
+      out = mapIssue(out, issue.id, i => ({ ...i, activity: [...i.activity, { id: crypto.randomUUID(), at: now, text: `Auto-closed after ${close.days} days without updates` }] }))
+      out = {
+        ...out,
+        notifications: [
+          { id: crypto.randomUUID(), at: now, text: `${issueKey(out, issue)} auto-closed after ${close.days} days without updates`, issueId: issue.id, read: false },
+          ...out.notifications
+        ].slice(0, 200)
+      }
+    }
+  }
+  for (const p of s.projects) {
+    const days = p.autoArchive?.days ?? 0
+    if (days < 1) continue
+    for (const issue of s.issues) {
+      if (issue.projectId !== p.id || issue.archivedAt) continue
+      const cat = categoryOf(p, issue.status)
+      if ((cat !== 'completed' && cat !== 'canceled') || dayDiff(toISO(new Date(issue.updatedAt)), today) < days) continue
+      // Archiving does not bump updatedAt. Unarchiving is a plain patchIssue, which does, so an unarchived issue waits N more days before it is archived again.
+      out = mapIssue(out, issue.id, i => ({ ...i, archivedAt: now, activity: [...i.activity, { id: crypto.randomUUID(), at: now, text: 'Archived automatically' }] }))
     }
   }
   return out
@@ -384,6 +425,7 @@ function describeChanges(project: Project | undefined, a: Issue, b: Issue): stri
   if (a.milestoneId !== b.milestoneId) out.push('Milestone changed')
   if (a.parentId !== b.parentId) out.push('Parent changed')
   if (a.triage && !b.triage) out.push('Accepted from triage')
+  if (a.archivedAt !== b.archivedAt) out.push(b.archivedAt ? 'Archived' : 'Unarchived')
   if (a.description !== b.description) out.push('Description edited')
   for (const key of new Set([...Object.keys(a.values), ...Object.keys(b.values)])) {
     if (JSON.stringify(a.values[key]) !== JSON.stringify(b.values[key])) {

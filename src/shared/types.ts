@@ -213,6 +213,9 @@ export interface Project {
   cycleLength: number
   autoCycles: boolean
   autoRollOver?: boolean
+  // Housekeeping: cancel issues untouched for N days; archive completed/canceled issues untouched for N days
+  autoClose?: { days: number; status: string }
+  autoArchive?: { days: number }
   milestones: Milestone[]
   updates: ProjectUpdate[]
   views: SavedView[]
@@ -268,6 +271,7 @@ export interface Issue {
   createdAt: string
   updatedAt: string
   completedAt?: string
+  archivedAt?: string // set by auto-archive; hidden from views until unarchived
 }
 
 // Copies the issue on a schedule. `next` is the YYYY-MM-DD of the next copy.

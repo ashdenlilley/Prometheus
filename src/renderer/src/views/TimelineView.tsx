@@ -65,7 +65,7 @@ export function TimelineView({ project, onOpen }: { project: Project; onOpen: (i
   const dragging = drag !== null
   const today = todayISO()
 
-  const issues = data.issues.filter(i => i.projectId === project.id && !i.triage)
+  const issues = data.issues.filter(i => i.projectId === project.id && !i.triage && !i.archivedAt)
   const dated = issues.filter(
     (i): i is Issue & { startDate: string; dueDate: string } => !!i.startDate && !!i.dueDate
   )

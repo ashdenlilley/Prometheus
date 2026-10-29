@@ -47,7 +47,7 @@ export function TableView({ project, onOpen }: { project: Project; onOpen: (id: 
   const [templateId, setTemplateId] = useState('')
   const fileInput = useRef<HTMLInputElement>(null)
 
-  const all = data.issues.filter(i => i.projectId === project.id && !i.triage)
+  const all = data.issues.filter(i => i.projectId === project.id && !i.triage && !i.archivedAt)
   const filtered = applyFilter(all, query.filter, project)
   const visible = query.showCompleted ? filtered : withoutCompleted(filtered, project)
   const visibleIds = new Set(visible.map(i => i.id))

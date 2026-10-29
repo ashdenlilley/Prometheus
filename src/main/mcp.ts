@@ -106,6 +106,7 @@ function issueView(data: AppData, i: Issue) {
     parentId: i.parentId ?? null,
     milestoneId: i.milestoneId ?? null,
     triage: !!i.triage,
+    archivedAt: i.archivedAt ?? null,
     cycleId: i.cycleId ?? null,
     startDate: i.startDate ?? null,
     dueDate: i.dueDate ?? null,
@@ -141,6 +142,7 @@ function issuePatch(project: Project | undefined, data: AppData, args: Record<st
   if (args.cycleId !== undefined) patch.cycleId = String(args.cycleId) || undefined
   if (args.milestoneId !== undefined) patch.milestoneId = String(args.milestoneId) || undefined
   if (args.triage !== undefined) patch.triage = Boolean(args.triage)
+  if (args.archived !== undefined) patch.archivedAt = args.archived ? new Date().toISOString() : undefined
   if (args.parentKey !== undefined) {
     patch.parentId = args.parentKey ? findIssue(data, { key: String(args.parentKey) }).id : undefined
   }
@@ -330,6 +332,7 @@ const TOOLS: Tool[] = [
         cycleId: str('Cycle id'),
         parentKey: str('Parent issue key: list its sub-issues'),
         triage: { type: 'boolean', description: 'Only issues in the triage inbox' },
+        include_archived: { type: 'boolean', description: 'Include archived issues, which are hidden by default' },
         search: str('Text to match in title or labels'),
         limit: num('Max results, default 100')
       }
@@ -346,6 +349,7 @@ const TOOLS: Tool[] = [
         .filter(i => !a.cycleId || i.cycleId === a.cycleId)
         .filter(i => !parentId || i.parentId === parentId)
         .filter(i => a.triage === undefined || !!i.triage === a.triage)
+        .filter(i => a.include_archived === true || !i.archivedAt)
         .filter(i => !q || i.title.toLowerCase().includes(q) || i.labels.some(l => l.toLowerCase().includes(q)))
         .slice(0, typeof a.limit === 'number' ? a.limit : 100)
         .map(i => issueView(data, i))
@@ -408,7 +412,8 @@ const TOOLS: Tool[] = [
         cycleId: str('Cycle id or empty'),
         milestoneId: str('Milestone id or empty'),
         parentKey: str('Parent issue key or empty'),
-        triage: { type: 'boolean', description: 'false accepts the issue out of triage' }
+        triage: { type: 'boolean', description: 'false accepts the issue out of triage' },
+        archived: { type: 'boolean', description: 'true archives the issue, false unarchives it' }
       }
     },
     run: (a, { data, apply }) => {

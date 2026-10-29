@@ -144,6 +144,12 @@ describe('read tools', () => {
     assert.equal((await ok('list_issues', { limit: 1 })).length, 1)
   })
 
+  test('list_issues hides archived issues unless include_archived is true', async () => {
+    data = { ...data, issues: data.issues.map(i => (i.number === 2 ? { ...i, archivedAt: '2026-10-01T00:00:00.000Z' } : i)) }
+    assert.deepEqual((await ok('list_issues')).map((i: { key: string }) => i.key), ['PRM-1'])
+    assert.deepEqual((await ok('list_issues', { include_archived: true })).map((i: { key: string }) => i.key), ['PRM-1', 'PRM-2'])
+  })
+
   test('get_issue resolves a key case-insensitively and returns the category', async () => {
     const i = await ok('get_issue', { key: 'prm-2' })
     assert.equal(i.key, 'PRM-2')

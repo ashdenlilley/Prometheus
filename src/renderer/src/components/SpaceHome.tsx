@@ -19,7 +19,7 @@ export function SpaceHome({ space, onOpenProject, onNewProject, onDeleted }: Spa
   const { data, dispatch } = useStore()
   const [name, setName] = useState(space.name)
   const projects = data.projects.filter(p => p.spaceId === space.id)
-  const issues = data.issues.filter(i => projects.some(p => p.id === i.projectId) && !i.triage)
+  const issues = data.issues.filter(i => projects.some(p => p.id === i.projectId) && !i.triage && !i.archivedAt)
   const doneOf = (p: Project) => data.issues.filter(i => i.projectId === p.id)
   const totals = projects.reduce(
     (acc, p) => {

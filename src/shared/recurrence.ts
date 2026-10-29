@@ -47,3 +47,15 @@ export function describeRecurrence(r: Recurrence): string {
     }
   }
 }
+
+// Same template and period give the same id on every device, so a copy made on two synced devices merges into one.
+export function recurrenceCopyId(templateId: string, period: string): string {
+  const text = `${templateId}:${period}`
+  return `rec-${fnv1a(text, 0x811c9dc5)}-${fnv1a(text, 0x9e3779b9)}`
+}
+
+function fnv1a(text: string, seed: number): string {
+  let h = seed
+  for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 0x01000193)
+  return (h >>> 0).toString(16).padStart(8, '0')
+}
