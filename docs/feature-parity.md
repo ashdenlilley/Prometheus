@@ -57,7 +57,7 @@ Last checked against the code: 2026-10-29.
 | Cycles view with graphs | Y (`CyclesView.tsx`: Burndown and velocity) |
 | Custom views (saved filters, shared, favourited) | P (saved views per project and view kind store filter, group, sort and hidden columns. `FilterBar.tsx`, `shared/types.ts` SavedView; not shared or favourited) |
 | Filters with AND and OR and any property | Y (`shared/filter.ts`, `shared/types.ts` FilterGroup match all or any, `FilterBar.tsx`) |
-| Display options (group by, sub-group by, order, show completed, show sub-issues, columns) | P (group by any field, sort, hide columns, sub-issues nested in `TableView.tsx`; no sub-group by, no show-completed toggle) |
+| Display options (group by, sub-group by, order, show completed, show sub-issues, columns) | P (group by any field, sub-group by as board swimlanes (`rowsBy`), sort, a show-completed toggle in List, Board and Table that saved views keep, hide columns, sub-issues nested in `TableView.tsx`; column order and visibility are per project, not per view) |
 | Insights and charts (burndown, created vs completed, scope) | P (burndown and velocity, bar chart by any field; no created vs completed chart, no scope line. `CyclesView.tsx`, `ChartView.tsx`) |
 
 ### 1.4 Automation and integrations
@@ -189,7 +189,7 @@ Full 1:1 with both products is a multi-quarter build and needs a multi-user back
 - Recurring issues. Intake forms for local use. Project-level and board-level templates.
 - Automatic cycle roll-over. Auto-close on inactivity and auto-archive rules.
 - Automation triggers on project, cycle and initiative changes, and on column changes.
-- Sub-group by, a show-completed toggle, and per-view column order and visibility (order and hidden columns are per project).
+- Per-view column order and visibility (order and hidden columns are per project). Sub-group by shipped as board swimlanes and the show-completed toggle has shipped.
 - Team entities with their own membership. Workspace-level labels and label groups.
 - Estimates on a t-shirt scale. A date-with-time column. A progress column computed from sub-items. A time-tracking timer. A map for Location. Button actions. Per-person votes.
 - Pie and line charts. Created vs completed chart and a scope line on the burndown. Calendar and portfolio dashboard widgets. A workload view over time. Map, gallery and personal views.
@@ -219,7 +219,7 @@ Each phase ends with typecheck passing and a manual check in the app. Phases are
 
 **Phase 2: views and filtering**
 6. Filter model (AND and OR, any property) shared across Board, Table, Timeline and Cycles. **Partial.** Done for Board, Table, List and Chart. Open: Timeline and Cycles do not use the filter bar.
-7. Saved views with grouping on any field, sorting, and column show and hide. **Partial.** Done for saved views. Open: column order and hidden columns are per project, not per view; sub-group by; shared or favourite views.
+7. Saved views with grouping on any field, sorting, and column show and hide. **Partial.** Done for saved views. Saved views also keep board rows (sub-group by) and the show-completed toggle. Open: column order and hidden columns are per project, not per view; shared or favourite views.
 8. Triage inbox with accept, decline, and duplicate. **Done.**
 9. Bulk select and bulk edit on Table and Board. **Done** (also on List).
 

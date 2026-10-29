@@ -1,6 +1,6 @@
 import { useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import type { Column, Issue, Project } from '@shared/types'
-import { applyFilter, childrenOf, groupIssues, issuesToCSV, parseCSV, summarize, type FixedField } from '@shared/query'
+import { applyFilter, childrenOf, groupIssues, issuesToCSV, parseCSV, summarize, withoutCompleted, type FixedField } from '@shared/query'
 import { createIssue, issueKey, useStore, withValue } from '../store'
 import { CellEditor } from '../components/cells'
 import { PrioritySelect, StatusDot, StatusSelect } from '../components/fields'
@@ -47,7 +47,8 @@ export function TableView({ project, onOpen }: { project: Project; onOpen: (id: 
   const fileInput = useRef<HTMLInputElement>(null)
 
   const all = data.issues.filter(i => i.projectId === project.id && !i.triage)
-  const visible = applyFilter(all, query.filter, project)
+  const filtered = applyFilter(all, query.filter, project)
+  const visible = query.showCompleted ? filtered : withoutCompleted(filtered, project)
   const visibleIds = new Set(visible.map(i => i.id))
 
   const baseCols: ColumnRef[] = [

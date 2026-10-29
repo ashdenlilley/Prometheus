@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { Issue, Project } from '@shared/types'
-import { applyFilter, groupPatch, progress, swimlanes, type Group, type Lane } from '@shared/query'
+import { applyFilter, groupPatch, progress, swimlanes, withoutCompleted, type Group, type Lane } from '@shared/query'
 import { createIssue, issueKey, useStore } from '../store'
 import { PriorityText, StatusDot } from '../components/fields'
 import { FilterBar, useViewQuery } from '../components/FilterBar'
@@ -16,7 +16,8 @@ export function BoardView({ project, onOpen }: { project: Project; onOpen: (id: 
   const [picked, setPicked] = useState<Set<string>>(new Set())
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const groupBy = query.groupBy ?? 'status'
-  const issues = applyFilter(data.issues.filter(i => i.projectId === project.id && !i.triage), query.filter, project)
+  const filtered = applyFilter(data.issues.filter(i => i.projectId === project.id && !i.triage), query.filter, project)
+  const issues = query.showCompleted ? filtered : withoutCompleted(filtered, project)
   const lanes = swimlanes(
     issues,
     project,

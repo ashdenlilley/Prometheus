@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { Project } from '@shared/types'
-import { applyFilter, groupIssues } from '@shared/query'
+import { applyFilter, groupIssues, withoutCompleted } from '@shared/query'
 import { useStore } from '../store'
 import { FilterBar, useViewQuery } from '../components/FilterBar'
 
@@ -9,7 +9,8 @@ export function ChartView({ project }: { project: Project }) {
   const { data } = useStore()
   const query = useViewQuery(project, 'list')
   const [metric, setMetric] = useState<'count' | 'estimate'>('count')
-  const issues = applyFilter(data.issues.filter(i => i.projectId === project.id && !i.triage), query.filter, project)
+  const filtered = applyFilter(data.issues.filter(i => i.projectId === project.id && !i.triage), query.filter, project)
+  const issues = query.showCompleted ? filtered : withoutCompleted(filtered, project)
   const groups = groupIssues(
     issues,
     project,

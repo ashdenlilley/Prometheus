@@ -134,6 +134,7 @@ export interface SavedView {
   rowsBy?: string | null
   sort: Sort | null
   hidden: string[]
+  showCompleted?: boolean
 }
 
 export type Operator = 'is' | 'is_not' | 'contains' | 'gt' | 'lt' | 'empty' | 'not_empty'
