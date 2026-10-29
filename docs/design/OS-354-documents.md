@@ -2,6 +2,9 @@
 
 Status: design for review. No code yet. Issue: OS-354. Size: XL. The first slice below is about L (3 to 5 days).
 
+## Decisions
+- Decided (Ashden): Markdown with a live preview is the editor. Rich-text editing is not planned.
+
 ## Scope
 First slice:
 - Markdown docs under a space or a project (team docs once OS-353 lands): create, edit, rename, delete (with undo) and duplicate.
@@ -12,7 +15,7 @@ First slice:
 - Docs are included in folder sync, backups, JSON export, and the command menu search (title and body).
 
 Deferred:
-- Rich-text or block editing, images pasted inline (files stay attachments), real-time co-editing (needs OS-359), version history beyond undo, and comments on docs.
+- Images pasted inline (files stay attachments), real-time co-editing (needs OS-359), version history beyond undo, and comments on docs.
 
 ## Storage model
 - A new `docs` table in SQLite: `{ id, spaceId, projectId?, teamId?, title, body, createdAt, updatedAt, archivedAt?, template?: boolean }`.
@@ -21,7 +24,7 @@ Deferred:
 
 ## Editor choice
 - Rendering: `marked` (small, no runtime dependencies) plus `dompurify` for sanitising. `npm audit` must stay at 0 when they are added.
-- Rejected for now: TipTap or ProseMirror (a much larger dependency tree and audit surface, not worth it for a single user yet) and CodeMirror (nice to have, can come later).
+- Decided: no rich-text editor. CodeMirror for the Markdown textarea (syntax highlighting) is a possible later nicety.
 - Rendered HTML is sanitised and links open externally through `shell.openExternal` with an http/https allowlist.
 
 ## Sync merge
@@ -44,9 +47,8 @@ None.
 - Smoke (xvfb): create a doc with an issue mention, link it from a Doc column, and open the backlink. Screenshot.
 
 ## Open questions for Ashden
-1. Are Markdown and preview enough for now, or is rich text a must-have (which brings TipTap and its dependency weight)?
-2. Is a "conflicted copy" acceptable for the rare same-doc offline edit, rather than a text merge?
-3. Should docs also be written to disk as `.md` files (for example in a chosen folder), or stay in SQLite only?
+1. Is a "conflicted copy" acceptable for the rare same-doc offline edit, rather than a text merge?
+2. Should docs also be written to disk as `.md` files (for example in a chosen folder), or stay in SQLite only?
 
 ## Dependencies and suggested build order
 
