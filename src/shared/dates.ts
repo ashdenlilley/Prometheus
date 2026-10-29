@@ -22,3 +22,10 @@ export function addDays(s: string, n: number) {
 export function dayDiff(a: string, b: string) {
   return Math.round((parseISO(b).getTime() - parseISO(a).getTime()) / 86400000)
 }
+
+// Six Monday-first weeks covering the month (month is 1-based). 42 days always fit any month.
+export function monthGrid(year: number, month: number) {
+  const first = `${year}-${String(month).padStart(2, '0')}-01`
+  const offset = (parseISO(first).getDay() + 6) % 7
+  return Array.from({ length: 42 }, (_, n) => addDays(first, n - offset))
+}

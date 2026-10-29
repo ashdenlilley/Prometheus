@@ -2083,6 +2083,17 @@ select.field-input:focus {
   color: var(--muted);
 }
 
+/* Portfolio widget: one grid row per project, header row first */
+.portfolio-row {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr 0.7fr 0.8fr 1fr;
+  gap: 8px;
+  align-items: center;
+  padding: 4px 0;
+  font-size: 13px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
 /* ───────────── Colour swatches, switch, settings ───────────── */
 .swatches {
   display: flex;

@@ -11,6 +11,7 @@ export type ViewId =
   | 'calendar'
   | 'roadmap'
   | 'dashboard'
+  | 'activity'
 
 export interface Route {
   spaceId: string | null
@@ -26,7 +27,8 @@ export const PROJECT_VIEWS: { id: ViewId; label: string }[] = [
   { id: 'timeline', label: 'Timeline' },
   { id: 'cycles', label: 'Cycles' },
   { id: 'chart', label: 'Charts' },
-  { id: 'calendar', label: 'Calendar' }
+  { id: 'calendar', label: 'Calendar' },
+  { id: 'activity', label: 'Activity' }
 ]
 
 export const VIEW_LABEL: Record<ViewId, string> = {
@@ -40,5 +42,6 @@ export const VIEW_LABEL: Record<ViewId, string> = {
   chart: 'Charts',
   calendar: 'Calendar',
   roadmap: 'Roadmap',
-  dashboard: 'Dashboard'
+  dashboard: 'Dashboard',
+  activity: 'Activity'
 }

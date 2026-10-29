@@ -318,7 +318,7 @@ export interface Template {
   estimate?: number
 }
 
-export type WidgetType = 'numbers' | 'progress' | 'chart' | 'list' | 'workload' | 'overdue' | 'milestones' | 'cycle'
+export type WidgetType = 'numbers' | 'progress' | 'chart' | 'list' | 'workload' | 'overdue' | 'milestones' | 'cycle' | 'calendar' | 'portfolio'
 
 export interface Widget {
   id: string

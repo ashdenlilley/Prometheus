@@ -1,5 +1,6 @@
-import type { Cycle, Issue, StatusDef } from './types'
+import type { AppData, Cycle, Issue, ProjectStatus, ProjectUpdate, StatusDef } from './types'
 import { addDays, dayDiff } from './dates'
+import { progress } from './query'
 
 // Canceled issues are left out of both helpers. Dates are compared on their YYYY-MM-DD prefix.
 const live = (issues: Issue[], statuses: StatusDef[]) => issues.filter(i => statuses.find(s => s.id === i.status)?.category !== 'canceled')
@@ -32,4 +33,25 @@ export function createdVsCompleted(issues: Issue[], from: string, to: string, bu
     })
   }
   return rows
+}
+
+export interface PortfolioRow {
+  id: string
+  name: string
+  status: ProjectStatus
+  lead: string
+  pct: number
+  targetDate?: string
+  health?: ProjectUpdate['health']
+}
+
+// One row per project in the space, or just `projectId`. Health is from the latest update. Missing values stay undefined for the UI to show as dashes.
+export function portfolioRows(data: AppData, spaceId: string, projectId?: string): PortfolioRow[] {
+  return data.projects
+    .filter(p => p.spaceId === spaceId && (!projectId || p.id === projectId))
+    .map(p => {
+      const issues = data.issues.filter(i => i.projectId === p.id && !i.triage)
+      const latest = [...p.updates].sort((a, b) => (a.at < b.at ? 1 : -1))[0]
+      return { id: p.id, name: p.name, status: p.status, lead: p.lead, pct: progress(issues, p.statuses).pct, targetDate: p.targetDate, health: latest?.health }
+    })
 }
