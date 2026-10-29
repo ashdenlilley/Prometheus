@@ -92,7 +92,7 @@ export function DashboardView({ space }: { space: Space }) {
 
 function scopeIssues(data: { issues: Issue[]; projects: { id: string; spaceId: string }[] }, spaceId: string, projectId?: string) {
   const ids = data.projects.filter(p => p.spaceId === spaceId && (!projectId || p.id === projectId)).map(p => p.id)
-  return data.issues.filter(i => ids.includes(i.projectId) && !i.triage)
+  return data.issues.filter(i => ids.includes(i.projectId) && !i.triage && !i.archivedAt)
 }
 
 function WidgetBody({ widget, spaceId }: { widget: Widget; spaceId: string }) {

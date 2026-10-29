@@ -15,7 +15,7 @@ export function CalendarView({ project, onOpen }: { project: Project; onOpen: (i
   const startDay = month.getDay()
   const gridStart = addDays(first, -startDay)
   const cells = Array.from({ length: 42 }, (_, n) => addDays(gridStart, n))
-  const issues = data.issues.filter((i): i is Issue & { dueDate: string } => i.projectId === project.id && !!i.dueDate)
+  const issues = data.issues.filter((i): i is Issue & { dueDate: string } => i.projectId === project.id && !!i.dueDate && !i.archivedAt)
   const today = todayISO()
 
   const shift = (n: number) => setMonth(m => new Date(m.getFullYear(), m.getMonth() + n, 1))

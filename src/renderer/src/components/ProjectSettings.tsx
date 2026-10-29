@@ -1,14 +1,14 @@
 import { useState } from 'react'
 import type { Automation, AutomationAction, AutomationTrigger, Project, ProjectStatus, StatusCategory, StatusDef } from '@shared/types'
-import { useStore } from '../store'
+import { issueKey, useStore } from '../store'
 import { fieldOptions } from './FilterBar'
 import type { Operator, TriageRule } from '@shared/types'
 import { ICONS } from './icons'
 import { askText, Modal } from './ui'
 import { LABEL_COLORS } from '../columns'
-import { uid, clsx, todayISO } from '../util'
+import { uid, clsx, todayISO, fmtDate } from '../util'
 
-type Tab = 'general' | 'statuses' | 'milestones' | 'updates' | 'automations' | 'triage' | 'templates'
+type Tab = 'general' | 'statuses' | 'milestones' | 'updates' | 'automations' | 'triage' | 'templates' | 'archive'
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'general', label: 'General' },
@@ -17,7 +17,8 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'updates', label: 'Updates' },
   { id: 'automations', label: 'Automations' },
   { id: 'triage', label: 'Triage rules' },
-  { id: 'templates', label: 'Templates' }
+  { id: 'templates', label: 'Templates' },
+  { id: 'archive', label: 'Archive' }
 ]
 
 const PROJECT_STATUS: { value: ProjectStatus; label: string }[] = [
@@ -49,6 +50,7 @@ export function ProjectSettings({ project, onClose }: { project: Project; onClos
       {tab === 'automations' && <Automations project={project} />}
       {tab === 'triage' && <TriageRules project={project} />}
       {tab === 'templates' && <Templates project={project} />}
+      {tab === 'archive' && <Archive project={project} />}
     </Modal>
   )
 }
@@ -58,6 +60,7 @@ function General({ project }: { project: Project }) {
   const [members, setMembers] = useState(project.members.join(', '))
   const patch = (p: Partial<Project>) => dispatch({ type: 'patchProject', id: project.id, patch: p })
   const initiatives = data.initiatives.filter(i => i.spaceId === project.spaceId)
+  const canceled = project.statuses.filter(s => s.category === 'canceled')
   return (
     <div className="settings-form">
       <label className="field">
@@ -107,6 +110,48 @@ function General({ project }: { project: Project }) {
           <input className="field-input" type="date" value={project.targetDate ?? ''} onChange={e => patch({ targetDate: e.target.value || undefined })} />
         </label>
       </div>
+      <div className="field-row">
+        <label className="field">
+          Auto-close after (days)
+          <input
+            className="field-input num"
+            type="number"
+            min={1}
+            aria-label="Auto-close days"
+            placeholder="Off"
+            value={project.autoClose?.days ?? ''}
+            onChange={e =>
+              patch({ autoClose: e.target.value === '' ? undefined : { days: Number(e.target.value), status: project.autoClose?.status ?? canceled[0]?.id ?? '' } })
+            }
+          />
+        </label>
+        <label className="field">
+          Close as
+          <select
+            className="field-input"
+            aria-label="Auto-close status"
+            disabled={!project.autoClose}
+            value={project.autoClose?.status ?? ''}
+            onChange={e => project.autoClose && patch({ autoClose: { ...project.autoClose, status: e.target.value } })}
+          >
+            {canceled.map(s => (
+              <option key={s.id} value={s.id}>{s.label}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+      <label className="field">
+        Auto-archive after (days)
+        <input
+          className="field-input num"
+          type="number"
+          min={1}
+          aria-label="Auto-archive days"
+          placeholder="Off"
+          value={project.autoArchive?.days ?? ''}
+          onChange={e => patch({ autoArchive: e.target.value === '' ? undefined : { days: Number(e.target.value) } })}
+        />
+      </label>
       <div className="section-title-row small">
         <h3>Initiatives</h3>
         <button
@@ -124,6 +169,26 @@ function General({ project }: { project: Project }) {
         </button>
       </div>
       <div className="muted small">{initiatives.map(i => i.name).join(', ') || 'No initiatives in this space yet.'}</div>
+    </div>
+  )
+}
+
+function Archive({ project }: { project: Project }) {
+  const { data, dispatch } = useStore()
+  const archived = data.issues.filter(i => i.projectId === project.id && i.archivedAt).sort((a, b) => (b.archivedAt ?? '').localeCompare(a.archivedAt ?? ''))
+  return (
+    <div className="settings-form">
+      {archived.map(i => (
+        <div key={i.id} className="option-row">
+          <span className="grow small">
+            {issueKey(data, i)} {i.title} <span className="muted">· {fmtDate(i.archivedAt!.slice(0, 10))}</span>
+          </span>
+          <button className="btn subtle" aria-label={`Unarchive ${issueKey(data, i)}`} onClick={() => dispatch({ type: 'patchIssue', id: i.id, patch: { archivedAt: undefined } })}>
+            Unarchive
+          </button>
+        </div>
+      ))}
+      {archived.length === 0 && <div className="muted small">No archived issues</div>}
     </div>
   )
 }

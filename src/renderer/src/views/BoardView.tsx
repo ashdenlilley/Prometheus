@@ -17,7 +17,7 @@ export function BoardView({ project, onOpen }: { project: Project; onOpen: (id: 
   const [picked, setPicked] = useState<Set<string>>(new Set())
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const groupBy = query.groupBy ?? 'status'
-  const filtered = applyFilter(data.issues.filter(i => i.projectId === project.id && !i.triage), query.filter, project)
+  const filtered = applyFilter(data.issues.filter(i => i.projectId === project.id && !i.triage && !i.archivedAt), query.filter, project)
   const issues = query.showCompleted ? filtered : withoutCompleted(filtered, project)
   const lanes = swimlanes(
     issues,

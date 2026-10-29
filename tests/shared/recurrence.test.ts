@@ -1,6 +1,6 @@
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
-import { describeRecurrence, nextOccurrence } from '../../src/shared/recurrence'
+import { describeRecurrence, nextOccurrence, recurrenceCopyId } from '../../src/shared/recurrence'
 import { createIssue, reducer, runRecurrences } from '../../src/shared/model'
 import { migrate } from '../../src/shared/migrate'
 import { blankProject, emptyData } from '../../src/shared/seed'
@@ -155,5 +155,42 @@ describe('runRecurrences', () => {
     const loaded = migrate(old)
     const ticked = reducer(loaded, { type: 'tick', today: '2026-10-29' })
     assert.deepEqual(ticked.issues, old.issues)
+  })
+})
+
+describe('recurrence copy ids', () => {
+  // A daily rule whose next copy is due on 2026-10-29.
+  const due = () => withData(source({ recurrence: { ...rule({ kind: 'daily' }), next: '2026-10-29' } }))
+
+  test('two devices running from the same data make the same copy id', () => {
+    const base = due()
+    const a = runRecurrences(structuredClone(base), '2026-10-29')
+    const b = runRecurrences(structuredClone(base), '2026-10-29')
+    assert.equal(a.issues[1].id, b.issues[1].id)
+    assert.equal(a.issues[1].id, recurrenceCopyId(base.issues[0].id, '2026-10-29'))
+  })
+
+  test('when that copy already exists, nothing is created but next still advances', () => {
+    const base = due()
+    const src = base.issues[0]
+    const existing = { ...src, id: recurrenceCopyId(src.id, '2026-10-29'), recurrence: undefined }
+    const out = runRecurrences({ ...base, issues: [src, existing] }, '2026-10-29')
+    assert.equal(out.issues.length, 2)
+    assert.equal(out.issues[0].recurrence?.next, '2026-10-30')
+  })
+
+  test('different periods and templates give different ids', () => {
+    const ids = new Set([recurrenceCopyId('t1', '2026-10-29'), recurrenceCopyId('t1', '2026-10-30'), recurrenceCopyId('t2', '2026-10-29')])
+    assert.equal(ids.size, 3)
+    assert.match(recurrenceCopyId('t1', '2026-10-29'), /^rec-[0-9a-f]{8}-[0-9a-f]{8}$/)
+  })
+
+  test('merging device B into device A by id leaves one copy', () => {
+    const base = due()
+    const a = runRecurrences(structuredClone(base), '2026-10-29')
+    const b = runRecurrences(structuredClone(base), '2026-10-29')
+    const merged = new Map(a.issues.map(i => [i.id, i]))
+    for (const i of b.issues) merged.set(i.id, i)
+    assert.equal(merged.size, 2)
   })
 })

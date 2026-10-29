@@ -16,7 +16,7 @@ export function IssuesView({ project, onOpen }: { project: Project; onOpen: (id:
   const query = useViewQuery(project, 'list')
   const [picked, setPicked] = useState<Set<string>>(new Set())
   const filtered = applyFilter(
-    data.issues.filter(i => i.projectId === project.id && !i.triage),
+    data.issues.filter(i => i.projectId === project.id && !i.triage && !i.archivedAt),
     query.filter,
     project
   )

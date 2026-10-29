@@ -193,6 +193,13 @@ export function IssueDetail({ issueId, onClose, onOpen }: { issueId: string; onC
           </div>
         )}
 
+        {issue.archivedAt && (
+          <div className="triage-banner">
+            <span>Archived {fmtDate(issue.archivedAt.slice(0, 10))}</span>
+            <button className="btn primary" onClick={() => patch({ archivedAt: undefined })}>Unarchive</button>
+          </div>
+        )}
+
         <input className="title-input" value={issue.title} onChange={e => patch({ title: e.target.value })} />
         <textarea
           className="field-input area desc"
