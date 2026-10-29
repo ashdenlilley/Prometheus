@@ -9,16 +9,38 @@
   </picture>
 </p>
 
-Local-first project management. Linear-style issues, cycles and roadmap. Monday-style boards with custom columns and timeline. Single user. Optional folder sync across devices (see docs/sync.md). Runs on macOS and Windows.
+<p align="center"><a href="https://github.com/ashdenlilley/Prometheus/actions/workflows/ci.yml"><img src="https://github.com/ashdenlilley/Prometheus/actions/workflows/ci.yml/badge.svg" alt="CI"></a></p>
+
+Local-first project management for a single user, on macOS and Windows. Linear-style issues, cycles, triage and roadmap. Monday-style boards with typed custom columns and dashboards. Optional encrypted folder sync across your own devices (see docs/sync.md).
 
 ## Views
 
-- **Issues**: status-grouped list. Toggle current project or all projects.
-- **Board**: kanban by status. Drag cards between columns.
-- **Table**: Monday-style grouped table. Inline edit. Add custom columns (text, number, date, checkbox, select).
-- **Timeline**: Gantt of issues with start/due dates, cycle bands, today marker.
-- **Cycles**: time-boxed sprints with progress. Assign open issues.
-- **Roadmap**: projects as bars with progress, across all projects.
+- **Issues**: list grouped by any field, sorting, bulk edit.
+- **Triage**: inbox to accept or decline incoming issues, with triage rules.
+- **Board**: kanban grouped by any field, drag between columns, WIP limits when grouped by status.
+- **Table**: monday-style table, inline edit, typed custom columns including formula, mirror and connect-boards, sub-issue rows, footer summaries, CSV import and export.
+- **Timeline**: Gantt bars with dependency arrows from `blocks` relations, cycle bands, today marker.
+- **Cycles**: time-boxed sprints with progress, burndown and velocity, roll-over of unfinished work.
+- **Chart**: bar chart of issue counts or estimate points by any field.
+- **Calendar**: issues on a month calendar by date.
+- **Roadmap**: projects and initiatives as bars with progress, quarter/month/week zoom.
+- **Dashboard**: widgets for numbers, progress, chart, list, workload, overdue, milestones and cycle.
+
+## Also
+
+- Sub-issues and relations (blocks, duplicate, related).
+- Comments, @mention notifications and per-issue activity.
+- Saved views with AND/OR filters.
+- Issue templates.
+- Automations triggered by status, priority, assignee or due-date.
+- Command palette (Cmd/Ctrl+K).
+- Local MCP server for coding agents such as Claude Code and Codex (streamable HTTP on 127.0.0.1, default port 7878, bearer token).
+
+For gaps compared with Linear and monday.com, see [docs/feature-parity.md](docs/feature-parity.md).
+
+## Requirements
+
+- Node 22 (pinned in `.nvmrc`; run `nvm use` if you use nvm).
 
 ## Run
 
@@ -26,9 +48,17 @@ Local-first project management. Linear-style issues, cycles and roadmap. Monday-
 npm install
 npm run dev        # development
 npm run typecheck
+npm run test:sync   # sync integration tests
 npm run build
 npm run dist:mac   # .dmg (run on macOS)
 npm run dist:win   # .exe installer (run on Windows)
 ```
 
-Data is stored in `prometheus-data.json` under the Electron `userData` directory.
+## Data
+
+Data is stored in a local SQLite database, `prometheus.db`, in the Electron `userData` directory. An older `prometheus-data.json` is imported once and renamed to `.bak`.
+
+## CI and releases
+
+- `.github/workflows/ci.yml` runs typecheck, sync tests and build on pull requests and pushes to `main`.
+- Pushing a `v*` tag runs `.github/workflows/release.yml` to build the macOS DMG and Windows installer. See [docs/macos-package.md](docs/macos-package.md) and [docs/windows-package.md](docs/windows-package.md).
