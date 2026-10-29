@@ -9,6 +9,7 @@ import { AUDIT_LIMIT, auditEntries, toCsv, type AuditEntry, type AuditFilter } f
 import { subscriptionNotifications } from '../shared/subscriptions'
 import { migrate } from '../shared/migrate'
 import { seed } from '../shared/seed'
+import { ensureTeams } from '../shared/teams'
 import { adoptPersonal } from '../shared/sync'
 import { McpController, type McpKeys } from './mcp'
 import { LEGACY_AGENT, agentAssignee, displayAssignee, isAgentAssignee, stampActor } from '../shared/agents'
@@ -58,7 +59,12 @@ async function openStore(): Promise<Store> {
 // First run: import the v2/v3 JSON file if present, otherwise seed sample content.
 async function loadInitial(db: Store): Promise<AppData> {
   const existing = db.read()
-  if (existing) return existing
+  if (existing) {
+    // An older database is upgraded once, and saved only when that changed it
+    const upgraded = ensureTeams(migrate(existing))
+    if (upgraded !== existing) await db.save(upgraded)
+    return upgraded
+  }
   try {
     const legacy = migrate(JSON.parse(await fs.readFile(legacyFile(), 'utf8')))
     await db.save(legacy)

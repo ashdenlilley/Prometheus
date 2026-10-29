@@ -67,9 +67,24 @@ function General({ project }: { project: Project }) {
   const [members, setMembers] = useState(project.members.join(', '))
   const patch = (p: Partial<Project>) => dispatch({ type: 'patchProject', id: project.id, patch: p })
   const initiatives = data.initiatives.filter(i => i.spaceId === project.spaceId)
+  const teams = data.teams.filter(t => t.spaceId === project.spaceId && !t.archivedAt)
   const canceled = project.statuses.filter(s => s.category === 'canceled')
+  const moveTeam = (teamId: string) => {
+    const next = teams.find(t => t.id === teamId)
+    if (!next || teamId === project.teamId) return
+    if (!window.confirm(`Move this project to ${next.name}? Existing issues keep their keys; new issues use ${next.key}.`)) return
+    dispatch({ type: 'moveProjectToTeam', projectId: project.id, teamId })
+  }
   return (
     <div className="settings-form">
+      <label className="field">
+        Team
+        <select aria-label="Team" className="field-input" value={project.teamId} onChange={e => moveTeam(e.target.value)}>
+          {teams.map(t => (
+            <option key={t.id} value={t.id}>{t.name} ({t.key})</option>
+          ))}
+        </select>
+      </label>
       <label className="check-field">
         <input
           type="checkbox"
@@ -221,6 +236,7 @@ function Statuses({ project }: { project: Project }) {
   }
   return (
     <div className="settings-form">
+      <p className="muted small">Statuses belong to team {data.teams.find(t => t.id === project.teamId)?.name} and apply to all its projects.</p>
       <p className="muted small">Categories drive progress: Completed counts as done, Canceled is excluded, the rest are open.</p>
       {project.statuses.map(s => (
         <div key={s.id} className="option-row">
