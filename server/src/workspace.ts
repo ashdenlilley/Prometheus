@@ -1,6 +1,6 @@
 import { DurableObject } from 'cloudflare:workers'
 import { parse, TABLE_KEYS, type Op } from '../../src/shared/sync'
-import type { Role } from '../../src/shared/permissions'
+import { ISSUE_SCOPE, PROJECT_SCOPE, canReadRow, isProjectAccess, writeError, type Principal, type ProjectAccess, type RowScope, type Role } from '../../src/shared/permissions'
 import type { Env } from './env'
 
 // Wire protocol: JSON text frames. See docs/cloud-sync.md.
@@ -17,7 +17,11 @@ const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS pushes (device TEXT NOT NULL, id TEXT NOT NULL, seqs TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (device, id))`,
   // Compacted state: the winning op per (table, id, field). field '$' is row existence.
   `CREATE TABLE IF NOT EXISTS snap (tbl TEXT NOT NULL, id TEXT NOT NULL, field TEXT NOT NULL, hlc TEXT NOT NULL, body TEXT NOT NULL, PRIMARY KEY (tbl, id, field))`,
-  `CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)`
+  `CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)`,
+  // Scope index, derived from the ops: the winning project (or issue) ref per row, and each project's winning access.
+  `CREATE TABLE IF NOT EXISTS scope (tbl TEXT NOT NULL, id TEXT NOT NULL, ref TEXT, hlc TEXT NOT NULL, PRIMARY KEY (tbl, id))`,
+  `CREATE TABLE IF NOT EXISTS pacc (id TEXT PRIMARY KEY, access TEXT, hlc TEXT NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS denials (at INTEGER NOT NULL, user TEXT NOT NULL, tbl TEXT NOT NULL, "row" TEXT NOT NULL, reason TEXT NOT NULL)`
 ]
 
 type Sql = SqlStorage
@@ -34,6 +38,7 @@ interface Att {
   role: Role
   projects: string[]
   name: string
+  presence?: string | null
 }
 
 // A type alias, not an interface: rows<T> needs an implicit index signature.
@@ -45,8 +50,23 @@ type Entry = {
   body: string
 }
 
+// Thrown inside a push's transaction so that none of its ops are kept.
+class Refused extends Error {
+  index: number
+  constructor(index: number, reason: string) {
+    super(reason)
+    this.index = index
+  }
+}
+
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
 const isField = (f: unknown): f is string => typeof f === 'string' && f !== '' && f !== '$' && !f.includes('\u0000') && f.length <= 64
+const principal = (a: Att): Principal => ({ userId: a.user, role: a.role, projects: a.projects })
+
+// The field that places a row: 'access' for projects, else the table's project or issue field.
+const scopeField = (tbl: string): string | undefined => (tbl === 'projects' ? 'access' : (PROJECT_SCOPE[tbl] ?? ISSUE_SCOPE[tbl]))
+// The op's new value for a scope field: undefined when the op leaves it alone, null when it unsets it.
+const scopeValue = (op: Op, field: string): unknown => (field in (op.set ?? {}) ? op.set?.[field] : op.unset?.includes(field) ? null : undefined)
 
 // Returns why an op is invalid, or null when it is valid.
 function opError(o: unknown): string | null {
@@ -55,6 +75,7 @@ function opError(o: unknown): string | null {
   if (typeof o.id !== 'string' || o.id === '' || o.id.includes('\u0000')) return 'bad id'
   if (typeof o.hlc !== 'string' || !HLC_RE.test(o.hlc)) return 'bad hlc'
   if (o.create && o.del) return 'op is both create and del'
+  if (o.table === 'projects' && isObj(o.set) && 'access' in o.set && !isProjectAccess(o.set.access)) return 'bad access'
   if (o.del) return null
   if (o.create) return isObj(o.set) && Object.keys(o.set).every(isField) ? null : 'bad create fields'
   if (o.set === undefined && o.unset === undefined) return 'op has no fields'
@@ -86,6 +107,8 @@ export class Workspace extends DurableObject<Env> {
     this.compactKeep = Number(env.COMPACT_KEEP ?? 2_000)
     ctx.blockConcurrencyWhile(async () => {
       for (const s of SCHEMA) run(ctx.storage.sql, s)
+      // Logs written before the scope index existed are indexed once, on first start.
+      if (rows<{ v: string }>(ctx.storage.sql, "SELECT v FROM meta WHERE k = 'scope_v'").length === 0) this.buildIndex()
     })
   }
 
@@ -121,6 +144,15 @@ export class Workspace extends DurableObject<Env> {
     for (const ws of this.ctx.getWebSockets(`u:${userId}`)) ws.close(code, reason)
   }
 
+  // Newest refusals first, for the owner's audit route.
+  denials(limit = 100) {
+    return rows<{ at: number; user: string; tbl: string; row: string; reason: string }>(
+      this.ctx.storage.sql,
+      'SELECT at, user, tbl, "row", reason FROM denials ORDER BY rowid DESC LIMIT ?',
+      limit
+    ).map(d => ({ at: d.at, user: d.user, table: d.tbl, row: d.row, reason: d.reason }))
+  }
+
   webSocketMessage(ws: WebSocket, message: string | ArrayBuffer) {
     if (typeof message !== 'string' || message.length > MAX_FRAME) return this.reply(ws, { type: 'error', code: 'too_large' })
     let msg: Record<string, unknown>
@@ -137,6 +169,8 @@ export class Workspace extends DurableObject<Env> {
         return this.hello(ws, att, msg.since ?? 0)
       case 'push':
         return this.push(ws, att, msg)
+      case 'presence':
+        return this.presence(ws, att, msg.issueId)
       default:
         return this.reply(ws, { type: 'error', code: 'unknown_type' })
     }
@@ -144,6 +178,7 @@ export class Workspace extends DurableObject<Env> {
 
   webSocketClose(ws: WebSocket) {
     ws.close()
+    this.broadcastPresence(ws)
   }
 
   webSocketError(ws: WebSocket) {
@@ -174,22 +209,93 @@ export class Workspace extends DurableObject<Env> {
     )
   }
 
+  // Scope index: the winning scope field per row, last-writer-wins by hlc. Deletes keep their index rows.
+  private index(op: Op) {
+    const field = scopeField(op.table)
+    if (!field || op.del) return
+    const sql = this.ctx.storage.sql
+    const next = scopeValue(op, field)
+    const val = next === null || next === undefined ? null : op.table === 'projects' ? JSON.stringify(next) : String(next)
+    if (op.table === 'projects') {
+      run(sql, "INSERT OR IGNORE INTO pacc (id, access, hlc) VALUES (?, NULL, '')", op.id)
+      if (next !== undefined) run(sql, 'UPDATE pacc SET access = ?, hlc = ? WHERE id = ? AND hlc < ?', val, op.hlc, op.id, op.hlc)
+    } else {
+      run(sql, "INSERT OR IGNORE INTO scope (tbl, id, ref, hlc) VALUES (?, ?, NULL, '')", op.table, op.id)
+      if (next !== undefined) run(sql, 'UPDATE scope SET ref = ?, hlc = ? WHERE tbl = ? AND id = ? AND hlc < ?', val, op.hlc, op.table, op.id, op.hlc)
+    }
+  }
+
+  private buildIndex() {
+    this.ctx.storage.transactionSync(() => {
+      for (const op of this.snapshotOps()) this.index(op)
+      for (const r of rows<{ body: string }>(this.ctx.storage.sql, 'SELECT body FROM ops ORDER BY seq')) this.index(JSON.parse(r.body) as Op)
+      run(this.ctx.storage.sql, "INSERT INTO meta (k, v) VALUES ('scope_v', '1')")
+    })
+  }
+
+  private refOf(tbl: string, id: string): string | null {
+    return rows<{ ref: string | null }>(this.ctx.storage.sql, 'SELECT ref FROM scope WHERE tbl = ? AND id = ?', tbl, id)[0]?.ref ?? null
+  }
+
+  private access(id: string): ProjectAccess | null {
+    const a = rows<{ access: string | null }>(this.ctx.storage.sql, 'SELECT access FROM pacc WHERE id = ?', id)[0]?.access
+    return a ? (JSON.parse(a) as ProjectAccess) : null
+  }
+
+  // The project a ref names, with its access. { project: null } when no project row has that id.
+  private scopeOf(ref: string | null): RowScope {
+    if (ref === null || !this.exists('projects', ref)) return { project: null }
+    return { project: ref, access: this.access(ref) }
+  }
+
+  // The scope of a row as it is now. `next` replaces the stored scope field, for checking a write before it lands.
+  private resolve(tbl: string, id: string, next?: unknown): RowScope {
+    if (tbl === 'projects') return { project: id, access: next !== undefined ? (next as ProjectAccess | null) : this.access(id) }
+    if (PROJECT_SCOPE[tbl]) return this.scopeOf(next !== undefined ? (next as string | null) : this.refOf(tbl, id))
+    if (ISSUE_SCOPE[tbl]) {
+      const issue = next !== undefined ? (next as string | null) : this.refOf(tbl, id)
+      return this.scopeOf(issue === null ? null : this.refOf('issues', issue))
+    }
+    return { project: null }
+  }
+
+  // Whether the row has a scope entry. Unscoped tables always do.
+  private exists(tbl: string, id: string): boolean {
+    const sql = this.ctx.storage.sql
+    if (tbl === 'projects') return rows<{ x: number }>(sql, 'SELECT 1 AS x FROM pacc WHERE id = ?', id).length > 0
+    if (!scopeField(tbl)) return true
+    return rows<{ x: number }>(sql, 'SELECT 1 AS x FROM scope WHERE tbl = ? AND id = ?', tbl, id).length > 0
+  }
+
+  // What one principal may read, op by op. Owners read everything; scope lookups are memoised per call.
+  private readable(p: Principal): (op: Op) => boolean {
+    if (p.role === 'owner') return () => true
+    const memo = new Map<string, RowScope>()
+    return op => {
+      const k = `${op.table}\u0000${op.id}`
+      let scope = memo.get(k)
+      if (!scope) memo.set(k, (scope = this.resolve(op.table, op.id)))
+      return canReadRow(p, op.table, scope)
+    }
+  }
+
   private hello(ws: WebSocket, att: Att, since: unknown) {
     if (typeof since !== 'number' || !Number.isSafeInteger(since) || since < 0) return this.reply(ws, { type: 'error', code: 'bad_request' })
     const sql = this.ctx.storage.sql
     const floor = this.floor()
     const head = this.head()
+    const can = this.readable(principal(att))
     if (since < floor) {
-      const snap = this.snapshotOps()
+      const snap = this.snapshotOps().filter(can)
       for (let i = 0; i < snap.length; i += BATCH) this.reply(ws, { type: 'snapshot', ops: snap.slice(i, i + BATCH), head })
     }
-    const list = rows<{ seq: number; body: string }>(sql, 'SELECT seq, body FROM ops WHERE seq > ? ORDER BY seq', Math.max(since, floor)).map(r => ({
-      seq: r.seq,
-      op: JSON.parse(r.body) as Op
-    }))
+    const list = rows<{ seq: number; body: string }>(sql, 'SELECT seq, body FROM ops WHERE seq > ? ORDER BY seq', Math.max(since, floor))
+      .map(r => ({ seq: r.seq, op: JSON.parse(r.body) as Op }))
+      .filter(e => can(e.op))
     this.sendOps(ws, list, head)
-    this.reply(ws, { type: 'ready', head })
+    this.reply(ws, { type: 'ready', head, userId: att.user, role: att.role, projects: att.projects })
     ws.serializeAttachment({ ...att, hello: true } satisfies Att)
+    this.broadcastPresence()
   }
 
   private push(ws: WebSocket, att: Att, msg: Record<string, unknown>) {
@@ -211,22 +317,83 @@ export class Workspace extends DurableObject<Env> {
     if (skewMs > MAX_SKEW_MS) return this.reply(ws, { type: 'error', id, code: 'skew', skewMs })
 
     const now = Date.now()
+    const p = principal(att)
     const seqs: number[] = []
-    this.ctx.storage.transactionSync(() => {
-      for (const op of typed) {
-        seqs.push(rows<{ seq: number }>(sql, 'INSERT INTO ops (hlc, device, body, at) VALUES (?, ?, ?, ?) RETURNING seq', op.hlc, att.device, JSON.stringify(op), now)[0].seq)
-      }
-      run(sql, 'INSERT INTO pushes (device, id, seqs, at) VALUES (?, ?, ?, ?)', att.device, id, JSON.stringify(seqs), now)
-      run(sql, 'DELETE FROM pushes WHERE at < ?', now - PUSH_TTL_MS)
-      this.compact()
-    })
+    // Rows whose scope this push changes, with the scope they had before. The first change wins.
+    const moved = new Map<string, { tbl: string; id: string; before: RowScope }>()
+    try {
+      this.ctx.storage.transactionSync(() => {
+        typed.forEach((op, i) => {
+          const before = this.exists(op.table, op.id) ? this.resolve(op.table, op.id) : null
+          const field = scopeField(op.table)
+          const next = field ? scopeValue(op, field) : undefined
+          if (p.role !== 'owner') {
+            const fields = [...Object.keys(op.set ?? {}), ...(op.unset ?? [])]
+            const reason = writeError(p, op.table, fields, before, op.del ? null : this.resolve(op.table, op.id, next))
+            if (reason) throw new Refused(i, reason)
+          }
+          const key = `${op.table}\u0000${op.id}`
+          if (next !== undefined && before && !moved.has(key)) moved.set(key, { tbl: op.table, id: op.id, before })
+          seqs.push(rows<{ seq: number }>(sql, 'INSERT INTO ops (hlc, device, body, at) VALUES (?, ?, ?, ?) RETURNING seq', op.hlc, att.device, JSON.stringify(op), now)[0].seq)
+          this.index(op)
+        })
+        run(sql, 'INSERT INTO pushes (device, id, seqs, at) VALUES (?, ?, ?, ?)', att.device, id, JSON.stringify(seqs), now)
+        run(sql, 'DELETE FROM pushes WHERE at < ?', now - PUSH_TTL_MS)
+        this.compact()
+      })
+    } catch (e) {
+      if (!(e instanceof Refused)) throw e
+      const bad = typed[e.index]
+      run(sql, 'INSERT INTO denials (at, user, tbl, "row", reason) VALUES (?, ?, ?, ?, ?)', now, att.user, bad.table, bad.id, e.message)
+      run(sql, 'DELETE FROM denials WHERE rowid NOT IN (SELECT rowid FROM denials ORDER BY rowid DESC LIMIT 1000)')
+      console.log(`refused ${bad.table}/${bad.id} for ${att.user}: ${e.message}`)
+      return this.reply(ws, { type: 'error', id, code: 'forbidden', index: e.index, message: e.message })
+    }
 
     const head = this.head()
     this.reply(ws, { type: 'ack', id, seqs, head })
     const list = typed.map((op, i) => ({ seq: seqs[i], op }))
+    const after = [...moved.values()].map(m => ({ ...m, now: this.resolve(m.tbl, m.id) }))
     for (const other of this.ctx.getWebSockets()) {
-      if (other === ws || !(other.deserializeAttachment() as Att | null)?.hello) continue
-      this.sendOps(other, list, head)
+      const a = other.deserializeAttachment() as Att | null
+      if (other === ws || !a?.hello) continue
+      const pr = principal(a)
+      // A socket that gained or lost a row's scope may hold a stale snapshot, so it closes and resyncs from 0.
+      if (after.some(m => canReadRow(pr, m.tbl, m.before) !== canReadRow(pr, m.tbl, m.now))) {
+        other.close(4003, 'access changed')
+        continue
+      }
+      const can = this.readable(pr)
+      this.sendOps(other, list.filter(e => can(e.op)), head)
+    }
+  }
+
+  private presence(ws: WebSocket, att: Att, issueId: unknown) {
+    const ok = issueId === undefined || issueId === null || (typeof issueId === 'string' && issueId.length <= 64)
+    if (!att.hello || !ok) return this.reply(ws, { type: 'error', code: 'bad_request' })
+    ws.serializeAttachment({ ...att, presence: typeof issueId === 'string' ? issueId : null } satisfies Att)
+    this.broadcastPresence()
+  }
+
+  // One presence frame per hello'd socket. Each user appears once, with an issue if any of their sockets is on one.
+  private broadcastPresence(skip?: WebSocket) {
+    const live = this.ctx.getWebSockets().filter(ws => ws !== skip && (ws.deserializeAttachment() as Att | null)?.hello)
+    const users = new Map<string, { userId: string; name: string; issueId?: string }>()
+    for (const ws of live) {
+      const a = ws.deserializeAttachment() as Att
+      const cur = users.get(a.user)
+      if (!cur || (!cur.issueId && a.presence)) users.set(a.user, { userId: a.user, name: a.name, ...(a.presence ? { issueId: a.presence } : {}) })
+    }
+    for (const ws of live) {
+      const pr = principal(ws.deserializeAttachment() as Att)
+      const list = [...users.values()].flatMap(u => {
+        if (pr.role === 'owner') return [u]
+        const seen = u.issueId !== undefined && canReadRow(pr, 'issues', this.resolve('issues', u.issueId))
+        // Guests see only users on an issue they can read, plus themselves.
+        if (pr.role === 'guest' && !seen && u.userId !== pr.userId) return []
+        return [seen || u.issueId === undefined ? u : { userId: u.userId, name: u.name }]
+      })
+      this.reply(ws, { type: 'presence', users: list })
     }
   }
 

@@ -201,6 +201,11 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
     if (!me) return unauthorized()
     return me.member.role === 'owner' ? manage(req, env, ctx, m, p) : json({ error: 'forbidden' }, 403)
   }
+  if (m === 'GET' && p === '/audit/denials') {
+    const me = await bearer(req, env)
+    if (!me) return unauthorized()
+    return me.member.role === 'owner' ? json(await env.WORKSPACE.getByName('default').denials()) : json({ error: 'forbidden' }, 403)
+  }
   if (m === 'GET' && p === '/sync') return sync(req, env)
   return json({ error: 'not_found' }, 404)
 }
