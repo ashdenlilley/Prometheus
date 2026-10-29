@@ -39,6 +39,7 @@ export function emptyData(): AppData {
     templates: [],
     dashboards: [],
     notifications: [],
+    docs: [],
     me: 'You'
   }
 }

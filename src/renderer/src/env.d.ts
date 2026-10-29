@@ -1,6 +1,7 @@
 /// <reference types="vite/client" />
-import type { AppData } from '@shared/types'
+import type { Agent, AppData, Webhook, WebhookEvent } from '@shared/types'
 import type { AuditFilter, AuditRow } from '@shared/audit'
+import type { WebhookDelivery } from '@shared/webhooks'
 
 export interface SyncStatus {
   enabled: boolean
@@ -59,6 +60,7 @@ declare global {
         disable: () => Promise<void>
         now: () => Promise<void>
       }
+      createAgent: (name: string, color: string, level: Agent['level']) => Promise<{ agent: Agent; token: string }>
       mcp: {
         status: () => Promise<McpStatus>
         setEnabled: (enabled: boolean) => Promise<McpStatus>
@@ -71,6 +73,14 @@ declare global {
         test: () => Promise<{ ok: boolean; login?: string; error?: string }>
         refresh: () => Promise<GitStatus>
         setSettings: (settings: { pollMinutes?: number; branchPrefix?: string }) => Promise<GitStatus>
+      }
+      webhooks: {
+        create: (projectId: string, url: string, events: WebhookEvent[], allowLocal: boolean) => Promise<{ webhook: Webhook; secret: string }>
+        rotateSecret: (id: string) => Promise<string>
+        remove: (id: string) => Promise<void>
+        test: (id: string) => Promise<string>
+        deliveries: (id: string) => Promise<WebhookDelivery[]>
+        redeliver: (deliveryId: string) => Promise<string>
       }
     }
   }

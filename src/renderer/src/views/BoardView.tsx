@@ -2,7 +2,9 @@ import { useState } from 'react'
 import type { Issue, Project } from '@shared/types'
 import { applyFilter, groupPatch, progress, swimlanes, withoutCompleted, type Group, type Lane } from '@shared/query'
 import { formatEstimate } from '@shared/estimate'
+import { displayAssignee } from '@shared/agents'
 import { createIssue, issueKey, useStore } from '../store'
+import { AgentBadge } from '../components/AgentBadge'
 import { PriorityText, StatusDot } from '../components/fields'
 import { FilterBar, useViewQuery } from '../components/FilterBar'
 import { BulkBar } from '../components/BulkBar'
@@ -81,7 +83,7 @@ export function BoardView({ project, onOpen }: { project: Project; onOpen: (id: 
                   onClick={() => setCollapsed(s => toggle(s, lane.key))}
                 >
                   {ICONS.chevron}
-                  <span>{lane.label || 'All'}</span>
+                  <span>{displayAssignee(data, lane.label) || 'All'}</span>
                   <span className="count">{lane.count}</span>
                 </button>
                 {open && <div className="board">{renderColumns(lane)}</div>}
@@ -154,7 +156,7 @@ function BoardColumn({
     >
       <div className="column-head">
         {status && <StatusDot status={status} />}
-        <span>{col.label || 'All'}</span>
+        <span>{displayAssignee(data, col.label) || 'All'}</span>
         <span className="count" title={rowsBy && limit !== undefined ? `${total} in column across lanes` : undefined}>
           {col.items.length}
           {limit !== undefined ? ` / ${limit}` : ''}
@@ -225,7 +227,7 @@ function BoardCard({
         <span className="muted">{issueKey(data, issue)}</span>
         <PriorityText value={issue.priority} />
         {issue.dueDate && <span className="muted">{fmtDate(issue.dueDate)}</span>}
-        {issue.assignee && <span className="muted">{issue.assignee}</span>}
+        {issue.assignee && <span className="muted"><AgentBadge data={data} assignee={issue.assignee} /></span>}
         {issue.estimate !== undefined && <span className="muted">{project.estimateScale === 'tshirt' ? formatEstimate(issue.estimate, 'tshirt') : `${issue.estimate} pts`}</span>}
         {sub && <span className="muted">{sub.done}/{sub.total} sub</span>}
         {issue.labels.map(l => (

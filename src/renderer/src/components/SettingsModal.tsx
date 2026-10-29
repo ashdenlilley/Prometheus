@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react'
 import type { McpStatus } from '../env'
 import type { AuditFilter, AuditRow, AuditSource } from '@shared/audit'
+import type { Agent } from '@shared/types'
+import { useStore } from '../store'
+import { clsx, fmtDate } from '../util'
 import { ICONS } from './icons'
 import { Modal } from './ui'
 import { SyncSettings } from './SyncSettings'
@@ -32,7 +35,9 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
 
   const claudeCmd = `claude mcp add --transport http --header "Authorization: Bearer ${status.token}" prometheus ${status.url}`
   const codexToml = `[mcp_servers.prometheus]\nurl = "${status.url}"\nhttp_headers = { Authorization = "Bearer ${status.token}" }`
-  const masked = `${status.token.slice(0, 4)}${'•'.repeat(24)}${status.token.slice(-4)}`
+  const apiBase = status.url.replace(/\/mcp$/, '/api/v1')
+  const restCurl = `curl -H "Authorization: Bearer ${status.token}" ${apiBase}/issues?project=<KEY>`
+  const masked =`${status.token.slice(0, 4)}${'•'.repeat(24)}${status.token.slice(-4)}`
 
   return (
     <Modal title="Settings" onClose={onClose}>
@@ -58,7 +63,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
       </section>
 
       <section className="settings-section">
-        <div className="settings-title">Token</div>
+        <div className="settings-title">Shared token (Unnamed agent)</div>
         <div className="token-row">
           <code className="token">{reveal ? status.token : masked}</code>
           <button className="btn" onClick={() => setReveal(r => !r)}>{reveal ? 'Hide' : 'Show'}</button>
@@ -79,8 +84,92 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
         <CodeBlock text={codexToml} copied={copied === 'codex'} onCopy={() => copy('codex', codexToml)} />
       </section>
 
+      <section className="settings-section">
+        <div className="settings-title">REST API</div>
+        <div className="muted small">Base URL {apiBase}</div>
+        <p className="muted small">Uses the shared MCP token above (agent tokens are MCP only). Localhost only. See docs/api.md.</p>
+        <CodeBlock text={restCurl} copied={copied === 'rest'} onCopy={() => copy('rest', restCurl)} />
+      </section>
+
+      <AgentsSection url={status.url} />
+
       <AuditLog />
     </Modal>
+  )
+}
+
+const AGENT_COLORS = ['#0a84ff', '#34c759', '#ff9f0a', '#ff453a', '#bf5af2', '#64d2ff']
+
+// Agents are MCP clients with their own token. The token is kept only in this component's state, so closing the modal hides it.
+function AgentsSection({ url }: { url: string }) {
+  const { data, dispatch } = useStore()
+  const agents = data.agents ?? []
+  const [name, setName] = useState('')
+  const [level, setLevel] = useState<Agent['level']>('comment')
+  const [created, setCreated] = useState<{ agent: Agent; token: string } | null>(null)
+  const [copied, setCopied] = useState(false)
+
+  const create = async () => {
+    const next = await window.api.createAgent(name.trim(), AGENT_COLORS[agents.length % AGENT_COLORS.length], level)
+    setCreated(next)
+    setCopied(false)
+    setName('')
+  }
+
+  const copyToken = async () => {
+    if (!created) return
+    await navigator.clipboard.writeText(created.token)
+    setCopied(true)
+  }
+
+  const revoke = (a: Agent) => {
+    if (!window.confirm(`Revoke ${a.name}? Its token will stop working.`)) return
+    dispatch({ type: 'revokeAgent', id: a.id, at: new Date().toISOString() })
+  }
+
+  return (
+    <section className="settings-section">
+      <div className="settings-title">Agents</div>
+      <p className="muted small">
+        Agents get their own token. read: look only. comment: comment and move their own issues. write: everything except agents, settings and sync.
+      </p>
+      {agents.map(a => (
+        <div key={a.id} className={clsx('agent-row', a.revokedAt && 'muted')}>
+          <span className="agent-dot" style={{ background: a.color }} />
+          <span className="grow">{a.name}</span>
+          {a.revokedAt ? (
+            <span className="small">Revoked</span>
+          ) : (
+            <select aria-label={`Level for ${a.name}`} className="field-input" value={a.level} onChange={e => dispatch({ type: 'patchAgent', id: a.id, patch: { level: e.target.value as Agent['level'] } })}>
+              <option value="read">read</option>
+              <option value="comment">comment</option>
+              <option value="write">write</option>
+            </select>
+          )}
+          <span className="muted small">{fmtDate(a.createdAt.slice(0, 10))}</span>
+          {!a.revokedAt && <button className="btn ghost" onClick={() => revoke(a)}>Revoke</button>}
+        </div>
+      ))}
+      <div className="agent-row">
+        <input aria-label="Agent name" className="field-input" placeholder="Name" value={name} onChange={e => setName(e.target.value)} />
+        <select aria-label="Agent level" className="field-input" value={level} onChange={e => setLevel(e.target.value as Agent['level'])}>
+          <option value="read">read</option>
+          <option value="comment">comment</option>
+          <option value="write">write</option>
+        </select>
+        <button className="btn" disabled={!name.trim()} onClick={create}>Create agent</button>
+      </div>
+      {created && (
+        <div className="agent-row">
+          <p className="muted small">Copy this token now. It will not be shown again.</p>
+          <div className="token-row">
+            <input className="token" readOnly data-testid="agent-token" value={created.token} />
+            <button className="btn" onClick={copyToken}>{copied ? 'Copied' : 'Copy'}</button>
+          </div>
+          <p className="muted small">Send <code>Authorization: Bearer &lt;token&gt;</code> with requests to {url}</p>
+        </div>
+      )}
+    </section>
   )
 }
 

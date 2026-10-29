@@ -96,7 +96,8 @@ export function useViewQuery(project: Project, kind: ViewKind): ViewQuery {
 export function fieldOptions(project: Project) {
   const fixed = [
     ...FIXED_FIELDS.map(f => ({ key: f.key as string, label: f.label })),
-    { key: 'favourite', label: 'Favourite' }
+    { key: 'favourite', label: 'Favourite' },
+    { key: 'assigneeType', label: 'Assignee type' }
   ]
   const custom = project.columns
     .filter(c => !['formula', 'button', 'subtasks', 'files', 'created', 'updated', 'timeline', 'mirror'].includes(c.type))
@@ -119,6 +120,7 @@ function valueOptions(project: Project, key: string): { value: string; label: st
   if (key === 'status') return project.statuses.map(s => ({ value: s.id, label: s.label }))
   if (key === 'favourite') return [{ value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }]
   if (key === 'pr') return [{ value: '', label: 'None' }, ...Object.entries(PR_STATE_LABEL).map(([value, label]) => ({ value, label }))]
+  if (key === 'assigneeType') return [{ value: 'agent', label: 'Agent' }, { value: 'person', label: 'Person' }]
   if (key === 'priority') return ['No priority', 'Urgent', 'High', 'Medium', 'Low'].map((label, n) => ({ value: String(n), label }))
   const col = project.columns.find(c => c.id === key)
   if (col?.options) return col.options.map(o => ({ value: o.id, label: o.label }))

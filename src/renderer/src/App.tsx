@@ -31,6 +31,8 @@ import { CalendarView } from './views/CalendarView'
 import { ActivityView } from './views/ActivityView'
 import { RoadmapView } from './views/RoadmapView'
 import { DashboardView } from './views/DashboardView'
+import { DocsView } from './views/DocsView'
+import { newDoc } from '@shared/docs'
 import { PROJECT_VIEWS, VIEW_LABEL, type Route, type ViewId } from './route'
 import { clsx } from './util'
 
@@ -140,6 +142,11 @@ export default function App() {
       return <RoadmapView projects={spaceProjects} initiatives={data.initiatives.filter(i => i.spaceId === space.id)} />
     }
     if (route.view === 'dashboard') return <DashboardView space={space} onOpen={setOpenIssueId} />
+    if (route.view === 'docs') {
+      return (
+        <DocsView space={space} project={project} docId={route.docId ?? null} onNavigate={navigate} onOpen={setOpenIssueId} />
+      )
+    }
 
     if (!project || route.view === 'overview') {
       return (
@@ -255,6 +262,29 @@ export default function App() {
       : []),
     ...(canUndo ? [{ id: 'undo', label: 'Undo', group: 'Edit', hint: window.api.platform === 'darwin' ? '⌘Z' : 'Ctrl+Z', run: undo }] : []),
     ...(canRedo ? [{ id: 'redo', label: 'Redo', group: 'Edit', hint: window.api.platform === 'darwin' ? '⇧⌘Z' : 'Ctrl+Shift+Z', run: redo }] : []),
+    ...(space
+      ? [
+          {
+            id: 'new-doc',
+            label: 'New doc',
+            group: 'Create',
+            hint: project?.name ?? space.name,
+            run: () => {
+              const doc = newDoc({ spaceId: space.id, projectId: project?.id, title: 'Untitled' })
+              dispatch({ type: 'addDoc', doc })
+              navigate({ spaceId: space.id, projectId: project?.id ?? null, view: 'docs', docId: doc.id })
+            }
+          }
+        ]
+      : []),
+    // keywords carries the body, so the palette matches body words as well as titles (searchDocs semantics).
+    ...(data.docs ?? []).filter(d => !d.archivedAt).map(d => ({
+      id: `doc-${d.id}`,
+      label: `Doc: ${d.title}`,
+      group: 'Docs',
+      keywords: d.body,
+      run: () => navigate({ spaceId: d.spaceId, projectId: d.projectId ?? null, view: 'docs', docId: d.id })
+    })),
     { id: 'new-project', label: 'New project', group: 'Create', run: () => space && setProjectIn(space.id) },
     { id: 'new-space', label: 'New space', group: 'Create', run: () => setCreatingSpace(true) },
     { id: 'settings', label: 'App settings and MCP', group: 'Settings', run: () => setSettings(true) },
@@ -315,7 +345,13 @@ export default function App() {
       </div>
 
       {openIssueId && (
-        <IssueDetail key={openIssueId} issueId={openIssueId} onClose={() => setOpenIssueId(null)} onOpen={setOpenIssueId} />
+        <IssueDetail
+          key={openIssueId}
+          issueId={openIssueId}
+          onClose={() => setOpenIssueId(null)}
+          onOpen={setOpenIssueId}
+          onNavigate={navigate}
+        />
       )}
       {projectIn && (
         <NewProjectModal

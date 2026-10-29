@@ -5,7 +5,11 @@ import { DRAWER_SHORTCUTS, drawerShortcut, isCopyBranchShortcut } from '@shared/
 import { branchName } from '@shared/git'
 import { createIssue, issueKey, useStore, withValue } from '../store'
 import { inverseRelations } from '@shared/model'
+import { backlinks } from '@shared/docs'
+import type { Route } from '../route'
 import { availableLabels, labelGroups } from '@shared/labels'
+import { activeAgents, AGENT_PREFIX, agentAssignee, agentText, displayAssignee, isAgentAssignee } from '@shared/agents'
+import { AgentBadge } from './AgentBadge'
 import { nextOccurrence } from '@shared/recurrence'
 import type { Recurrence } from '@shared/types'
 import { CellEditor } from './cells'
@@ -29,7 +33,17 @@ const MAX_FILE = 5 * 1024 * 1024
 const REACTIONS = ['👍', '🎉', '❤️', '😄', '👀', '🚀']
 
 // Issue drawer: every field, sub-issues, relations, comments and activity.
-export function IssueDetail({ issueId, onClose, onOpen }: { issueId: string; onClose: () => void; onOpen: (id: string) => void }) {
+export function IssueDetail({
+  issueId,
+  onClose,
+  onOpen,
+  onNavigate
+}: {
+  issueId: string
+  onClose: () => void
+  onOpen: (id: string) => void
+  onNavigate: (route: Route) => void
+}) {
   const { data, dispatch } = useStore()
   const issue = data.issues.find(i => i.id === issueId)
   const project = data.projects.find(p => p.id === issue?.projectId)
@@ -101,6 +115,7 @@ export function IssueDetail({ issueId, onClose, onOpen }: { issueId: string; onC
   const childPct = progress(children, project.statuses)
   const parent = data.issues.find(i => i.id === issue.parentId)
   const inverse = inverseRelations(data, issue.id)
+  const docLinks = backlinks(issue.id, data)
   const pool = data.issues.filter(i => i.id !== issue.id)
   const key = (i: Issue) => issueKey(data, i)
 
@@ -322,12 +337,27 @@ export function IssueDetail({ issueId, onClose, onOpen }: { issueId: string; onC
           </label>
           <label>
             Assignee
-            <input ref={assigneeRef} aria-label="Assignee" className="field-input" list={`people-${project.id}`} value={issue.assignee} onChange={e => patch({ assignee: e.target.value })} />
-            <datalist id={`people-${project.id}`}>
-              {project.members.map(m => (
-                <option key={m} value={m} />
+            {isAgentAssignee(issue.assignee) ? (
+              <div className="agent-cell">
+                <AgentBadge data={data} assignee={issue.assignee} />
+                <button className="btn ghost" aria-label="Clear assignee" onClick={() => patch({ assignee: '' })}>×</button>
+              </div>
+            ) : (
+              <>
+                <input ref={assigneeRef} aria-label="Assignee" className="field-input" list={`people-${project.id}`} value={issue.assignee} onChange={e => patch({ assignee: e.target.value })} />
+                <datalist id={`people-${project.id}`}>
+                  {project.members.map(m => (
+                    <option key={m} value={m} />
+                  ))}
+                </datalist>
+              </>
+            )}
+            <select aria-label="Assign to agent" className="field-input" value="" onChange={e => e.target.value && patch({ assignee: e.target.value })}>
+              <option value="">Assign to agent…</option>
+              {activeAgents(data).map(a => (
+                <option key={a.id} value={agentAssignee(a.id)}>🤖 {a.name}</option>
               ))}
-            </datalist>
+            </select>
           </label>
           <label>
             Labels
@@ -557,6 +587,25 @@ export function IssueDetail({ issueId, onClose, onOpen }: { issueId: string; onC
           </section>
         )}
 
+        {docLinks.length > 0 && (
+          <section className="drawer-section" data-testid="doc-backlinks">
+            <div className="section-title-row small">
+              <h3>Mentioned in docs</h3>
+            </div>
+            <div className="doc-backlinks">
+              {docLinks.map(d => (
+                <button
+                  key={d.id}
+                  className="chip neutral"
+                  onClick={() => onNavigate({ spaceId: d.spaceId, projectId: d.projectId ?? null, view: 'docs', docId: d.id })}
+                >
+                  {d.title}
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
+
         <section className="drawer-section">
           <div className="section-title-row small">
             <h3>Activity</h3>
@@ -564,7 +613,10 @@ export function IssueDetail({ issueId, onClose, onOpen }: { issueId: string; onC
           {timeline.map((t, n) =>
             t.kind === 'activity' ? (
               <div key={`a-${n}`} className="activity-row muted small">
-                {(t.item as ActivityEntry).text} · {fmtDate(t.at.slice(0, 10))}
+                {agentText(data, (t.item as ActivityEntry).text)} · {fmtDate(t.at.slice(0, 10))}
+                {(t.item as ActivityEntry).actor?.startsWith(AGENT_PREFIX) && (
+                  <span className="muted" data-testid="activity-actor"> · by {displayAssignee(data, (t.item as ActivityEntry).actor ?? '')}</span>
+                )}
               </div>
             ) : (
               renderComment(t.item as Comment)

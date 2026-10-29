@@ -13,8 +13,9 @@ import { askText, Modal } from './ui'
 import { LABEL_COLORS } from '../columns'
 import { uid, clsx, todayISO, fmtDate } from '../util'
 import { FORM_FIXED_KEYS, fieldName, validateForm } from '@shared/forms'
+import { WebhooksSection } from './WebhooksSection'
 
-type Tab = 'general' | 'statuses' | 'milestones' | 'updates' | 'automations' | 'git' | 'triage' | 'forms' | 'templates' | 'archive'
+type Tab = 'general' | 'statuses' | 'milestones' | 'updates' | 'automations' | 'git' | 'triage' | 'forms' | 'templates' | 'webhooks' | 'archive'
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'general', label: 'General' },
@@ -26,6 +27,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'triage', label: 'Triage rules' },
   { id: 'forms', label: 'Forms' },
   { id: 'templates', label: 'Templates' },
+  { id: 'webhooks', label: 'Webhooks' },
   { id: 'archive', label: 'Archive' }
 ]
 
@@ -60,6 +62,7 @@ export function ProjectSettings({ project, onClose }: { project: Project; onClos
       {tab === 'triage' && <TriageRules project={project} />}
       {tab === 'forms' && <Forms project={project} />}
       {tab === 'templates' && <Templates project={project} />}
+      {tab === 'webhooks' && <WebhooksSection project={project} />}
       {tab === 'archive' && <Archive project={project} />}
     </Modal>
   )

@@ -1,11 +1,12 @@
 import type { Column, Condition, CellValue, FilterGroup, Issue, Project } from './types'
 import { dateValueMs } from './datetime'
+import { isAgentAssignee } from './agents'
 
 // Field access and filtering. Used by the renderer views and by automation rules in the reducer,
 // so it depends only on types.
 
-// 'favourite' is filter-only: it has no table column.
-export type FixedField = 'name' | 'status' | 'priority' | 'assignee' | 'due' | 'start' | 'estimate' | 'labels' | 'cycle' | 'milestone' | 'pr' | 'favourite'
+// 'favourite' and 'assigneeType' are filter-only: they have no table column.
+export type FixedField = 'name' | 'status' | 'priority' | 'assignee' | 'due' | 'start' | 'estimate' | 'labels' | 'cycle' | 'milestone' | 'pr' | 'favourite' | 'assigneeType'
 
 export const FIXED_FIELDS: { key: FixedField; label: string; width: number }[] = [
   { key: 'name', label: 'Name', width: 320 },
@@ -28,6 +29,8 @@ export function fieldValue(issue: Issue, key: string, project: Project | undefin
   switch (key as FixedField) {
     case 'favourite':
       return issue.favourite ? 'yes' : 'no'
+    case 'assigneeType':
+      return !issue.assignee ? undefined : isAgentAssignee(issue.assignee) ? 'agent' : 'person'
     case 'name':
       return issue.title
     case 'status':

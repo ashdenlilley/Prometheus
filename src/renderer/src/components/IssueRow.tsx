@@ -1,6 +1,7 @@
 import type { Issue, Project } from '@shared/types'
 import { issueKey, useStore } from '../store'
 import { fmtDate } from '../util'
+import { AgentBadge } from './AgentBadge'
 import { PriorityText, StatusDot } from './fields'
 import { FavGutter } from './FavGutter'
 
@@ -20,7 +21,7 @@ export function IssueRow({ issue, onOpen, fav = true }: { issue: Issue; onOpen: 
       ))}
       <PriorityText value={issue.priority} />
       {issue.dueDate && <span className="muted">{fmtDate(issue.dueDate)}</span>}
-      <span className="muted assignee">{issue.assignee}</span>
+      <span className="muted assignee"><AgentBadge data={data} assignee={issue.assignee} /></span>
     </div>
   )
 }

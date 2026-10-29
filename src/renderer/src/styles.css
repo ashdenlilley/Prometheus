@@ -2446,6 +2446,47 @@ select.field-input:focus {
   white-space: nowrap;
 }
 
+.agent-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 1px 8px;
+  border: 1px solid var(--line);
+  border-left-width: 3px;
+  border-radius: 999px;
+  background: var(--panel2);
+  color: var(--text);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.agent-badge-revoked {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.agent-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.agent-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.agent-dot {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
 .code-block {
   position: relative;
   border-radius: 10px;
@@ -3600,3 +3641,63 @@ select.field-input:focus {
 .git-help code {
   font-size: 11px;
 }
+
+.webhook-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.webhook-url {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+
+.webhook-events {
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+.webhook-deliveries {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+}
+.webhook-deliveries th,
+.webhook-deliveries td {
+  text-align: left;
+  padding: 3px 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: top;
+}
+
+/* Docs (OS-354) */
+.docs-view { display: grid; grid-template-columns: 240px 1fr; gap: 16px; height: 100%; min-height: 0; }
+.docs-list { overflow: auto; display: flex; flex-direction: column; gap: 2px; }
+.docs-list-head { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.doc-item { text-align: left; background: none; border: 0; border-radius: 6px; padding: 4px 8px; color: inherit; cursor: pointer; }
+.doc-item:hover { background: var(--hover); }
+.doc-item.active { background: var(--accent-soft); font-weight: 600; }
+.docs-main { min-height: 0; display: flex; flex-direction: column; }
+.doc-page { display: flex; flex-direction: column; gap: 8px; height: 100%; min-height: 0; }
+.doc-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.doc-title { flex: 1; min-width: 200px; font-size: 20px; font-weight: 600; border: 0; background: transparent; color: inherit; }
+.doc-note, .doc-error { margin: 0; font-size: 12px; }
+.doc-note { color: var(--muted); }
+.doc-error { color: var(--danger); }
+.doc-split { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.doc-split textarea { width: 100%; height: 100%; min-height: 240px; resize: none; font-family: ui-monospace, Menlo, monospace; font-size: 13px; }
+.doc-preview { overflow: auto; line-height: 1.55; padding: 8px 12px; border: 1px solid var(--line); border-radius: 6px; }
+.doc-preview h1, .doc-preview h2, .doc-preview h3 { margin: 0.8em 0 0.4em; }
+.doc-preview ul, .doc-preview ol { padding-left: 1.5em; }
+.doc-preview pre { background: var(--panel); padding: 8px; border-radius: 6px; overflow: auto; }
+.doc-preview code { font-family: ui-monospace, Menlo, monospace; font-size: 12.5px; }
+.doc-preview a.issue-mention { font-weight: 600; }
+.doc-backlinks { display: flex; flex-wrap: wrap; gap: 6px; }
+.doc-cell { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
