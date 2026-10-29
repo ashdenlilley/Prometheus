@@ -132,7 +132,8 @@ export function issuesToCSV(data: AppData, project: Project, issues: Issue[]): s
   const header = ['Key', 'Title', 'Status', 'Priority', 'Assignee', 'Labels', 'Start', 'Due', 'Estimate', 'Cycle', ...project.columns.map(c => c.name)]
   const rows = issues.map(i => {
     const cycle = data.cycles.find(c => c.id === i.cycleId)?.name
-    const custom = project.columns.map(c => csvCell(customValue(i, c)))
+    // Raw values: the whole row is escaped once below.
+    const custom = project.columns.map(c => customValue(i, c))
     return [
       `${project.key}-${i.number}`,
       i.title,

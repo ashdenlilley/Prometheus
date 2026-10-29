@@ -242,11 +242,24 @@ describe('issuesToCSV and parseCSV', () => {
     assert.equal(rows[2][1], '')
   })
 
-  test('BUG-check: a custom value with commas or quotes survives the round trip', { todo: 'BUG: issuesToCSV quotes custom values twice (csvCell inside custom, then again on the row), so they come back wrapped in quotes with doubled inner quotes' }, () => {
+  test('a custom value with commas or quotes is escaped once (OS-302)', () => {
     const p = project([col('notes', 'text', { name: 'Notes' })])
     const items = [issue(1, { values: { notes: 'a, "q"' } })]
+    const csv = issuesToCSV(data(items), p, items)
+    assert.equal(csv.split('\n')[1], 'T-1,Issue 1,Backlog,No priority,,,,,,,"a, ""q"""')
+    assert.equal(parseCSV(csv)[1][10], 'a, "q"')
+  })
+
+  test('round trip: custom values with commas and quotes re-import unchanged (OS-302)', () => {
+    const p = project([col('notes', 'text', { name: 'Notes' }), col('quote', 'text', { name: 'Quote' }), col('plain', 'text', { name: 'Plain' })])
+    const items = [
+      issue(1, { values: { notes: 'x, y, z', quote: 'she said "hi", then left', plain: 'simple' } }),
+      issue(2, { values: { notes: '"', quote: '""', plain: ',' } })
+    ]
     const rows = parseCSV(issuesToCSV(data(items), p, items))
-    assert.equal(rows[1][10], 'a, "q"')
+    assert.deepEqual(rows[0].slice(10), ['Notes', 'Quote', 'Plain'])
+    assert.deepEqual(rows[1].slice(10), ['x, y, z', 'she said "hi", then left', 'simple'])
+    assert.deepEqual(rows[2].slice(10), ['"', '""', ','])
   })
 
   test('BUG-check: a carriage return inside a title survives the round trip', { todo: 'BUG: csvCell only quotes on comma, quote or LF, so a bare CR in a field splits the row when parsed' }, () => {
