@@ -1,6 +1,7 @@
 /// <reference types="vite/client" />
-import type { AppData } from '@shared/types'
+import type { AppData, Webhook, WebhookEvent } from '@shared/types'
 import type { AuditFilter, AuditRow } from '@shared/audit'
+import type { WebhookDelivery } from '@shared/webhooks'
 
 export interface SyncStatus {
   enabled: boolean
@@ -52,6 +53,14 @@ declare global {
         status: () => Promise<McpStatus>
         setEnabled: (enabled: boolean) => Promise<McpStatus>
         regenerate: () => Promise<McpStatus>
+      }
+      webhooks: {
+        create: (projectId: string, url: string, events: WebhookEvent[], allowLocal: boolean) => Promise<{ webhook: Webhook; secret: string }>
+        rotateSecret: (id: string) => Promise<string>
+        remove: (id: string) => Promise<void>
+        test: (id: string) => Promise<string>
+        deliveries: (id: string) => Promise<WebhookDelivery[]>
+        redeliver: (deliveryId: string) => Promise<string>
       }
     }
   }

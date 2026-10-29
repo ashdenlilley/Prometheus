@@ -414,6 +414,20 @@ export interface Notification {
   read: boolean
 }
 
+export type WebhookEvent = 'issue.created' | 'issue.updated' | 'issue.deleted' | 'issue.status_changed' | 'comment.created'
+
+// Config only: the signing secret is per device (see src/main/webhooks.ts) and never part of AppData.
+export interface Webhook {
+  id: string
+  projectId: string
+  url: string
+  events: WebhookEvent[]
+  enabled: boolean
+  allowLocal?: boolean
+  createdAt: string
+  disabledReason?: string
+}
+
 export interface AppData {
   version: 4
   spaces: Space[]
@@ -426,6 +440,8 @@ export interface AppData {
   templates: Template[]
   dashboards: Dashboard[]
   notifications: Notification[]
+  // Optional so data saved before webhooks existed still loads. Readers use `?? []`.
+  webhooks?: Webhook[]
   // Display name for the local user. Used for comment authors and notifications.
   me: string
 }

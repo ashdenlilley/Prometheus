@@ -18,7 +18,8 @@ export const COLLECTIONS = [
   'automations',
   'triageRules',
   'templates',
-  'dashboards'
+  'dashboards',
+  'webhooks'
 ] as const
 // Notifications are left out: they are a feed, not user data.
 export type Collection = (typeof COLLECTIONS)[number]
@@ -39,7 +40,7 @@ export interface Patch {
   me?: { before: string; after: string }
 }
 
-const rowsOf = (d: AppData, c: Collection) => d[c] as unknown as Row[]
+const rowsOf = (d: AppData, c: Collection) => (d[c] ?? []) as unknown as Row[]
 
 /** The rows that differ between two versions of the data. Unchanged rows keep their reference in the reducer. */
 export function diffData(prev: AppData, next: AppData): Patch {
