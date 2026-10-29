@@ -1,4 +1,4 @@
-import type { AppData } from './types'
+import type { AppData, Project, SavedView } from './types'
 
 // Row-level sync with per-field clocks. Pure functions only: no fs, no Electron.
 //
@@ -119,12 +119,39 @@ export function stampOps(clocks: Map<string, string>, ops: Op[]): [string, strin
   return entries
 }
 
+// Personal views stay on this device, so they never go out in project rows.
+export const stripPersonal = (project: Project): Project => ({ ...project, views: project.views.filter(v => !v.personal) })
+
+// Incoming shared views, plus this device's personal views from `local`.
+export const keepPersonal = (local: SavedView[], incoming: SavedView[]): SavedView[] => [
+  ...incoming.filter(v => !v.personal),
+  ...local.filter(v => v.personal)
+]
+
+// `data` with each project's personal views taken from `from` (the renderer's copy). Personal views produce
+// no ops, so the main process adopts them directly. Returns `data` itself when nothing differs.
+export function adoptPersonal(data: AppData, from: AppData): AppData {
+  const mine = new Map(from.projects.map(p => [p.id, p.views.filter(v => v.personal)]))
+  let changed = false
+  const projects = data.projects.map(p => {
+    const personal = mine.get(p.id) ?? []
+    if (JSON.stringify(p.views.filter(v => v.personal)) === JSON.stringify(personal)) return p
+    changed = true
+    return { ...p, views: [...p.views.filter(v => !v.personal), ...personal] }
+  })
+  return changed ? { ...data, projects } : data
+}
+
+// A row as it goes out to other devices.
+const outgoing = (table: Table, r: { id: string }) =>
+  (table === 'projects' ? stripPersonal(r as unknown as Project) : r) as unknown as Record<string, unknown>
+
 // Ops that turn `prev` into `next`, one op per changed row, carrying only changed fields.
 export function diffOps(prev: AppData, next: AppData, clock: Clock): Op[] {
   const ops: Op[] = []
   for (const [table, key] of TABLE_KEYS) {
-    const before = new Map((prev[key] as { id: string }[]).map(r => [r.id, r as unknown as Record<string, unknown>]))
-    const after = new Map((next[key] as { id: string }[]).map(r => [r.id, r as unknown as Record<string, unknown>]))
+    const before = new Map((prev[key] as { id: string }[]).map(r => [r.id, outgoing(table, r)]))
+    const after = new Map((next[key] as { id: string }[]).map(r => [r.id, outgoing(table, r)]))
     for (const [id, row] of after) {
       const old = before.get(id)
       if (!old) {
@@ -193,7 +220,7 @@ export function applyOps(data: AppData, ops: Op[], clocks?: Map<string, string>)
       for (const [f, v] of Object.entries(op.set ?? {})) {
         if (!wins(rowKey(table, op.id, f), op.hlc)) continue
         stamp(rowKey(table, op.id, f), op.hlc)
-        row[f] = v
+        row[f] = table === 'projects' && f === 'views' ? keepPersonal(row.views as SavedView[], v as SavedView[]) : v
         touched = true
       }
       for (const f of op.unset ?? []) {
@@ -216,7 +243,7 @@ export function snapshotOps(data: AppData, clocks: Map<string, string>, device: 
   const live = new Set<string>()
   for (const [table, key] of TABLE_KEYS) {
     for (const r of data[key] as { id: string }[]) {
-      const row = r as unknown as Record<string, unknown>
+      const row = outgoing(table, r)
       live.add(rowKey(table, r.id, EXISTS))
       const existsHlc = clocks.get(rowKey(table, r.id, EXISTS)) ?? ZERO_HLC + device
       ops.push({ hlc: existsHlc, table, id: r.id, create: true, set: {} })

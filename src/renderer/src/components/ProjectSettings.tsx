@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { triggerDefault } from '@shared/live'
 import type { Automation, AutomationAction, AutomationTrigger, Project, ProjectStatus, StatusCategory, StatusDef } from '@shared/types'
 import { issueKey, useStore } from '../store'
 import { fieldOptions } from './FilterBar'
@@ -6,12 +7,13 @@ import type { Initiative, Operator, TriageRule } from '@shared/types'
 import { RECIPES, recipeAutomation, type Blank, type Recipe } from '@shared/recipes'
 import { ICONS } from './icons'
 import { projectTemplateFrom } from '@shared/projectTemplates'
-import type { ProjectTemplate } from '@shared/types'
+import type { IntakeForm, ProjectTemplate } from '@shared/types'
 import { askText, Modal } from './ui'
 import { LABEL_COLORS } from '../columns'
 import { uid, clsx, todayISO, fmtDate } from '../util'
+import { FORM_FIXED_KEYS, fieldName, validateForm } from '@shared/forms'
 
-type Tab = 'general' | 'statuses' | 'milestones' | 'updates' | 'automations' | 'triage' | 'templates' | 'archive'
+type Tab = 'general' | 'statuses' | 'milestones' | 'updates' | 'automations' | 'triage' | 'forms' | 'templates' | 'archive'
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'general', label: 'General' },
@@ -20,6 +22,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'updates', label: 'Updates' },
   { id: 'automations', label: 'Automations' },
   { id: 'triage', label: 'Triage rules' },
+  { id: 'forms', label: 'Forms' },
   { id: 'templates', label: 'Templates' },
   { id: 'archive', label: 'Archive' }
 ]
@@ -52,6 +55,7 @@ export function ProjectSettings({ project, onClose }: { project: Project; onClos
       {tab === 'updates' && <Updates project={project} />}
       {tab === 'automations' && <Automations project={project} />}
       {tab === 'triage' && <TriageRules project={project} />}
+      {tab === 'forms' && <Forms project={project} />}
       {tab === 'templates' && <Templates project={project} />}
       {tab === 'archive' && <Archive project={project} />}
     </Modal>
@@ -493,6 +497,7 @@ function Automations({ project }: { project: Project }) {
             onChange={e => {
               const next = e.target.value as AutomationTrigger['type']
               setTrigger(next)
+              setTriggerValue(triggerDefault(next, project.statuses))
               if (OBJECT_TRIGGERS.includes(next) && !OBJECT_ACTIONS.includes(action)) setAction('notify')
             }}
           >
@@ -733,6 +738,62 @@ function Templates({ project }: { project: Project }) {
           <button className="icon-btn" aria-label={`Delete project template ${t.name}`} onClick={() => write(saved.filter(x => x.id !== t.id))}>{ICONS.trash}</button>
         </div>
       ))}
+    </div>
+  )
+}
+
+// Local intake forms. A submission (FormModal) becomes a triage item.
+function Forms({ project }: { project: Project }) {
+  const { dispatch } = useStore()
+  const forms = project.forms ?? []
+  const save = (next: IntakeForm[]) => dispatch({ type: 'patchProject', id: project.id, patch: { forms: next } })
+  const patchForm = (form: IntakeForm, patch: Partial<IntakeForm>) => save(forms.map(f => (f.id === form.id ? { ...f, ...patch } : f)))
+  const fieldKeys = [...FORM_FIXED_KEYS, ...project.columns.map(c => c.id)]
+
+  return (
+    <div className="settings-form">
+      <div className="option-row">
+        <span className="grow small muted">Submissions from a form land in triage.</span>
+        <button className="btn" aria-label="New form" onClick={() => save([...forms, { id: uid(), name: 'New form', fields: [{ key: 'title', required: true }] }])}>
+          {ICONS.plus} New form
+        </button>
+      </div>
+      {forms.map(form => {
+        const errors = validateForm(form, project)
+        const patchField = (n: number, patch: Partial<IntakeForm['fields'][number]>) =>
+          patchForm(form, { fields: form.fields.map((f, i) => (i === n ? { ...f, ...patch } : f)) })
+        return (
+          <div key={form.id} className="drawer-section">
+            <div className="option-row">
+              <input className="field-input grow" aria-label={`Form name ${form.name}`} value={form.name} onChange={e => patchForm(form, { name: e.target.value })} />
+              <button className="icon-btn" aria-label={`Delete form ${form.name}`} onClick={() => save(forms.filter(f => f.id !== form.id))}>{ICONS.trash}</button>
+            </div>
+            <input className="field-input" placeholder="Description" value={form.description ?? ''} onChange={e => patchForm(form, { description: e.target.value })} />
+            {form.fields.map((f, n) => (
+              <div key={n} className="option-row">
+                <select className="field-input" aria-label="Field" value={f.key} onChange={e => patchField(n, { key: e.target.value })}>
+                  {fieldKeys.map(k => (
+                    <option key={k} value={k}>{fieldName(project, k)}</option>
+                  ))}
+                </select>
+                <input className="field-input" placeholder="Label" value={f.label ?? ''} onChange={e => patchField(n, { label: e.target.value })} />
+                <input className="field-input" placeholder="Help text" value={f.help ?? ''} onChange={e => patchField(n, { help: e.target.value })} />
+                <label className="small">
+                  <input type="checkbox" checked={!!f.required} onChange={e => patchField(n, { required: e.target.checked })} /> Required
+                </label>
+                <button className="icon-btn" aria-label="Remove field" onClick={() => patchForm(form, { fields: form.fields.filter((_, i) => i !== n) })}>{ICONS.close}</button>
+              </div>
+            ))}
+            <div className="option-row">
+              <button className="btn subtle" onClick={() => patchForm(form, { fields: [...form.fields, { key: 'description' }] })}>{ICONS.plus} Add field</button>
+            </div>
+            {errors.map(e => (
+              <div key={e} className="small" style={{ color: 'var(--danger)' }}>{e}</div>
+            ))}
+          </div>
+        )
+      })}
+      {forms.length === 0 && <div className="muted small">No forms yet. A form asks for fields and files the answer as a triage item.</div>}
     </div>
   )
 }

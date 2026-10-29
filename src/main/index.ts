@@ -9,6 +9,7 @@ import { AUDIT_LIMIT, auditEntries, toCsv, type AuditEntry, type AuditFilter } f
 import { subscriptionNotifications } from '../shared/subscriptions'
 import { migrate } from '../shared/migrate'
 import { seed } from '../shared/seed'
+import { adoptPersonal } from '../shared/sync'
 import { McpController } from './mcp'
 import { Store } from './db'
 import { SyncEngine } from './sync'
@@ -141,10 +142,16 @@ ipcMain.handle('data:save', (_event, incoming: AppData) => {
   const ops = diffOps(base ?? state, incoming, sync.clock)
   if (ops.length === 0) {
     base = incoming
+    // Personal views are device-only and produce no ops; keep them anyway.
+    const adopted = adoptPersonal(state, incoming)
+    if (adopted !== state) {
+      state = adopted
+      return persist(adopted)
+    }
     return
   }
   sync.record(ops)
-  const merged = applyOps(state, ops).data
+  const merged = adoptPersonal(applyOps(state, ops).data, incoming)
   const remoteAhead = JSON.stringify(merged) !== JSON.stringify(incoming)
   state = merged
   audit(auditEntries(ops, 'ui', new Date().toISOString()))

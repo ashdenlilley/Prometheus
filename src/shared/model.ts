@@ -11,6 +11,7 @@ import type {
   Comment,
   Cycle,
   Dashboard,
+  Folder,
   Initiative,
   Issue,
   Notification,
@@ -30,6 +31,11 @@ export type Action =
   | { type: 'addSpace'; space: Space }
   | { type: 'patchSpace'; id: string; patch: Partial<Space> }
   | { type: 'deleteSpace'; id: string }
+  | { type: 'addFolder'; spaceId: string; folder: Folder }
+  | { type: 'renameFolder'; spaceId: string; folderId: string; name: string }
+  | { type: 'toggleFolder'; spaceId: string; folderId: string }
+  | { type: 'deleteFolder'; spaceId: string; folderId: string }
+  | { type: 'moveProjectToFolder'; projectId: string; folderId: string | null }
   | { type: 'addInitiative'; initiative: Initiative }
   | { type: 'patchInitiative'; id: string; patch: Partial<Initiative> }
   | { type: 'deleteInitiative'; id: string }
@@ -48,6 +54,7 @@ export type Action =
   | { type: 'addComment'; issueId: string; comment: Comment }
   | { type: 'deleteComment'; issueId: string; commentId: string }
   | { type: 'toggleReaction'; issueId: string; commentId: string; emoji: string; by: string }
+  | { type: 'pressButton'; issueId: string; columnId: string }
   | { type: 'addRelation'; issueId: string; relation: Relation }
   | { type: 'removeRelation'; issueId: string; index: number }
   | { type: 'addCycle'; cycle: Cycle }
@@ -75,6 +82,11 @@ export type Action =
 const mapProject = (s: AppData, id: string, fn: (p: Project) => Project): AppData => ({
   ...s,
   projects: s.projects.map(p => (p.id === id ? fn(p) : p))
+})
+
+const mapFolders = (s: AppData, spaceId: string, fn: (fs: Folder[]) => Folder[]): AppData => ({
+  ...s,
+  spaces: s.spaces.map(sp => (sp.id === spaceId ? { ...sp, folders: fn(sp.folders ?? []) } : sp))
 })
 
 export const today = () => new Date().toISOString().slice(0, 10)
@@ -112,6 +124,22 @@ export function reducer(s: AppData, a: Action): AppData {
         triageRules: s.triageRules.filter(r => !projectIds.includes(r.projectId)),
         templates: s.templates.filter(t => !projectIds.includes(t.projectId))
       }
+    }
+    case 'addFolder':
+      return mapFolders(s, a.spaceId, fs => [...fs, a.folder])
+    case 'renameFolder':
+      return mapFolders(s, a.spaceId, fs => fs.map(f => (f.id === a.folderId ? { ...f, name: a.name } : f)))
+    case 'toggleFolder':
+      return mapFolders(s, a.spaceId, fs => fs.map(f => (f.id === a.folderId ? { ...f, collapsed: !f.collapsed } : f)))
+    case 'deleteFolder': {
+      const out = mapFolders(s, a.spaceId, fs => fs.filter(f => f.id !== a.folderId))
+      return { ...out, projects: out.projects.map(p => (p.spaceId === a.spaceId && p.folderId === a.folderId ? { ...p, folderId: undefined } : p)) }
+    }
+    case 'moveProjectToFolder': {
+      const project = s.projects.find(p => p.id === a.projectId)
+      if (!project) return s
+      if (a.folderId !== null && !s.spaces.find(sp => sp.id === project.spaceId)?.folders?.some(f => f.id === a.folderId)) return s
+      return mapProject(s, a.projectId, p => ({ ...p, folderId: a.folderId ?? undefined }))
     }
     case 'addInitiative':
       return { ...s, initiatives: [...s.initiatives, a.initiative] }
@@ -214,6 +242,17 @@ export function reducer(s: AppData, a: Action): AppData {
           return { ...c, reactions }
         })
       }))
+    case 'pressButton': {
+      // One step: count the click, then run the column's action (if any) as its own automation.
+      const issue = s.issues.find(i => i.id === a.issueId)
+      const column = s.projects.find(p => p.id === issue?.projectId)?.columns.find(c => c.id === a.columnId)
+      if (!issue || !column) return s
+      const count = typeof issue.values[a.columnId] === 'number' ? (issue.values[a.columnId] as number) : 0
+      const next = updateIssue(s, a.issueId, { values: { ...issue.values, [a.columnId]: count + 1 } })
+      if (!column.buttonAction) return next
+      const rule: Automation = { id: 'button:' + column.id, projectId: issue.projectId, name: column.buttonLabel || column.name, enabled: true, trigger: { type: 'column_changed', columnId: column.id }, action: column.buttonAction }
+      return applyAction(next, a.issueId, rule)
+    }
     case 'addRelation':
       return mapIssue(s, a.issueId, i => ({ ...i, relations: [...i.relations, a.relation] }))
     case 'removeRelation':

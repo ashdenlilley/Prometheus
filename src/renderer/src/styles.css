@@ -1237,6 +1237,100 @@ select.field-input:focus {
   font-variant-numeric: tabular-nums;
 }
 
+/* ───────────── Files gallery and map ───────────── */
+.files-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
+}
+.file-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+.file-thumb {
+  width: 100%;
+  height: 120px;
+  object-fit: cover;
+  border-radius: 6px;
+  background: var(--hover);
+}
+.file-ext {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  color: var(--muted);
+}
+.loc-edit {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.loc-edit .field-input,
+.loc-edit .cell-input {
+  flex: 1;
+  min-width: 0;
+}
+.map-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 240px;
+  gap: 12px;
+}
+.map-svg {
+  display: block;
+  background: var(--hover);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  user-select: none;
+}
+.map-grid {
+  stroke: var(--line);
+  stroke-width: 1;
+}
+.map-label {
+  fill: var(--muted);
+  font-size: 11px;
+}
+.map-pin {
+  cursor: pointer;
+}
+.map-pin circle {
+  fill: var(--accent);
+  stroke: var(--panel);
+  stroke-width: 2;
+}
+.map-pin text {
+  fill: var(--text);
+  font-size: 12px;
+  paint-order: stroke;
+  stroke: var(--panel);
+  stroke-width: 3px;
+}
+.map-side {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 560px;
+  overflow: auto;
+}
+.map-unplaced {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.map-unplaced .link-btn {
+  flex: 1;
+  min-width: 0;
+}
+
 /* ───────────── Cell editors ───────────── */
 .range-edit {
   display: flex;
@@ -1400,6 +1494,11 @@ select.field-input:focus {
   background: transparent;
 }
 
+.vote-btn.on {
+  color: var(--accent);
+  font-weight: 600;
+}
+
 /* ───────────── Cycles ───────────── */
 .cycle {
   margin-bottom: 14px;
@@ -1433,6 +1532,19 @@ select.field-input:focus {
   background: var(--accent);
   transition: width 200ms ease;
 }
+
+/* ───────────── Workload and planning ───────────── */
+.planning-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 12px; }
+.planning-load.over, .workload-table td.over { color: var(--danger); }
+.workload-table { border-collapse: collapse; }
+.workload-table th, .workload-table td { padding: 6px 10px; text-align: left; border-bottom: 1px solid var(--line, rgba(128, 128, 128, 0.2)); }
+.workload-table td.over { background: rgba(255, 69, 58, 0.15); font-weight: 600; }
+.planning-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.planning-col { min-height: 120px; padding: 8px; border-radius: 8px; background: var(--surface-2, rgba(128, 128, 128, 0.06)); }
+.planning-col h3 { margin: 0 0 6px; }
+.planning-row { display: grid; grid-template-columns: auto 1fr auto auto; gap: 8px; align-items: center; padding: 6px; border-radius: 6px; cursor: grab; }
+.planning-row:focus-visible { outline: 2px solid var(--accent, #0a84ff); }
+.planning-title { all: unset; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ───────────── Timeline and roadmap ───────────── */
 .timeline {
@@ -1962,6 +2074,35 @@ select.field-input:focus {
   gap: 8px;
   align-items: center;
   margin-top: 8px;
+}
+
+.folder-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding-left: 14px;
+}
+
+.folder-row .lbl {
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.folder-row .btn {
+  display: none;
+  min-height: 22px;
+  padding: 0 6px;
+}
+
+.folder-row:hover .btn,
+.folder-row:focus-within .btn {
+  display: inline-flex;
+}
+
+.folder-move {
+  width: calc(100% - 54px);
+  margin: 2px 0 4px 46px;
+  font-size: 12px;
 }
 
 /* ───────────── Topbar breadcrumb ───────────── */
