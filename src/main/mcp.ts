@@ -625,6 +625,8 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse, token:
   } catch {
     return send(res, 400, fail(null, -32700, 'Parse error'))
   }
+  // JSON-RPC 2.0: an empty batch is an Invalid Request, answered with one error object.
+  if (Array.isArray(parsed) && parsed.length === 0) return send(res, 200, fail(null, -32600, 'Invalid Request'))
   // A single message must be an object; null, numbers and strings are Invalid Request.
   if (!Array.isArray(parsed) && !isMessage(parsed)) return send(res, 400, fail(null, -32600, 'Invalid Request'))
 

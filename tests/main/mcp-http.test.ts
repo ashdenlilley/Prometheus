@@ -199,7 +199,7 @@ describe('MCP HTTP layer', () => {
     })
 
     // JSON-RPC 2.0 says an empty batch is an Invalid Request (-32600) with a single error reply.
-    test('an empty batch array returns an error reply', { todo: 'BUG: empty batch [] returns 202 instead of a -32600 error' }, async () => {
+    test('an empty batch array returns an error reply', async () => {
       const res = await post(port, [])
       assert.equal(res.status, 200)
       assert.equal((res.json as Rpc).error?.code, -32600)
