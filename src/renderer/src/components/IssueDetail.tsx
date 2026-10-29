@@ -5,7 +5,7 @@ import { DRAWER_SHORTCUTS, drawerShortcut } from '@shared/shortcuts'
 import { createIssue, issueKey, useStore, withValue } from '../store'
 import { inverseRelations } from '@shared/model'
 import { availableLabels, labelGroups } from '@shared/labels'
-import { activeAgents, AGENT_PREFIX, agentAssignee, displayAssignee, isAgentAssignee } from '@shared/agents'
+import { activeAgents, AGENT_PREFIX, agentAssignee, agentText, displayAssignee, isAgentAssignee } from '@shared/agents'
 import { AgentBadge } from './AgentBadge'
 import { nextOccurrence } from '@shared/recurrence'
 import type { Recurrence } from '@shared/types'
@@ -536,7 +536,7 @@ export function IssueDetail({ issueId, onClose, onOpen }: { issueId: string; onC
           {timeline.map((t, n) =>
             t.kind === 'activity' ? (
               <div key={`a-${n}`} className="activity-row muted small">
-                {(t.item as ActivityEntry).text} · {fmtDate(t.at.slice(0, 10))}
+                {agentText(data, (t.item as ActivityEntry).text)} · {fmtDate(t.at.slice(0, 10))}
                 {(t.item as ActivityEntry).actor?.startsWith(AGENT_PREFIX) && (
                   <span className="muted" data-testid="activity-actor"> · by {displayAssignee(data, (t.item as ActivityEntry).actor ?? '')}</span>
                 )}

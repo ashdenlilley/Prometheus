@@ -61,3 +61,8 @@ export class WriteLimiter {
     return { ok: true, firstTrip: false }
   }
 }
+
+// Activity text stores raw assignee strings; show agent names instead of "agent:<id>".
+export function agentText(data: AppData, text: string): string {
+  return text.replace(/agent:[A-Za-z0-9-]+/g, m => displayAssignee(data, m))
+}

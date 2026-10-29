@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { createIssue } from '../../src/shared/model'
 import { emptyData } from '../../src/shared/seed'
 import { applyFilter } from '../../src/shared/filter'
+import { agentText } from '../../src/shared/agents'
 import type { AppData, Issue } from '../../src/shared/types'
 
 describe('assigneeType filter', () => {
@@ -25,4 +26,10 @@ describe('assigneeType filter', () => {
   test('empty matches unassigned issues', () => {
     assert.deepEqual(titles({ match: 'all', conditions: [{ key: 'assigneeType', op: 'empty' }] }), ['nobody'])
   })
+})
+
+test('agentText replaces agent ids in activity text with names', () => {
+  const data = { ...emptyData(), agents: [{ id: 'a1', name: 'Bot', color: '#000', level: 'write' as const, tokenHash: 'h', createdAt: '2026-01-01' }] }
+  assert.equal(agentText(data, 'Assignee: none → agent:a1'), 'Assignee: none → Bot')
+  assert.equal(agentText(data, 'Assignee: agent:legacy → Sam'), 'Assignee: Unnamed agent → Sam')
 })
