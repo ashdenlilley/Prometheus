@@ -1,5 +1,6 @@
 /// <reference types="vite/client" />
 import type { AppData } from '@shared/types'
+import type { AuditFilter, AuditRow } from '@shared/audit'
 
 export interface SyncStatus {
   enabled: boolean
@@ -33,6 +34,8 @@ declare global {
       load: () => Promise<AppData | null>
       save: (data: AppData) => Promise<void>
       openExternal: (url: string) => Promise<void>
+      auditList: (filters: AuditFilter) => Promise<AuditRow[]>
+      auditCsv: (filters: AuditFilter) => Promise<string>
       onExternal: (cb: (data: AppData) => void) => () => void
       onEditCommand: (cb: (cmd: 'undo' | 'redo') => void) => () => void
       sync: {

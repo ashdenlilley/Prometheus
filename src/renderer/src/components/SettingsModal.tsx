@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { McpStatus } from '../env'
+import type { AuditFilter, AuditRow, AuditSource } from '@shared/audit'
 import { ICONS } from './icons'
 import { Modal } from './ui'
 import { SyncSettings } from './SyncSettings'
@@ -75,7 +76,90 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
         <div className="settings-title">Connect Codex</div>
         <CodeBlock text={codexToml} copied={copied === 'codex'} onCopy={() => copy('codex', codexToml)} />
       </section>
+
+      <AuditLog />
     </Modal>
+  )
+}
+
+const AUDIT_PAGE = 500
+const AUDIT_TABLES = ['spaces', 'initiatives', 'projects', 'issues', 'cycles', 'automations', 'triage_rules', 'templates', 'dashboards']
+
+// Recent changes, newest first. Filters are applied by the main process; export uses the same filters.
+function AuditLog() {
+  const [source, setSource] = useState<AuditSource | ''>('')
+  const [table, setTable] = useState('')
+  const [q, setQ] = useState('')
+  const [rows, setRows] = useState<AuditRow[]>([])
+  const query: AuditFilter = { source: source || undefined, table: table || undefined, q: q.trim() || undefined }
+
+  useEffect(() => {
+    void window.api.auditList({ ...query, limit: AUDIT_PAGE }).then(setRows)
+  }, [source, table, q])
+
+  const more = () =>
+    window.api.auditList({ ...query, before: rows[rows.length - 1].seq, limit: AUDIT_PAGE }).then(next => setRows([...rows, ...next]))
+
+  const exportCsv = async () => {
+    const blob = new Blob([await window.api.auditCsv(query)], { type: 'text/csv' })
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = 'prometheus-audit.csv'
+    a.click()
+    URL.revokeObjectURL(a.href)
+  }
+
+  return (
+    <section className="settings-section">
+      <div className="settings-title">Audit log</div>
+      <div className="audit-controls">
+        <select className="field-input" aria-label="Audit source" value={source} onChange={e => setSource(e.target.value as AuditSource | '')}>
+          <option value="">All</option>
+          <option value="ui">UI</option>
+          <option value="mcp">MCP</option>
+          <option value="sync">Sync</option>
+        </select>
+        <select className="field-input" aria-label="Audit table" value={table} onChange={e => setTable(e.target.value)}>
+          <option value="">All</option>
+          {AUDIT_TABLES.map(t => (
+            <option key={t} value={t}>{t}</option>
+          ))}
+        </select>
+        <input className="field-input" aria-label="Search audit log" placeholder="Search" value={q} onChange={e => setQ(e.target.value)} />
+        <button className="btn" aria-label="Export audit CSV" onClick={exportCsv}>Export CSV</button>
+      </div>
+      {rows.length === 0 ? (
+        <p className="muted small">No changes match.</p>
+      ) : (
+        <div className="audit-list">
+          <table>
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Source</th>
+                <th>Action</th>
+                <th>Table</th>
+                <th>Target id</th>
+                <th>Fields</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(r => (
+                <tr key={r.seq}>
+                  <td>{new Date(r.at).toLocaleString()}</td>
+                  <td>{r.source}</td>
+                  <td>{r.action}</td>
+                  <td>{r.table}</td>
+                  <td>{r.targetId}</td>
+                  <td>{r.fields?.join(', ')}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {rows.length >= AUDIT_PAGE && <button className="btn ghost" onClick={more}>Load more</button>}
+    </section>
   )
 }
 
