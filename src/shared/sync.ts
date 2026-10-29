@@ -14,6 +14,7 @@ import type { AppData, Project, SavedView } from './types'
 export type Table =
   | 'spaces'
   | 'initiatives'
+  | 'teams'
   | 'projects'
   | 'issues'
   | 'cycles'
@@ -26,6 +27,7 @@ export type Table =
 export const TABLE_KEYS: [Table, keyof AppData][] = [
   ['spaces', 'spaces'],
   ['initiatives', 'initiatives'],
+  ['teams', 'teams'],
   ['projects', 'projects'],
   ['issues', 'issues'],
   ['cycles', 'cycles'],

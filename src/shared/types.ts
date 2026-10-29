@@ -222,9 +222,26 @@ export interface Automation {
   action: AutomationAction
 }
 
+// A team owns the issue key, number sequence, workflow statuses, cycle settings and members.
+export interface Team {
+  id: string
+  spaceId: string
+  name: string
+  key: string
+  color: string
+  members: string[]
+  statuses: StatusDef[]
+  nextNumber: number
+  cycleLength: number
+  autoCycles: boolean
+  autoRollOver?: boolean
+  archivedAt?: string
+}
+
 export interface Project {
   id: string
   spaceId: string
+  teamId: string // exactly one team; statuses and cycle settings mirror the team
   name: string
   key: string
   color: string
@@ -307,6 +324,7 @@ export interface Issue {
   id: string
   projectId: string
   number: number
+  key?: string // stored team key prefix, set at creation and never rewritten
   title: string
   description: string
   status: string
@@ -350,6 +368,7 @@ export interface Recurrence {
 export interface Cycle {
   id: string
   projectId: string
+  teamId?: string
   name: string
   startDate: string
   endDate: string
@@ -415,10 +434,11 @@ export interface Notification {
 }
 
 export interface AppData {
-  version: 4
+  version: 5
   spaces: Space[]
   initiatives: Initiative[]
   projects: Project[]
+  teams: Team[]
   issues: Issue[]
   cycles: Cycle[]
   automations: Automation[]

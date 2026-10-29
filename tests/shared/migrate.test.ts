@@ -18,21 +18,21 @@ function legacyFile(overrides: Record<string, unknown> = {}): unknown {
 }
 
 describe('migrate: current version passthrough', () => {
-  test('returns a version 4 file as the same object', () => {
+  test('returns a version 5 file as the same object', () => {
     const current = seed()
     assert.equal(migrate(current), current)
   })
 
-  test('returns an empty version 4 file unchanged', () => {
+  test('returns an empty version 5 file unchanged', () => {
     const current = emptyData()
     assert.equal(migrate(current), current)
   })
 })
 
 describe('migrate: missing fields get defaults', () => {
-  test('an empty legacy file becomes an empty version 4 file with a Workspace space', () => {
+  test('an empty legacy file becomes an empty version 5 file with a Workspace space', () => {
     const out = migrate({ projects: [], issues: [] })
-    assert.equal(out.version, 4)
+    assert.equal(out.version, 5)
     assert.equal(out.spaces.length, 1)
     assert.equal(out.spaces[0].name, 'Workspace')
     assert.equal(out.spaces[0].color, '#5e6ad2')
@@ -97,7 +97,7 @@ describe('migrate: missing fields get defaults', () => {
 
   test('a missing version field is treated as a legacy file', () => {
     const out = migrate({ projects: [], issues: [] })
-    assert.equal(out.version, 4)
+    assert.equal(out.version, 5)
   })
 })
 
@@ -129,7 +129,7 @@ describe('migrate: existing data is preserved', () => {
     const cycles = [{ id: 'c1', projectId: 'p1', name: 'Cycle 1', startDate: '2026-01-01', endDate: '2026-01-14' }]
     const out = migrate(legacyFile({ spaces, cycles }))
     assert.deepEqual(out.spaces, spaces)
-    assert.deepEqual(out.cycles, cycles)
+    assert.deepEqual(out.cycles, cycles.map(c => ({ ...c, teamId: 'team-p1' })))
   })
 
   test('issue values that are not select or people columns are kept unchanged', () => {

@@ -1,10 +1,15 @@
 import { blankProject, emptyData } from './seed'
 import { DEFAULT_STATUSES, type AppData, type CellValue, type Column } from './types'
+import { ensureTeams } from './teams'
 
-// Upgrades any saved file to the current version. Accepts v2, v3 and v4.
+// Upgrades any saved file to the current version. Accepts v2 to v5.
 export function migrate(raw: unknown): AppData {
-  const v = raw as AppData & { version?: number }
-  if (v.version === 4) return v
+  const version = (raw as { version?: number }).version
+  if (version === 5) return raw as AppData
+  if (version === 4) {
+    const v4 = raw as AppData
+    return ensureTeams({ ...v4, teams: v4.teams ?? [], version: 5 })
+  }
 
   const legacy = raw as unknown as Record<string, unknown> & AppData
   const base = emptyData()
@@ -51,13 +56,14 @@ export function migrate(raw: unknown): AppData {
     }
   })
 
-  return {
+  return ensureTeams({
     ...base,
     ...legacy,
-    version: 4,
+    version: 5,
     spaces,
     projects,
+    teams: [],
     issues,
     cycles: legacy.cycles ?? []
-  }
+  })
 }

@@ -62,12 +62,10 @@ function findIssue(data: AppData, args: Record<string, unknown>): Issue {
     if (hit) return hit
   }
   if (typeof args.key === 'string') {
-    const m = /^([A-Za-z0-9]+)-(\d+)$/.exec(args.key.trim())
-    if (m) {
-      const project = data.projects.find(p => p.key.toLowerCase() === m[1].toLowerCase())
-      const hit = project && data.issues.find(i => i.projectId === project.id && i.number === Number(m[2]))
-      if (hit) return hit
-    }
+    // Matches the displayed key, which is the team key for newer issues
+    const key = args.key.trim().toLowerCase()
+    const hit = data.issues.find(i => issueKey(data, i).toLowerCase() === key)
+    if (hit) return hit
   }
   throw new Error('Issue not found. Pass a valid id or key such as PRM-12.')
 }
