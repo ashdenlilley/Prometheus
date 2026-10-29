@@ -1,9 +1,10 @@
 import http from 'http'
-import { randomBytes, randomUUID, timingSafeEqual } from 'crypto'
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'crypto'
 import { join } from 'path'
 import { promises as fs } from 'fs'
-import { type AppData, type Issue, type Project, type RelationType, type StatusDef } from '../shared/types'
+import { type Agent, type AppData, type Issue, type Notification, type Project, type RelationType, type StatusDef } from '../shared/types'
 import { categoryOf, createIssue, issueKey, reducer, type Action } from '../shared/model'
+import { LEGACY_AGENT, WriteLimiter, agentAssignee } from '../shared/agents'
 import { blankProject } from '../shared/seed'
 import { progress } from '../shared/query'
 import { submissionToIssue } from '../shared/forms'
@@ -18,13 +19,29 @@ export const MAX_BODY = 1024 * 1024
 
 export interface McpHost {
   read(): AppData | null
-  apply(action: Action): void
+  apply(action: Action, actor?: string): void
 }
 
+// Who a request is made as: a registered agent, or the shared token's "Unnamed agent".
+type Caller = Pick<Agent, 'id' | 'name' | 'level'>
+
+// Plaintext settings in memory. On disk the token is sealed when keys are available.
 interface McpConfig {
   enabled: boolean
   token: string
   port: number
+}
+
+interface McpFile {
+  enabled: boolean
+  port: number
+  sealedToken?: string
+  token?: string
+}
+
+export interface McpKeys {
+  seal(s: string): Promise<string>
+  open(s: string): Promise<string | null>
 }
 
 export interface McpStatus {
@@ -37,11 +54,16 @@ export interface McpStatus {
 
 interface ToolContext {
   data: AppData
+  agent: Caller
   apply: (action: Action) => void
 }
 
+// read: queries only. comment: also add_comment. write: everything else.
+type ToolKind = 'read' | 'comment' | 'write'
+
 interface Tool {
   name: string
+  kind: ToolKind
   description: string
   inputSchema: Record<string, unknown>
   run: (args: Record<string, unknown>, ctx: ToolContext) => unknown
@@ -156,6 +178,7 @@ const RELATION_TYPES: RelationType[] = ['blocks', 'duplicate', 'related']
 const TOOLS: Tool[] = [
   {
     name: 'list_spaces',
+    kind: 'read',
     description: 'List spaces with their project counts.',
     inputSchema: { type: 'object', properties: {} },
     run: (_a, { data }) =>
@@ -163,6 +186,7 @@ const TOOLS: Tool[] = [
   },
   {
     name: 'create_space',
+    kind: 'write',
     description: 'Create a space that groups projects.',
     inputSchema: {
       type: 'object',
@@ -177,6 +201,7 @@ const TOOLS: Tool[] = [
   },
   {
     name: 'create_initiative',
+    kind: 'write',
     description: 'Create an initiative (a goal that groups projects in a space).',
     inputSchema: {
       type: 'object',
@@ -200,6 +225,7 @@ const TOOLS: Tool[] = [
   },
   {
     name: 'list_projects',
+    kind: 'read',
     description: 'List projects, optionally within one space.',
     inputSchema: { type: 'object', properties: { spaceId: str('Space id') } },
     run: (a, { data }) =>
@@ -220,6 +246,7 @@ const TOOLS: Tool[] = [
   },
   {
     name: 'create_project',
+    kind: 'write',
     description: 'Create a project inside a space. Key is derived from the name.',
     inputSchema: {
       type: 'object',
@@ -255,6 +282,7 @@ const TOOLS: Tool[] = [
   },
   {
     name: 'update_project',
+    kind: 'write',
     description: 'Update project status, lead, dates, initiative or cycle settings.',
     inputSchema: {
       type: 'object',
@@ -293,6 +321,7 @@ const TOOLS: Tool[] = [
   },
   {
     name: 'get_project',
+    kind: 'read',
     description: 'Project detail: statuses, columns, cycles, milestones and progress.',
     inputSchema: {
       type: 'object',
@@ -322,6 +351,7 @@ const TOOLS: Tool[] = [
   },
   {
     name: 'list_issues',
+    kind: 'read',
     description: 'List issues. Filter by project, space, status, cycle, parent or a text search over title and labels.',
     inputSchema: {
       type: 'object',
@@ -357,12 +387,14 @@ const TOOLS: Tool[] = [
   },
   {
     name: 'get_issue',
+    kind: 'read',
     description: 'Get one issue by id or key such as PRM-12.',
     inputSchema: { type: 'object', properties: issueRef },
     run: (a, { data }) => issueView(data, findIssue(data, a))
   },
   {
     name: 'create_issue',
+    kind: 'write',
     description: 'Create an issue in a project. Pass parentKey to make it a sub-issue. New items may go to triage.',
     inputSchema: {
       type: 'object',
@@ -395,6 +427,7 @@ const TOOLS: Tool[] = [
   },
   {
     name: 'list_forms',
+    kind: 'read',
     description: 'List a project\'s intake forms with their fields.',
     inputSchema: { type: 'object', properties: { projectId: str('Project id or key') }, required: ['projectId'] },
     run: (a, { data }) =>
@@ -402,6 +435,7 @@ const TOOLS: Tool[] = [
   },
   {
     name: 'submit_form',
+    kind: 'write',
     description: 'Submit a local intake form. The answer becomes an item in the project triage inbox.',
     inputSchema: {
       type: 'object',
@@ -430,6 +464,7 @@ const TOOLS: Tool[] = [
   },
   {
     name: 'update_issue',
+    kind: 'write',
     description: 'Update fields on an issue. Pass only the fields to change. Empty string clears dates, cycle or parent.',
     inputSchema: {
       type: 'object',
@@ -462,16 +497,18 @@ const TOOLS: Tool[] = [
   },
   {
     name: 'add_comment',
+    kind: 'comment',
     description: 'Add a comment to an issue. Mentions like @name notify that person in the app.',
     inputSchema: {
       type: 'object',
       properties: { ...issueRef, body: str('Comment text'), author: str('Author name') },
       required: ['body']
     },
-    run: (a, { data, apply }) => {
+    run: (a, { data, agent, apply }) => {
       const issue = findIssue(data, a)
       const body = requireString(a, 'body')
-      const author = a.author ? String(a.author) : data.me
+      // Registered agents always post under their own name. The shared token keeps the old behaviour.
+      const author = agent.id === LEGACY_AGENT.id ? (a.author ? String(a.author) : data.me) : agent.name
       const now = new Date().toISOString()
       apply({ type: 'addComment', issueId: issue.id, comment: { id: crypto.randomUUID(), author, body, at: now } })
       return { key: issueKey(data, issue), author, body, at: now }
@@ -479,6 +516,7 @@ const TOOLS: Tool[] = [
   },
   {
     name: 'add_relation',
+    kind: 'write',
     description: 'Link two issues. blocks: this issue blocks the target. duplicate: this issue duplicates the target. related: loose link.',
     inputSchema: {
       type: 'object',
@@ -501,6 +539,7 @@ const TOOLS: Tool[] = [
   },
   {
     name: 'set_issue_value',
+    kind: 'write',
     description: 'Set one custom column value on an issue. Value shape depends on column type.',
     inputSchema: {
       type: 'object',
@@ -517,6 +556,7 @@ const TOOLS: Tool[] = [
   },
   {
     name: 'create_cycle',
+    kind: 'write',
     description: 'Create a time-boxed cycle (sprint) in a project.',
     inputSchema: {
       type: 'object',
@@ -543,9 +583,40 @@ const TOOLS: Tool[] = [
   },
   {
     name: 'list_notifications',
+    kind: 'read',
     description: 'Unread notifications (mentions, automation alerts).',
     inputSchema: { type: 'object', properties: {} },
     run: (_a, { data }) => data.notifications.filter(n => !n.read).map(n => ({ ...n, key: n.issueId ? keyOf(data, n.issueId) : null }))
+  },
+  {
+    name: 'whoami',
+    kind: 'read',
+    description: 'The agent this token belongs to: id, name, permission level and assignee string.',
+    inputSchema: { type: 'object', properties: {} },
+    run: (_a, { agent }) => ({ id: agent.id, name: agent.name, level: agent.level, assignee: agentAssignee(agent.id) })
+  },
+  {
+    name: 'my_issues',
+    kind: 'read',
+    description: 'Open issues assigned to this agent. Same shape as list_issues. Done and canceled issues are hidden unless includeDone is true.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        project: str('Project id or key'),
+        status: statusProp,
+        includeDone: { type: 'boolean', description: 'Include completed and canceled issues' }
+      }
+    },
+    run: (a, { data, agent }) => {
+      const assignee = agentAssignee(agent.id)
+      const projectId = a.project ? findProject(data, { projectId: a.project }).id : undefined
+      return data.issues
+        .filter(i => i.assignee === assignee && !i.archivedAt)
+        .filter(i => !projectId || i.projectId === projectId)
+        .filter(i => !a.status || i.status === a.status)
+        .filter(i => a.includeDone === true || !['completed', 'canceled'].includes(categoryOf(data.projects.find(p => p.id === i.projectId), i.status)))
+        .map(i => issueView(data, i))
+    }
   }
 ]
 
@@ -566,19 +637,34 @@ const isMessage = (m: unknown): m is RpcMessage => typeof m === 'object' && m !=
 // Runs one tool against the live data. Shared by the MCP handler and the REST API (rest.ts).
 export type ToolResult = { ok: true; value: unknown } | { ok: false; message: string }
 
-export function callTool(name: string, args: Record<string, unknown>, host: McpHost): ToolResult {
+// REST calls run as the shared token's legacy agent (write level), as before agents existed.
+export function callTool(name: string, args: Record<string, unknown>, host: McpHost, caller: Caller = LEGACY_AGENT): ToolResult {
   const tool = TOOLS.find(t => t.name === name)
   if (!tool) return { ok: false, message: `Unknown tool: ${name}` }
   const data = host.read()
   if (!data) return { ok: false, message: 'Prometheus has not loaded its data yet. Open the app first.' }
   try {
-    return { ok: true, value: tool.run(args, { data, apply: host.apply }) }
+    return { ok: true, value: tool.run(args, { data, agent: caller, apply: action => host.apply(action, agentAssignee(caller.id)) }) }
   } catch (e) {
     return { ok: false, message: e instanceof Error ? e.message : String(e) }
   }
 }
 
-function handle(msg: RpcMessage, host: McpHost): unknown | null {
+// Whether the caller's level allows this tool with these args. Args have no confirm key here.
+function mayCall(caller: Caller, tool: Tool, args: Record<string, unknown>, data: AppData): boolean {
+  if (caller.level === 'write' || tool.kind === 'read') return true
+  if (caller.level === 'read') return false
+  if (tool.kind === 'comment') return true
+  // comment level: update_issue only on the caller's own issues, and only to change status.
+  return (
+    tool.name === 'update_issue' &&
+    typeof args.status === 'string' &&
+    Object.keys(args).every(k => k === 'status' || k === 'id' || k === 'key') &&
+    findIssue(data, args).assignee === agentAssignee(caller.id)
+  )
+}
+
+function handle(msg: RpcMessage, host: McpHost, caller: Caller, limiter: WriteLimiter): unknown | null {
   if (!isMessage(msg)) return fail(null, -32600, 'Invalid Request')
   // Notifications carry no id and get no response.
   if (msg.id === undefined || msg.method === undefined) return null
@@ -599,10 +685,31 @@ function handle(msg: RpcMessage, host: McpHost): unknown | null {
       return ok(id, { tools: TOOLS.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })) })
     case 'tools/call': {
       const name = String(msg.params?.name ?? '')
-      if (!TOOLS.some(t => t.name === name)) return fail(id, -32602, `Unknown tool: ${name}`)
-      const out = callTool(name, (msg.params?.arguments ?? {}) as Record<string, unknown>, host)
-      if (!out.ok) return ok(id, { content: [{ type: 'text', text: out.message }], isError: true })
-      return ok(id, { content: [{ type: 'text', text: JSON.stringify(out.value, null, 2) }] })
+      const tool = TOOLS.find(t => t.name === name)
+      if (!tool) return fail(id, -32602, `Unknown tool: ${name}`)
+      const data = host.read()
+      if (!data) return ok(id, { content: [{ type: 'text', text: 'Prometheus has not loaded its data yet. Open the app first.' }], isError: true })
+      const refused = (text: string) => ok(id, { content: [{ type: 'text', text }], isError: true })
+      // confirm only means something to delete tools, so it is dropped everywhere else.
+      const { confirm, ...args } = (msg.params?.arguments ?? {}) as Record<string, unknown>
+      try {
+        if (!mayCall(caller, tool, args, data)) return refused(`Agent ${caller.name} (level ${caller.level}) may not call ${tool.name}`)
+        if (tool.name.startsWith('delete_') && confirm !== true) return refused(`${tool.name} deletes data. Pass confirm: true to run it.`)
+        if (tool.kind !== 'read') {
+          const hit = limiter.hit(caller.id)
+          if (!hit.ok) {
+            if (hit.firstTrip) {
+              const notification: Notification = { id: randomUUID(), at: new Date().toISOString(), text: `${caller.name} hit the write rate limit`, read: false }
+              host.apply({ type: 'notify', notification })
+            }
+            return refused('Rate limit: 60 writes a minute')
+          }
+        }
+        const out = tool.run(args, { data, agent: caller, apply: action => host.apply(action, agentAssignee(caller.id)) })
+        return ok(id, { content: [{ type: 'text', text: JSON.stringify(out, null, 2) }] })
+      } catch (e) {
+        return ok(id, { content: [{ type: 'text', text: e instanceof Error ? e.message : String(e) }], isError: true })
+      }
     }
     default:
       return fail(id, -32601, `Method not found: ${msg.method}`)
@@ -621,11 +728,30 @@ const isLocalOrigin = (origin: string) => {
   }
 }
 
+const sameBytes = (a: string, b: string) => {
+  const x = Buffer.from(a)
+  const y = Buffer.from(b)
+  return x.length === y.length && timingSafeEqual(x, y)
+}
+
+// The shared token only. Used by the REST API.
 export function tokenMatches(header: string | undefined, token: string) {
-  if (!header?.startsWith('Bearer ')) return false
-  const given = Buffer.from(header.slice(7))
-  const want = Buffer.from(token)
-  return given.length === want.length && timingSafeEqual(given, want)
+  return !!header?.startsWith('Bearer ') && sameBytes(header.slice(7), token)
+}
+
+export const hashToken = (token: string) => createHash('sha256').update(token).digest('hex')
+
+// Agent tokens carry a prefix so they are easy to spot in an MCP config.
+export const newAgentToken = () => `prm_${randomBytes(32).toString('base64url')}`
+
+// The shared token maps to the legacy agent. Any other token must match a live agent's hash.
+function resolveCaller(header: string | undefined, sharedToken: string, data: AppData | null): Caller | null {
+  if (!header?.startsWith('Bearer ')) return null
+  const given = header.slice(7)
+  if (sameBytes(given, sharedToken)) return LEGACY_AGENT
+  const hash = hashToken(given)
+  const agent = (data?.agents ?? []).find(a => !a.revokedAt && sameBytes(a.tokenHash, hash))
+  return agent ?? null
 }
 
 export function readBody(req: http.IncomingMessage): Promise<string> {
@@ -654,17 +780,17 @@ export function send(res: http.ServerResponse, status: number, body?: unknown) {
   res.writeHead(status, { 'Content-Type': 'application/json' }).end(JSON.stringify(body))
 }
 
-function createServer(token: string, host: McpHost) {
+function createServer(token: string, host: McpHost, limiter: WriteLimiter) {
   return http.createServer((req, res) => {
     // Never let a request reject unhandled in the main process.
-    route(req, res, token, host).catch(() => {
+    route(req, res, token, host, limiter).catch(() => {
       if (!res.headersSent) send(res, 500, fail(null, -32603, 'Internal error'))
       else res.end()
     })
   })
 }
 
-async function route(req: http.IncomingMessage, res: http.ServerResponse, token: string, host: McpHost) {
+async function route(req: http.IncomingMessage, res: http.ServerResponse, token: string, host: McpHost, limiter: WriteLimiter) {
   // Reject DNS-rebinding and cross-site requests before anything else.
   if (!isLocalHost(req.headers.host)) return send(res, 403, fail(null, -32000, 'Forbidden host'))
   if (req.headers.origin && !isLocalOrigin(req.headers.origin)) {
@@ -672,9 +798,8 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse, token:
   }
   if (req.url?.startsWith('/api/v1/')) return restRoute(req, res, token, host)
   if (req.url !== '/mcp') return send(res, 404)
-  if (!tokenMatches(req.headers.authorization, token)) {
-    return send(res, 401, fail(null, -32001, 'Missing or invalid bearer token'))
-  }
+  const caller = resolveCaller(req.headers.authorization, token, host.read())
+  if (!caller) return send(res, 401, fail(null, -32001, 'Missing or invalid bearer token'))
   if (req.method !== 'POST') return send(res, 405)
 
   let parsed: RpcMessage | RpcMessage[]
@@ -689,7 +814,7 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse, token:
   if (!Array.isArray(parsed) && !isMessage(parsed)) return send(res, 400, fail(null, -32600, 'Invalid Request'))
 
   const batch = Array.isArray(parsed) ? parsed : [parsed]
-  const replies = batch.map(m => handle(m, host)).filter(r => r !== null)
+  const replies = batch.map(m => handle(m, host, caller, limiter)).filter(r => r !== null)
   if (replies.length === 0) return send(res, 202)
   return send(res, 200, Array.isArray(parsed) ? replies : replies[0])
 }
@@ -700,9 +825,12 @@ export class McpController {
   private server: http.Server | null = null
   private port = 0
 
+  private limiter = new WriteLimiter()
+
   constructor(
     private dir: string,
-    private host: McpHost
+    private host: McpHost,
+    private keys?: McpKeys
   ) {}
 
   private get file() {
@@ -710,17 +838,36 @@ export class McpController {
   }
 
   private async config(): Promise<McpConfig> {
+    let raw: McpFile | null = null
     try {
-      return JSON.parse(await fs.readFile(this.file, 'utf8')) as McpConfig
+      raw = JSON.parse(await fs.readFile(this.file, 'utf8')) as McpFile
     } catch {
-      const fresh = { enabled: true, token: randomBytes(24).toString('hex'), port: DEFAULT_PORT }
-      await this.save(fresh)
-      return fresh
+      raw = null
     }
+    const sealed = raw?.sealedToken !== undefined && this.keys ? await this.keys.open(raw.sealedToken) : null
+    const cfg = {
+      enabled: raw?.enabled ?? true,
+      port: raw?.port ?? DEFAULT_PORT,
+      token: sealed ?? raw?.token ?? randomBytes(24).toString('hex')
+    }
+    // Saves a new file, a new token, or a plaintext token that can now be sealed.
+    if (!raw || (sealed === null && !raw.token) || (raw.token !== undefined && this.keys)) await this.save(cfg)
+    return cfg
   }
 
   private async save(cfg: McpConfig) {
-    await fs.writeFile(this.file, JSON.stringify(cfg, null, 2), { mode: 0o600 })
+    const sealedToken = await this.keys?.seal(cfg.token).catch(() => undefined)
+    const body: McpFile = sealedToken
+      ? { enabled: cfg.enabled, port: cfg.port, sealedToken }
+      : { enabled: cfg.enabled, port: cfg.port, token: cfg.token }
+    await fs.writeFile(this.file, JSON.stringify(body, null, 2), { mode: 0o600 })
+  }
+
+  // The agent row goes into data via the addAgent action, applied by the caller.
+  createAgent(name: string, color: string, level: Agent['level']): { agent: Agent; token: string } {
+    const token = newAgentToken()
+    const agent: Agent = { id: randomUUID(), name, color, level, tokenHash: hashToken(token), createdAt: new Date().toISOString() }
+    return { agent, token }
   }
 
   async status(): Promise<McpStatus> {
@@ -741,7 +888,7 @@ export class McpController {
     const token = cfg.token
     for (let n = 0; n < PORT_TRIES; n++) {
       const port = cfg.port + n
-      const server = createServer(token, this.host)
+      const server = createServer(token, this.host, this.limiter)
       try {
         await new Promise<void>((resolve, reject) => {
           server.once('error', reject)

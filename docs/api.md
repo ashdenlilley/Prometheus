@@ -4,7 +4,7 @@ Prometheus runs a local server on `127.0.0.1` while the app is open. The same po
 
 ```
 Base URL: http://127.0.0.1:7878/api/v1
-Token:    the MCP token from Settings (regenerating it stops the old one)
+Token:    the shared MCP token from Settings (regenerating it stops the old one). Per-agent tokens from Settings > Agents work on `/mcp` only.
 ```
 
 ## Authentication and headers

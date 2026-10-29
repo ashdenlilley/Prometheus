@@ -3,6 +3,7 @@ import { applyFilter } from './filter'
 import { nextOccurrence, recurrenceCopyId } from './recurrence'
 import type {
   ActivityEntry,
+  Agent,
   AppData,
   Automation,
   AutomationAction,
@@ -11,6 +12,7 @@ import type {
   Comment,
   Cycle,
   Dashboard,
+  Doc,
   Folder,
   Initiative,
   Issue,
@@ -85,8 +87,16 @@ export type Action =
   | { type: 'addDashboard'; dashboard: Dashboard }
   | { type: 'patchDashboard'; id: string; patch: Partial<Dashboard> }
   | { type: 'deleteDashboard'; id: string }
+  | { type: 'addDoc'; doc: Doc }
+  | { type: 'patchDoc'; id: string; patch: Partial<Doc> }
+  | { type: 'deleteDoc'; id: string }
+  | { type: 'duplicateDoc'; id: string; newId: string }
+  | { type: 'saveDocAsTemplate'; id: string; newId: string }
   | { type: 'notify'; notification: Notification }
   | { type: 'markNotifications'; read: boolean }
+  | { type: 'addAgent'; agent: Agent }
+  | { type: 'patchAgent'; id: string; patch: Partial<Pick<Agent, 'name' | 'color' | 'level'>> }
+  | { type: 'revokeAgent'; id: string; at: string }
   | { type: 'tick'; today: string }
 
 const mapProject = (s: AppData, id: string, fn: (p: Project) => Project): AppData => ({
@@ -158,7 +168,8 @@ export function reducer(s: AppData, a: Action): AppData {
         cycles: s.cycles.filter(c => !projectIds.includes(c.projectId)),
         automations: s.automations.filter(x => !projectIds.includes(x.projectId)),
         triageRules: s.triageRules.filter(r => !projectIds.includes(r.projectId)),
-        templates: s.templates.filter(t => !projectIds.includes(t.projectId))
+        templates: s.templates.filter(t => !projectIds.includes(t.projectId)),
+        docs: (s.docs ?? []).filter(d => d.spaceId !== a.id)
       }
     }
     case 'addFolder':
@@ -218,8 +229,26 @@ export function reducer(s: AppData, a: Action): AppData {
           .filter(x => x.projectId !== a.id)
           .map(x => (x.action.type === 'create_issue' && x.action.projectId === a.id ? { ...x, enabled: false } : x)),
         triageRules: s.triageRules.filter(r => r.projectId !== a.id),
-        templates: s.templates.filter(t => t.projectId !== a.id)
+        templates: s.templates.filter(t => t.projectId !== a.id),
+        docs: (s.docs ?? []).filter(d => d.projectId !== a.id)
       }
+    case 'addDoc':
+      return { ...s, docs: [...(s.docs ?? []), a.doc] }
+    case 'patchDoc':
+      return { ...s, docs: (s.docs ?? []).map(d => (d.id === a.id ? { ...d, ...a.patch, updatedAt: Date.now() } : d)) }
+    case 'deleteDoc':
+      return { ...s, docs: (s.docs ?? []).filter(d => d.id !== a.id) }
+    case 'duplicateDoc':
+    case 'saveDocAsTemplate': {
+      const src = (s.docs ?? []).find(d => d.id === a.id)
+      if (!src) return s
+      const now = Date.now()
+      const copy: Doc =
+        a.type === 'duplicateDoc'
+          ? { ...src, id: a.newId, title: `${src.title} (copy)`, createdAt: now, updatedAt: now }
+          : { ...src, id: a.newId, template: true, createdAt: now, updatedAt: now }
+      return { ...s, docs: [...(s.docs ?? []), copy] }
+    }
     case 'addColumn':
       return mapProject(s, a.projectId, p => ({ ...p, columns: [...p.columns, a.column] }))
     case 'patchColumn':
@@ -360,6 +389,15 @@ export function reducer(s: AppData, a: Action): AppData {
       return { ...s, dashboards: s.dashboards.filter(d => d.id !== a.id) }
     case 'notify':
       return { ...s, notifications: [a.notification, ...s.notifications].slice(0, 200) }
+    case 'addAgent':
+      return { ...s, agents: [...(s.agents ?? []), a.agent] }
+    case 'patchAgent':
+      return {
+        ...s,
+        agents: (s.agents ?? []).map(g => (g.id === a.id ? { ...g, name: a.patch.name ?? g.name, color: a.patch.color ?? g.color, level: a.patch.level ?? g.level } : g))
+      }
+    case 'revokeAgent':
+      return { ...s, agents: (s.agents ?? []).map(g => (g.id === a.id ? { ...g, revokedAt: a.at } : g)) }
     case 'markNotifications':
       return { ...s, notifications: s.notifications.map(n => ({ ...n, read: a.read })) }
   }

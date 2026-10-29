@@ -2,6 +2,7 @@ import type { AppData, Column, ColumnType, Issue, Project } from '@shared/types'
 import { FIXED_FIELDS, fieldValue, customValue, type FixedField } from '@shared/query'
 import { categoryOf } from '@shared/model'
 import { dateValueMs } from '@shared/datetime'
+import { isAgentAssignee } from '@shared/agents'
 import { subtaskSummary } from '@shared/subtasks'
 import { voteCount } from '@shared/votes'
 
@@ -32,6 +33,7 @@ export const COLUMN_TYPE_INFO: { type: ColumnType; label: string; glyph: string;
   { type: 'location', label: 'Location', glyph: '⌖', group: 'Contact' },
   { type: 'formula', label: 'Formula', glyph: 'ƒ', group: 'Advanced' },
   { type: 'mirror', label: 'Mirror', glyph: '⧉', group: 'Advanced' },
+  { type: 'doc', label: 'Doc', glyph: '📄', group: 'Advanced' },
   { type: 'board_relation', label: 'Connect projects', glyph: '⇄', group: 'Advanced' },
   { type: 'dependency', label: 'Dependency', glyph: '⛓', group: 'Advanced' },
   { type: 'files', label: 'Files', glyph: '📎', group: 'Advanced' },
@@ -100,6 +102,8 @@ export function fixedSortValue(key: FixedKey, i: Issue, project: Project): strin
       return i.milestoneId ?? ''
     case 'favourite':
       return i.favourite ? 0 : 1
+    case 'assigneeType':
+      return i.assignee ? (isAgentAssignee(i.assignee) ? 'agent' : 'person') : ''
   }
 }
 

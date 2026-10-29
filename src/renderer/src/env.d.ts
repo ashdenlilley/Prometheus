@@ -1,5 +1,5 @@
 /// <reference types="vite/client" />
-import type { AppData, Webhook, WebhookEvent } from '@shared/types'
+import type { Agent, AppData, Webhook, WebhookEvent } from '@shared/types'
 import type { AuditFilter, AuditRow } from '@shared/audit'
 import type { WebhookDelivery } from '@shared/webhooks'
 
@@ -49,6 +49,7 @@ declare global {
         disable: () => Promise<void>
         now: () => Promise<void>
       }
+      createAgent: (name: string, color: string, level: Agent['level']) => Promise<{ agent: Agent; token: string }>
       mcp: {
         status: () => Promise<McpStatus>
         setEnabled: (enabled: boolean) => Promise<McpStatus>

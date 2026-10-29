@@ -9,6 +9,7 @@ const { Store } = require('./main/db.js')
 const { SyncEngine } = require('./main/sync.js')
 const { diffOps, applyOps } = require('./shared/sync.js')
 const { seed, emptyData } = require('./shared/seed.js')
+const { newDoc, editBody } = require('./shared/docs.js')
 
 const PASS = 'correct horse battery'
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'prom-sync-'))
@@ -167,6 +168,35 @@ const titles = d => d.state.issues.map(i => i.title).join('|')
   await pull(B)
   assert.equal(titles(B), titles(A), 'B matches A after compaction')
   console.log(`ok: compaction (${own.length} segments left), B converges`)
+
+  // Docs: both devices edit one doc body offline. After sync both keep one winner and the same conflicted copy.
+  const docId = 'doc-1'
+  edit(A, s => {
+    s.docs = [newDoc({ id: docId, spaceId: s.spaces[0].id, title: 'Spec', body: 'base' })]
+    return s
+  })
+  await flush(A)
+  await pull(B)
+  edit(A, s => {
+    s.docs[0] = editBody(s.docs[0], 'body from A', 'A')
+    return s
+  })
+  edit(B, s => {
+    s.docs[0] = editBody(s.docs[0], 'body from B', 'B')
+    return s
+  })
+  await flush(A)
+  await flush(B)
+  await pull(A)
+  await pull(B)
+  const winner = d => d.state.docs.find(x => x.id === docId).body
+  const copies = d => d.state.docs.filter(x => x.conflictOf === docId)
+  assert.equal(winner(A), winner(B), 'one winner body')
+  assert.equal(copies(A).length, 1, 'A has one conflicted copy')
+  assert.equal(copies(B).length, 1, 'B has one conflicted copy')
+  assert.equal(copies(A)[0].id, copies(B)[0].id, 'same copy id')
+  assert.deepEqual([winner(A), copies(A)[0].body].sort(), ['body from A', 'body from B'])
+  console.log('ok: concurrent doc body edits -> one winner plus the same conflicted copy')
 
   // Restart: A reopens and keeps clock order.
   const store2 = new Store(path.join(root, 'A', 'prometheus.db'))

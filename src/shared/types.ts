@@ -38,6 +38,7 @@ export type ColumnType =
   | 'rating'
   | 'progress'
   | 'created'
+  | 'doc'
   | 'updated'
   | 'auto_number'
   | 'item_id'
@@ -318,6 +319,8 @@ export interface ActivityEntry {
   id: string
   at: string
   text: string
+  // "me", "agent:<id>", "agent:legacy" (shared MCP token) or "sync:<device>". Absent on older entries.
+  actor?: string
 }
 
 export interface Issue {
@@ -447,6 +450,35 @@ export interface Webhook {
   disabledReason?: string
 }
 
+// A Markdown document under a space or project. rev/baseRev/revBy drive conflict detection on sync.
+export interface Doc {
+  id: string
+  spaceId: string
+  projectId?: string
+  teamId?: string
+  title: string
+  body: string
+  createdAt: number
+  updatedAt: number
+  archivedAt?: number
+  template?: boolean
+  rev?: string
+  baseRev?: string
+  revBy?: string
+  conflictOf?: string
+}
+
+// An MCP client that acts on issues. Its token is shown once; only the SHA-256 hash is stored.
+export interface Agent {
+  id: string
+  name: string
+  color: string
+  level: 'read' | 'comment' | 'write'
+  tokenHash: string
+  createdAt: string
+  revokedAt?: string
+}
+
 export interface AppData {
   version: 5
   spaces: Space[]
@@ -460,6 +492,9 @@ export interface AppData {
   templates: Template[]
   dashboards: Dashboard[]
   notifications: Notification[]
+  // Optional so files saved before docs existed still load. Read as `?? []`.
+  docs?: Doc[]
+  agents?: Agent[]
   // Optional so data saved before webhooks existed still loads. Readers use `?? []`.
   webhooks?: Webhook[]
   // Display name for the local user. Used for comment authors and notifications.

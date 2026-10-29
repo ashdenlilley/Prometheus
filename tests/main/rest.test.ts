@@ -26,11 +26,13 @@ function fakeHost() {
   const state = { data: fixture() as AppData | null }
   const host: McpHost = {
     read: () => state.data,
-    apply: a => {
+    apply: (a, actor) => {
+      actors.push(actor)
       if (state.data) state.data = reducer(state.data, a)
     }
   }
-  return { host, state }
+  const actors: (string | undefined)[] = []
+  return { host, state, actors }
 }
 
 interface Reply {
@@ -226,5 +228,18 @@ describe('REST API /api/v1', () => {
     const res = await api(port, 'POST', '/mcp', { jsonrpc: '2.0', id: 1, method: 'ping' })
     assert.equal(res.status, 200)
     assert.deepEqual(res.json, { jsonrpc: '2.0', id: 1, result: {} })
+  })
+  test('REST takes only the shared token: agent tokens are refused, writes are attributed to the legacy agent', async () => {
+    const created = ctrl.createAgent('Bot', '#111111', 'write')
+    fake.state.data = { ...fixture(), agents: [created.agent] }
+    const refused = await api(port, 'GET', '/api/v1/projects', undefined, `Bearer ${created.token}`)
+    assert.equal(refused.status, 401)
+    // The same agent token still works on /mcp.
+    const mcp = await api(port, 'POST', '/mcp', { jsonrpc: '2.0', id: 1, method: 'ping' }, `Bearer ${created.token}`)
+    assert.equal(mcp.status, 200)
+    fake.actors.length = 0
+    const res = await api(port, 'POST', '/api/v1/issues', { projectId: 'proj-1', title: 'From REST' })
+    assert.equal(res.status, 201)
+    assert.deepEqual(fake.actors, ['agent:legacy'])
   })
 })
