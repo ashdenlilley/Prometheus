@@ -27,6 +27,17 @@ export interface McpStatus {
   port: number
 }
 
+export interface GitStatus {
+  hasToken: boolean
+  login: string | null
+  tokenHint: string | null
+  pollMinutes: number
+  branchPrefix: string
+  lastPoll: number | null
+  error: string | null
+  backoffUntil: number | null
+}
+
 declare global {
   interface Window {
     api: {
@@ -52,6 +63,14 @@ declare global {
         status: () => Promise<McpStatus>
         setEnabled: (enabled: boolean) => Promise<McpStatus>
         regenerate: () => Promise<McpStatus>
+      }
+      git: {
+        status: () => Promise<GitStatus>
+        setToken: (token: string) => Promise<GitStatus | { ok: false; error: string }>
+        clearToken: () => Promise<GitStatus>
+        test: () => Promise<{ ok: boolean; login?: string; error?: string }>
+        refresh: () => Promise<GitStatus>
+        setSettings: (settings: { pollMinutes?: number; branchPrefix?: string }) => Promise<GitStatus>
       }
     }
   }

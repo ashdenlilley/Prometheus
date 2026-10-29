@@ -3567,3 +3567,36 @@ select.field-input:focus {
   border: 1px solid var(--line);
   border-radius: 3px;
 }
+
+/* GitHub: PR state pills, linked PR rows and the Git settings */
+.pr-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.pr-pill.open { background: #00c875; }
+.pr-pill.draft { background: #8a8f98; }
+.pr-pill.merged { background: #a25ddc; }
+.pr-pill.closed { background: #e2445c; }
+.pr-link-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.pr-link-row .link-row {
+  flex: 1;
+  min-width: 0;
+}
+.git-error {
+  color: #e5484d;
+  margin: 8px 0 0;
+}
+.git-help code {
+  font-size: 11px;
+}

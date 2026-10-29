@@ -8,9 +8,9 @@ import { AUDIT_LIMIT, type AuditEntry, type AuditFilter, type AuditRow } from '.
 // the entity as JSON with its parent id indexed. Saves diff against the last write, so only
 // changed rows are rewritten.
 
-type Table = 'spaces' | 'initiatives' | 'teams' | 'projects' | 'issues' | 'cycles' | 'automations' | 'triage_rules' | 'templates' | 'dashboards' | 'notifications'
+type Table = 'spaces' | 'initiatives' | 'teams' | 'projects' | 'issues' | 'cycles' | 'automations' | 'triage_rules' | 'templates' | 'dashboards' | 'notifications' | 'git_links'
 
-const TABLES: Table[] = ['spaces', 'initiatives', 'teams', 'projects', 'issues', 'cycles', 'automations', 'triage_rules', 'templates', 'dashboards', 'notifications']
+const TABLES: Table[] = ['spaces', 'initiatives', 'teams', 'projects', 'issues', 'cycles', 'automations', 'triage_rules', 'templates', 'dashboards', 'notifications', 'git_links']
 
 // AppData key for each table.
 const KEY: Record<Table, keyof AppData> = {
@@ -24,11 +24,13 @@ const KEY: Record<Table, keyof AppData> = {
   triage_rules: 'triageRules',
   templates: 'templates',
   dashboards: 'dashboards',
-  notifications: 'notifications'
+  notifications: 'notifications',
+  git_links: 'gitLinks'
 }
 
 // Parent column per table, used to index child lookups.
 const PARENT: Partial<Record<Table, string>> = {
+  git_links: 'issue_id',
   initiatives: 'space_id',
   teams: 'space_id',
   projects: 'space_id',
@@ -221,6 +223,7 @@ export class Store {
       templates: all('templates') as AppData['templates'],
       dashboards: all('dashboards') as AppData['dashboards'],
       notifications: all('notifications') as AppData['notifications'],
+      gitLinks: all('git_links') as AppData['gitLinks'],
       me
     }
     this.primeCache(data)
@@ -236,7 +239,7 @@ export class Store {
   private primeCache(data: AppData) {
     for (const t of TABLES) {
       const rows = new Map<string, string>()
-      for (const row of data[KEY[t]] as { id: string }[]) rows.set(row.id, JSON.stringify(row))
+      for (const row of (data[KEY[t]] ?? []) as { id: string }[]) rows.set(row.id, JSON.stringify(row))
       this.cache.set(t, rows)
     }
   }
@@ -255,7 +258,8 @@ export class Store {
       triage_rules: data.triageRules.map(r => ({ id: r.id, parent: r.projectId, json: JSON.stringify(r) })),
       templates: data.templates.map(r => ({ id: r.id, parent: r.projectId, json: JSON.stringify(r) })),
       dashboards: data.dashboards.map(r => ({ id: r.id, parent: r.spaceId, json: JSON.stringify(r) })),
-      notifications: data.notifications.map(r => ({ id: r.id, json: JSON.stringify(r) }))
+      notifications: data.notifications.map(r => ({ id: r.id, json: JSON.stringify(r) })),
+      git_links: (data.gitLinks ?? []).map(r => ({ id: r.id, parent: r.issueId, json: JSON.stringify(r) }))
     }
 
     db.run('BEGIN')

@@ -34,6 +34,7 @@ Local-first project management for a single user, on macOS and Windows. Linear-s
 - Saved views with AND/OR filters.
 - Issue templates.
 - Automations triggered by status, priority, assignee or due-date.
+- GitHub pull requests: linked by issue key in the branch, title or body, with their state; copy a branch name per issue. See [docs/github.md](docs/github.md).
 - Command palette (Cmd/Ctrl+K).
 - Local MCP server for coding agents such as Claude Code and Codex (streamable HTTP on 127.0.0.1, default port 7878, bearer token).
 

@@ -1,6 +1,21 @@
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
-import { drawerShortcut } from '../../src/shared/shortcuts'
+import { drawerShortcut, isCopyBranchShortcut } from '../../src/shared/shortcuts'
+
+describe('isCopyBranchShortcut', () => {
+  test('Mod+Shift+. copies the branch name', () => {
+    assert.equal(isCopyBranchShortcut({ code: 'Period', metaKey: true, shiftKey: true, typing: false }), true)
+    assert.equal(isCopyBranchShortcut({ code: 'Period', ctrlKey: true, shiftKey: true, typing: false }), true)
+  })
+
+  test('needs Shift, Mod, and not typing or Alt', () => {
+    assert.equal(isCopyBranchShortcut({ code: 'Period', metaKey: true, typing: false }), false)
+    assert.equal(isCopyBranchShortcut({ code: 'Period', shiftKey: true, typing: false }), false)
+    assert.equal(isCopyBranchShortcut({ code: 'Period', metaKey: true, shiftKey: true, typing: true }), false)
+    assert.equal(isCopyBranchShortcut({ code: 'Period', metaKey: true, shiftKey: true, altKey: true, typing: false }), false)
+    assert.equal(isCopyBranchShortcut({ code: 'Comma', metaKey: true, shiftKey: true, typing: false }), false)
+  })
+})
 
 describe('drawerShortcut', () => {
   test('returns each listed key when not typing', () => {

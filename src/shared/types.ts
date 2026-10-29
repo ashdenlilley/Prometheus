@@ -238,6 +238,40 @@ export interface Team {
   archivedAt?: string
 }
 
+// Git: a PR's state as shown in Prometheus. Open beats draft beats merged beats closed when summarised.
+export type PrState = 'open' | 'draft' | 'merged' | 'closed'
+
+export interface RepoRef {
+  provider: 'github'
+  owner: string
+  name: string
+}
+
+// A pull request linked to an issue. Synced like other rows; the token never is.
+export interface GitLink {
+  id: string
+  issueId: string
+  provider: 'github'
+  repo: string // owner/name
+  number: number
+  title: string
+  url: string
+  state: PrState
+  branch: string
+  updatedAt: string
+}
+
+// One pull request as the poller reports it.
+export interface GitPull {
+  number: number
+  title: string
+  body: string | null
+  url: string
+  state: PrState
+  branch: string
+  updatedAt: string
+}
+
 export interface Project {
   id: string
   spaceId: string
@@ -278,6 +312,9 @@ export interface Project {
   updates: ProjectUpdate[]
   views: SavedView[]
   forms?: IntakeForm[]
+  repos?: RepoRef[]
+  // Status ids to move an issue to when its PR opens (not draft) or merges. Unset = off.
+  gitAutomation?: { onOpen?: string; onMerge?: string }
 }
 
 // One field of a local intake form. key: 'title' | 'description' | 'priority' | 'labels' | 'dueDate' | column id
@@ -353,6 +390,7 @@ export interface Issue {
   updatedAt: string
   completedAt?: string
   archivedAt?: string // set by auto-archive; hidden from views until unarchived
+  prState?: PrState // summary of the linked PRs, see summaryState
 }
 
 // Copies the issue on a schedule. `next` is the YYYY-MM-DD of the next copy.
@@ -446,6 +484,7 @@ export interface AppData {
   templates: Template[]
   dashboards: Dashboard[]
   notifications: Notification[]
+  gitLinks?: GitLink[]
   // Display name for the local user. Used for comment authors and notifications.
   me: string
 }

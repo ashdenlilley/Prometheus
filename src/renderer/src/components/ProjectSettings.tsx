@@ -3,6 +3,7 @@ import { triggerDefault } from '@shared/live'
 import type { Automation, AutomationAction, AutomationTrigger, Project, ProjectStatus, StatusCategory, StatusDef } from '@shared/types'
 import { issueKey, useStore } from '../store'
 import { fieldOptions } from './FilterBar'
+import { GitSection } from './GitSection'
 import type { Initiative, Operator, TriageRule } from '@shared/types'
 import { RECIPES, recipeAutomation, type Blank, type Recipe } from '@shared/recipes'
 import { ICONS } from './icons'
@@ -13,7 +14,7 @@ import { LABEL_COLORS } from '../columns'
 import { uid, clsx, todayISO, fmtDate } from '../util'
 import { FORM_FIXED_KEYS, fieldName, validateForm } from '@shared/forms'
 
-type Tab = 'general' | 'statuses' | 'milestones' | 'updates' | 'automations' | 'triage' | 'forms' | 'templates' | 'archive'
+type Tab = 'general' | 'statuses' | 'milestones' | 'updates' | 'automations' | 'git' | 'triage' | 'forms' | 'templates' | 'archive'
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'general', label: 'General' },
@@ -21,6 +22,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'milestones', label: 'Milestones' },
   { id: 'updates', label: 'Updates' },
   { id: 'automations', label: 'Automations' },
+  { id: 'git', label: 'Git' },
   { id: 'triage', label: 'Triage rules' },
   { id: 'forms', label: 'Forms' },
   { id: 'templates', label: 'Templates' },
@@ -54,6 +56,7 @@ export function ProjectSettings({ project, onClose }: { project: Project; onClos
       {tab === 'milestones' && <Milestones project={project} />}
       {tab === 'updates' && <Updates project={project} />}
       {tab === 'automations' && <Automations project={project} />}
+      {tab === 'git' && <GitSection project={project} />}
       {tab === 'triage' && <TriageRules project={project} />}
       {tab === 'forms' && <Forms project={project} />}
       {tab === 'templates' && <Templates project={project} />}

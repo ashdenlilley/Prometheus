@@ -23,6 +23,7 @@ export type Table =
   | 'templates'
   | 'dashboards'
   | 'notifications'
+  | 'git_links'
 
 export const TABLE_KEYS: [Table, keyof AppData][] = [
   ['spaces', 'spaces'],
@@ -35,7 +36,8 @@ export const TABLE_KEYS: [Table, keyof AppData][] = [
   ['triage_rules', 'triageRules'],
   ['templates', 'templates'],
   ['dashboards', 'dashboards'],
-  ['notifications', 'notifications']
+  ['notifications', 'notifications'],
+  ['git_links', 'gitLinks']
 ]
 
 export interface Op {
@@ -152,8 +154,8 @@ const outgoing = (table: Table, r: { id: string }) =>
 export function diffOps(prev: AppData, next: AppData, clock: Clock): Op[] {
   const ops: Op[] = []
   for (const [table, key] of TABLE_KEYS) {
-    const before = new Map((prev[key] as { id: string }[]).map(r => [r.id, outgoing(table, r)]))
-    const after = new Map((next[key] as { id: string }[]).map(r => [r.id, outgoing(table, r)]))
+    const before = new Map(((prev[key] ?? []) as { id: string }[]).map(r => [r.id, outgoing(table, r)]))
+    const after = new Map(((next[key] ?? []) as { id: string }[]).map(r => [r.id, outgoing(table, r)]))
     for (const [id, row] of after) {
       const old = before.get(id)
       if (!old) {
@@ -187,7 +189,7 @@ export function applyOps(data: AppData, ops: Op[], clocks?: Map<string, string>)
   for (const [table, key] of TABLE_KEYS) {
     const mine = ops.filter(o => o.table === table)
     if (mine.length === 0) continue
-    const rows: Rows = new Map((data[key] as { id: string }[]).map(r => [r.id, { ...(r as unknown as Record<string, unknown>) }]))
+    const rows: Rows = new Map(((data[key] ?? []) as { id: string }[]).map(r => [r.id, { ...(r as unknown as Record<string, unknown>) }]))
     const wins = (k: string, hlc: string) => {
       const cur = clocks?.get(k)
       return !clocks || cur === undefined || cur < hlc
@@ -244,7 +246,7 @@ export function snapshotOps(data: AppData, clocks: Map<string, string>, device: 
   const ops: Op[] = []
   const live = new Set<string>()
   for (const [table, key] of TABLE_KEYS) {
-    for (const r of data[key] as { id: string }[]) {
+    for (const r of (data[key] ?? []) as { id: string }[]) {
       const row = outgoing(table, r)
       live.add(rowKey(table, r.id, EXISTS))
       const existsHlc = clocks.get(rowKey(table, r.id, EXISTS)) ?? ZERO_HLC + device

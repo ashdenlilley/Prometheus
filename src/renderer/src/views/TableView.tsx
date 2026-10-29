@@ -8,6 +8,7 @@ import { EstimateSelect, PrioritySelect, StatusDot, StatusSelect } from '../comp
 import { exportXlsx, importXlsx } from '../xlsx'
 import { ICONS } from '../components/icons'
 import { ColumnModal } from '../components/ColumnModal'
+import { PrPill } from '../components/PrPill'
 import { FilterBar, useViewQuery } from '../components/FilterBar'
 import { BulkBar } from '../components/BulkBar'
 import { FavGutter } from '../components/FavGutter'
@@ -63,7 +64,8 @@ export function TableView({ project, onOpen }: { project: Project; onOpen: (id: 
   const layout = resolveColumnLayout(project, activeView)
 
   const baseCols: ColumnRef[] = [
-    ...FIXED_COLUMNS.map(f => ({
+    // The PR column only appears once the project links a repo or an issue has a PR.
+    ...FIXED_COLUMNS.filter(f => f.key !== 'pr' || (project.repos ?? []).length > 0 || data.issues.some(i => i.projectId === project.id && i.prState)).map(f => ({
       key: f.key,
       label: f.label,
       width: project.widths[f.key] ?? f.width,
@@ -222,6 +224,8 @@ export function TableView({ project, onOpen }: { project: Project; onOpen: (id: 
             ))}
           </select>
         )
+      case 'pr':
+        return i.prState ? <PrPill state={i.prState} /> : null
       default:
         return null
     }

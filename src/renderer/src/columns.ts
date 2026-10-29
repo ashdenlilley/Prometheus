@@ -4,6 +4,7 @@ import { categoryOf } from '@shared/model'
 import { dateValueMs } from '@shared/datetime'
 import { subtaskSummary } from '@shared/subtasks'
 import { voteCount } from '@shared/votes'
+import { PR_STATE_LABEL } from '@shared/git'
 
 export const COLUMN_TYPE_INFO: { type: ColumnType; label: string; glyph: string; group: string }[] = [
   { type: 'text', label: 'Text', glyph: 'Aa', group: 'Basic' },
@@ -98,6 +99,8 @@ export function fixedSortValue(key: FixedKey, i: Issue, project: Project): strin
       return i.cycleId ?? ''
     case 'milestone':
       return i.milestoneId ?? ''
+    case 'pr':
+      return Object.keys(PR_STATE_LABEL).indexOf(i.prState ?? '') + 1 || 9 // no PR sorts last
     case 'favourite':
       return i.favourite ? 0 : 1
   }

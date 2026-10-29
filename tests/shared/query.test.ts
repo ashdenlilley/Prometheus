@@ -178,25 +178,25 @@ describe('issuesToCSV and parseCSV', () => {
     const p = project([col('sprint', 'number', { name: 'Sprint' })])
     const items = [issue(1, { title: 'Hello', status: 'todo', priority: 1, labels: ['a', 'b'], values: { sprint: 3 } })]
     const lines = issuesToCSV(data(items), p, items).split('\n')
-    assert.equal(lines[0], 'Key,Title,Status,Priority,Assignee,Labels,Start,Due,Estimate,Cycle,Sprint')
-    assert.equal(lines[1], 'T-1,Hello,Todo,Urgent,,a; b,,,,,3')
+    assert.equal(lines[0], 'Key,Title,Status,Priority,Assignee,Labels,Start,Due,Estimate,Cycle,PR,Sprint')
+    assert.equal(lines[1], 'T-1,Hello,Todo,Urgent,,a; b,,,,,,3')
   })
 
   test('an issue with no values or cycle leaves those cells empty', () => {
     const p = project([col('sprint', 'number', { name: 'Sprint' })])
     const items = [issue(1, { priority: 0 })]
-    assert.equal(issuesToCSV(data(items), p, items).split('\n')[1], 'T-1,Issue 1,Backlog,No priority,,,,,,,')
+    assert.equal(issuesToCSV(data(items), p, items).split('\n')[1], 'T-1,Issue 1,Backlog,No priority,,,,,,,,')
   })
 
   test('cycle column shows the cycle name', () => {
     const p = project()
     const items = [issue(1, { cycleId: 'c1' })]
     const d = data(items, [{ id: 'c1', projectId: 'p1', name: 'Sprint 9', startDate: '2026-01-01', endDate: '2026-01-14' }])
-    assert.equal(issuesToCSV(d, p, items).split('\n')[1].split(',').at(-1), 'Sprint 9')
+    assert.equal(issuesToCSV(d, p, items).split('\n')[1].split(',')[9], 'Sprint 9')
   })
 
   test('no issues gives just the header line', () => {
-    assert.equal(issuesToCSV(data(), project(), []), 'Key,Title,Status,Priority,Assignee,Labels,Start,Due,Estimate,Cycle')
+    assert.equal(issuesToCSV(data(), project(), []), 'Key,Title,Status,Priority,Assignee,Labels,Start,Due,Estimate,Cycle,PR')
   })
 
   test('quotes fields containing commas, double quotes and newlines, doubling any quotes', () => {
@@ -246,8 +246,8 @@ describe('issuesToCSV and parseCSV', () => {
     const p = project([col('notes', 'text', { name: 'Notes' })])
     const items = [issue(1, { values: { notes: 'a, "q"' } })]
     const csv = issuesToCSV(data(items), p, items)
-    assert.equal(csv.split('\n')[1], 'T-1,Issue 1,Backlog,No priority,,,,,,,"a, ""q"""')
-    assert.equal(parseCSV(csv)[1][10], 'a, "q"')
+    assert.equal(csv.split('\n')[1], 'T-1,Issue 1,Backlog,No priority,,,,,,,,"a, ""q"""')
+    assert.equal(parseCSV(csv)[1][11], 'a, "q"')
   })
 
   test('round trip: custom values with commas and quotes re-import unchanged (OS-302)', () => {
@@ -257,9 +257,9 @@ describe('issuesToCSV and parseCSV', () => {
       issue(2, { values: { notes: '"', quote: '""', plain: ',' } })
     ]
     const rows = parseCSV(issuesToCSV(data(items), p, items))
-    assert.deepEqual(rows[0].slice(10), ['Notes', 'Quote', 'Plain'])
-    assert.deepEqual(rows[1].slice(10), ['x, y, z', 'she said "hi", then left', 'simple'])
-    assert.deepEqual(rows[2].slice(10), ['"', '""', ','])
+    assert.deepEqual(rows[0].slice(11), ['Notes', 'Quote', 'Plain'])
+    assert.deepEqual(rows[1].slice(11), ['x, y, z', 'she said "hi", then left', 'simple'])
+    assert.deepEqual(rows[2].slice(11), ['"', '""', ','])
   })
 
   test('BUG-check: a carriage return inside a title survives the round trip', () => {
