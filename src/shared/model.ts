@@ -1,5 +1,6 @@
 import { addDays } from './dates'
 import { applyFilter } from './filter'
+import { nextOccurrence } from './recurrence'
 import type {
   ActivityEntry,
   AppData,
@@ -219,7 +220,7 @@ export function reducer(s: AppData, a: Action): AppData {
     case 'deleteTriageRule':
       return { ...s, triageRules: s.triageRules.filter(r => r.id !== a.id) }
     case 'tick':
-      return runTimedRules(s, a.today)
+      return runRecurrences(runTimedRules(s, a.today), a.today)
     case 'addTemplate':
       return { ...s, templates: [...s.templates, a.template] }
     case 'deleteTemplate':
@@ -304,6 +305,30 @@ export function runTimedRules(s: AppData, today: string): AppData {
       if (issue.firedAutomations?.includes(key)) continue
       out = mapIssue(out, issue.id, i => ({ ...i, firedAutomations: [...(i.firedAutomations ?? []), key] }))
       out = applyAction(out, issue.id, rule.action, rule.name)
+    }
+  }
+  return out
+}
+
+// Recurring issues copy themselves once per due date. After a long gap only one copy is made, then the rule moves past today.
+export function runRecurrences(s: AppData, today: string): AppData {
+  let out = s
+  for (const src of s.issues) {
+    const r = src.recurrence
+    if (!r || r.next > today) continue
+    const now = new Date().toISOString()
+    const copy = createIssue(out, src.projectId, src.title, {
+      description: src.description,
+      labels: [...src.labels],
+      priority: src.priority,
+      assignee: src.assignee,
+      estimate: src.estimate,
+      dueDate: r.dueInDays === undefined ? undefined : addDays(today, r.dueInDays),
+      activity: [{ id: crypto.randomUUID(), at: now, text: `Created from ${issueKey(out, src)} (recurring)` }]
+    })
+    out = {
+      ...out,
+      issues: [...out.issues.map(i => (i.id === src.id ? { ...i, recurrence: { ...r, next: nextOccurrence(r, today) } } : i)), copy]
     }
   }
   return out
