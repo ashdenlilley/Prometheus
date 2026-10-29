@@ -53,6 +53,8 @@ export function migrate(raw: unknown): AppData {
 
   return {
     ...base,
+    ...legacy,
+    version: 4,
     spaces,
     projects,
     issues,
