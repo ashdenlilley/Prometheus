@@ -39,6 +39,7 @@ export type ColumnType =
   | 'rating'
   | 'progress'
   | 'created'
+  | 'doc'
   | 'updated'
   | 'auto_number'
   | 'item_id'
@@ -272,6 +273,40 @@ export interface Team {
   archivedAt?: string
 }
 
+// Git: a PR's state as shown in Prometheus. Open beats draft beats merged beats closed when summarised.
+export type PrState = 'open' | 'draft' | 'merged' | 'closed'
+
+export interface RepoRef {
+  provider: 'github'
+  owner: string
+  name: string
+}
+
+// A pull request linked to an issue. Synced like other rows; the token never is.
+export interface GitLink {
+  id: string
+  issueId: string
+  provider: 'github'
+  repo: string // owner/name
+  number: number
+  title: string
+  url: string
+  state: PrState
+  branch: string
+  updatedAt: string
+}
+
+// One pull request as the poller reports it.
+export interface GitPull {
+  number: number
+  title: string
+  body: string | null
+  url: string
+  state: PrState
+  branch: string
+  updatedAt: string
+}
+
 export interface Project {
   id: string
   spaceId: string
@@ -312,6 +347,9 @@ export interface Project {
   updates: ProjectUpdate[]
   views: SavedView[]
   forms?: IntakeForm[]
+  repos?: RepoRef[]
+  // Status ids to move an issue to when its PR opens (not draft) or merges. Unset = off.
+  gitAutomation?: { onOpen?: string; onMerge?: string }
 }
 
 // One field of a local intake form. key: 'title' | 'description' | 'priority' | 'labels' | 'dueDate' | column id
@@ -352,6 +390,8 @@ export interface ActivityEntry {
   id: string
   at: string
   text: string
+  // "me", "agent:<id>", "agent:legacy" (shared MCP token) or "sync:<device>". Absent on older entries.
+  actor?: string
 }
 
 export interface Issue {
@@ -387,6 +427,7 @@ export interface Issue {
   updatedAt: string
   completedAt?: string
   archivedAt?: string // set by auto-archive; hidden from views until unarchived
+  prState?: PrState // summary of the linked PRs, see summaryState
 }
 
 // Copies the issue on a schedule. `next` is the YYYY-MM-DD of the next copy.
@@ -467,6 +508,49 @@ export interface Notification {
   read: boolean
 }
 
+export type WebhookEvent = 'issue.created' | 'issue.updated' | 'issue.deleted' | 'issue.status_changed' | 'comment.created'
+
+// Config only: the signing secret is per device (see src/main/webhooks.ts) and never part of AppData.
+export interface Webhook {
+  id: string
+  projectId: string
+  url: string
+  events: WebhookEvent[]
+  enabled: boolean
+  allowLocal?: boolean
+  createdAt: string
+  disabledReason?: string
+}
+
+// A Markdown document under a space or project. rev/baseRev/revBy drive conflict detection on sync.
+export interface Doc {
+  id: string
+  spaceId: string
+  projectId?: string
+  teamId?: string
+  title: string
+  body: string
+  createdAt: number
+  updatedAt: number
+  archivedAt?: number
+  template?: boolean
+  rev?: string
+  baseRev?: string
+  revBy?: string
+  conflictOf?: string
+}
+
+// An MCP client that acts on issues. Its token is shown once; only the SHA-256 hash is stored.
+export interface Agent {
+  id: string
+  name: string
+  color: string
+  level: 'read' | 'comment' | 'write'
+  tokenHash: string
+  createdAt: string
+  revokedAt?: string
+}
+
 export interface AppData {
   version: 5
   spaces: Space[]
@@ -480,6 +564,12 @@ export interface AppData {
   templates: Template[]
   dashboards: Dashboard[]
   notifications: Notification[]
+  // Optional so files saved before docs existed still load. Read as `?? []`.
+  docs?: Doc[]
+  agents?: Agent[]
+  // Optional so data saved before webhooks existed still loads. Readers use `?? []`.
+  webhooks?: Webhook[]
+  gitLinks?: GitLink[]
   // Display name for the local user. Used for comment authors and notifications.
   me: string
   // Optional so older data loads unchanged. Tolerate undefined everywhere.

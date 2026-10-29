@@ -1,10 +1,13 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { AppData, PendingPost } from '../shared/types'
+import type { Agent, AppData, PendingPost, Webhook, WebhookEvent } from '../shared/types'
 import type { AuditFilter, AuditRow } from '../shared/audit'
+import type { WebhookDelivery } from '../shared/webhooks'
 
 contextBridge.exposeInMainWorld('api', {
   platform: process.platform,
   load: () => ipcRenderer.invoke('data:load') as Promise<AppData | null>,
+  createAgent: (name: string, color: string, level: Agent['level']) =>
+    ipcRenderer.invoke('agents:create', name, color, level) as Promise<{ agent: Agent; token: string }>,
   save: (data: AppData) => ipcRenderer.invoke('data:save', data) as Promise<void>,
   openExternal: (url: string) => ipcRenderer.invoke('shell:open', url) as Promise<void>,
   auditList: (filters: AuditFilter) => ipcRenderer.invoke('audit:list', filters) as Promise<AuditRow[]>,
@@ -41,6 +44,23 @@ contextBridge.exposeInMainWorld('api', {
     setEnabled: (enabled: boolean) => ipcRenderer.invoke('mcp:setEnabled', enabled) as Promise<McpStatus>,
     regenerate: () => ipcRenderer.invoke('mcp:regenerate') as Promise<McpStatus>
   },
+  git: {
+    status: () => ipcRenderer.invoke('git:status') as Promise<GitStatus>,
+    setToken: (token: string) => ipcRenderer.invoke('git:setToken', token) as Promise<GitStatus | { ok: false; error: string }>,
+    clearToken: () => ipcRenderer.invoke('git:clearToken') as Promise<GitStatus>,
+    test: () => ipcRenderer.invoke('git:test') as Promise<{ ok: boolean; login?: string; error?: string }>,
+    refresh: () => ipcRenderer.invoke('git:refresh') as Promise<GitStatus>,
+    setSettings: (settings: { pollMinutes?: number; branchPrefix?: string }) => ipcRenderer.invoke('git:setSettings', settings) as Promise<GitStatus>
+  },
+  webhooks: {
+    create: (projectId: string, url: string, events: WebhookEvent[], allowLocal: boolean) =>
+      ipcRenderer.invoke('webhooks:create', projectId, url, events, allowLocal) as Promise<{ webhook: Webhook; secret: string }>,
+    rotateSecret: (id: string) => ipcRenderer.invoke('webhooks:rotateSecret', id) as Promise<string>,
+    remove: (id: string) => ipcRenderer.invoke('webhooks:remove', id) as Promise<void>,
+    test: (id: string) => ipcRenderer.invoke('webhooks:test', id) as Promise<string>,
+    deliveries: (id: string) => ipcRenderer.invoke('webhooks:deliveries', id) as Promise<WebhookDelivery[]>,
+    redeliver: (deliveryId: string) => ipcRenderer.invoke('webhooks:redeliver', deliveryId) as Promise<string>
+  },
   integrations: {
     status: () => ipcRenderer.invoke('integrations:status') as Promise<IntegrationStatus>,
     setWebhook: (integrationId: string, url: string) =>
@@ -57,6 +77,18 @@ export interface IntegrationStatus {
 }
 
 export type IntegrationTestResult = { ok: true } | { ok: false; status?: number; error: string }
+
+
+export interface GitStatus {
+  hasToken: boolean
+  login: string | null
+  tokenHint: string | null // last four characters of the token only
+  pollMinutes: number
+  branchPrefix: string
+  lastPoll: number | null
+  error: string | null
+  backoffUntil: number | null
+}
 
 export interface McpStatus {
   enabled: boolean

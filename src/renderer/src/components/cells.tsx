@@ -172,6 +172,32 @@ export function CellEditor({ column, project, value, issue, onChange, variant = 
     case 'tags':
       return <TagsInput value={Array.isArray(value) ? (value as string[]) : []} onChange={onChange} />
 
+    case 'doc': {
+      const ids = asIds(value)
+      const docs = data.docs ?? []
+      const titleOf = (id: string) => docs.find(d => d.id === id)?.title ?? 'Missing doc'
+      const setIds = (next: string[]) => onChange(next.length ? next : undefined)
+      const pickable = docs.filter(d => d.spaceId === project.spaceId && !d.archivedAt && !d.template && !ids.includes(d.id))
+      return (
+        <div className="doc-cell">
+          {ids.map(id => (
+            <span key={id} className="chip neutral">
+              {titleOf(id)}
+              <button className="icon-btn" aria-label={`Remove ${titleOf(id)}`} onClick={() => setIds(ids.filter(x => x !== id))}>
+                {ICONS.close}
+              </button>
+            </span>
+          ))}
+          <select aria-label="Add doc" value="" onChange={e => e.target.value && setIds([...ids, e.target.value])}>
+            <option value="">Add doc</option>
+            {pickable.map(d => (
+              <option key={d.id} value={d.id}>{d.title}</option>
+            ))}
+          </select>
+        </div>
+      )
+    }
+
     case 'link':
       return (
         <div className="link-edit">

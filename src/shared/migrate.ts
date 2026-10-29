@@ -64,6 +64,7 @@ export function migrate(raw: unknown): AppData {
     projects,
     teams: [],
     issues,
-    cycles: legacy.cycles ?? []
+    cycles: legacy.cycles ?? [],
+    docs: legacy.docs ?? []
   })
 }

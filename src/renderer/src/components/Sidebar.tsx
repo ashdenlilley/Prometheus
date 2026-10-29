@@ -72,6 +72,7 @@ export function Sidebar(props: SidebarProps) {
               onOverview={() => go(space.id, null, 'overview')}
               onRoadmap={() => go(space.id, null, 'roadmap')}
               onDashboard={() => go(space.id, null, 'dashboard')}
+              onDocs={() => go(space.id, null, 'docs')}
               onProject={projectId => go(space.id, projectId, 'issues')}
               onView={view => go(space.id, route.projectId, view)}
               onNewProject={() => props.onNewProject(space.id)}
@@ -109,6 +110,7 @@ interface SpaceNodeProps {
   onOverview: () => void
   onRoadmap: () => void
   onDashboard: () => void
+  onDocs: () => void
   onProject: (projectId: string) => void
   onView: (view: ViewId) => void
   onNewProject: () => void
@@ -119,7 +121,7 @@ function SpaceNode(p: SpaceNodeProps) {
   const projects = data.projects.filter(pr => pr.spaceId === p.space.id)
   const folders = p.space.folders ?? []
   const rootProjects = projects.filter(pr => !folders.some(f => f.id === pr.folderId))
-  const overviewActive = p.active && p.route.projectId === null && p.route.view !== 'roadmap' && p.route.view !== 'dashboard'
+  const overviewActive = p.active && p.route.projectId === null && !['roadmap', 'dashboard', 'docs'].includes(p.route.view)
 
   // Drops only land on this space's folders and root. The reducer ignores folders from other spaces.
   const allowDrop = (e: DragEvent) => e.preventDefault()
@@ -216,6 +218,13 @@ function SpaceNode(p: SpaceNodeProps) {
           >
             <span className="nav-icon">{ICONS.dashboard}</span>
             <span className="lbl grow ellipsis">Dashboard</span>
+          </button>
+          <button
+            className={clsx('tree-row sub', p.active && p.route.projectId === null && p.route.view === 'docs' && 'active')}
+            onClick={p.onDocs}
+          >
+            <span className="nav-icon">{ICONS.files}</span>
+            <span className="lbl grow ellipsis">Docs</span>
           </button>
 
           {folders.map(f => {

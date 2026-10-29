@@ -4,6 +4,7 @@ import { formatEstimate, parseEstimate } from './estimate'
 import { toISO } from './dates'
 import { subtaskLabel, subtaskSummary } from './subtasks'
 import { voteCount } from './votes'
+import { PR_STATE_LABEL } from './git'
 
 // Read-side helpers: grouping, progress, summaries and CSV. Shared by renderer views and the main process.
 // Field access and filtering live in ./filter.
@@ -219,7 +220,7 @@ const csvCell = (v: unknown) => {
 
 // Header plus one row per issue. CSV and XLSX export both use it, so they carry the same columns and values.
 export function issuesToRows(data: AppData, project: Project, issues: Issue[]): string[][] {
-  const header = ['Key', 'Title', 'Status', 'Priority', 'Assignee', 'Labels', 'Start', 'Due', 'Estimate', 'Cycle', ...project.columns.map(c => c.name)]
+  const header = ['Key', 'Title', 'Status', 'Priority', 'Assignee', 'Labels', 'Start', 'Due', 'Estimate', 'Cycle', 'PR', ...project.columns.map(c => c.name)]
   const rows = issues.map(i => {
     const cycle = data.cycles.find(c => c.id === i.cycleId)?.name
     const custom = project.columns.map(c =>
@@ -238,6 +239,7 @@ export function issuesToRows(data: AppData, project: Project, issues: Issue[]): 
       i.dueDate,
       formatEstimate(i.estimate, project.estimateScale),
       cycle,
+      i.prState ? PR_STATE_LABEL[i.prState] : undefined,
       ...custom
     ].map(cellText)
   })

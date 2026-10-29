@@ -1,6 +1,7 @@
 /// <reference types="vite/client" />
-import type { AppData, PendingPost } from '@shared/types'
+import type { Agent, AppData, PendingPost, Webhook, WebhookEvent } from '@shared/types'
 import type { AuditFilter, AuditRow } from '@shared/audit'
+import type { WebhookDelivery } from '@shared/webhooks'
 
 export interface SyncStatus {
   enabled: boolean
@@ -34,6 +35,17 @@ export interface McpStatus {
   port: number
 }
 
+export interface GitStatus {
+  hasToken: boolean
+  login: string | null
+  tokenHint: string | null
+  pollMinutes: number
+  branchPrefix: string
+  lastPoll: number | null
+  error: string | null
+  backoffUntil: number | null
+}
+
 declare global {
   interface Window {
     api: {
@@ -55,10 +67,27 @@ declare global {
         disable: () => Promise<void>
         now: () => Promise<void>
       }
+      createAgent: (name: string, color: string, level: Agent['level']) => Promise<{ agent: Agent; token: string }>
       mcp: {
         status: () => Promise<McpStatus>
         setEnabled: (enabled: boolean) => Promise<McpStatus>
         regenerate: () => Promise<McpStatus>
+      }
+      git: {
+        status: () => Promise<GitStatus>
+        setToken: (token: string) => Promise<GitStatus | { ok: false; error: string }>
+        clearToken: () => Promise<GitStatus>
+        test: () => Promise<{ ok: boolean; login?: string; error?: string }>
+        refresh: () => Promise<GitStatus>
+        setSettings: (settings: { pollMinutes?: number; branchPrefix?: string }) => Promise<GitStatus>
+      }
+      webhooks: {
+        create: (projectId: string, url: string, events: WebhookEvent[], allowLocal: boolean) => Promise<{ webhook: Webhook; secret: string }>
+        rotateSecret: (id: string) => Promise<string>
+        remove: (id: string) => Promise<void>
+        test: (id: string) => Promise<string>
+        deliveries: (id: string) => Promise<WebhookDelivery[]>
+        redeliver: (deliveryId: string) => Promise<string>
       }
       integrations: {
         status: () => Promise<IntegrationStatus>

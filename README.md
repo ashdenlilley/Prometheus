@@ -29,13 +29,17 @@ Local-first project management for a single user, on macOS and Windows. Linear-s
 ## Also
 
 - Teams: several projects can share one key, issue sequence, workflow and cycle settings.
+- Markdown docs per space or project, with issue mentions, backlinks, a Doc column and doc templates.
 - Sub-issues and relations (blocks, duplicate, related).
 - Comments, @mention notifications and per-issue activity.
 - Saved views with AND/OR filters.
 - Issue templates.
 - Automations triggered by status, priority, assignee or due-date.
+- GitHub pull requests: linked by issue key in the branch, title or body, with their state; copy a branch name per issue. See [docs/github.md](docs/github.md).
 - Command palette (Cmd/Ctrl+K).
 - Local MCP server for coding agents such as Claude Code and Codex (streamable HTTP on 127.0.0.1, default port 7878, bearer token).
+- Local REST API at `http://127.0.0.1:7878/api/v1` (the shared MCP token; per-agent tokens work on MCP only) and per-project outgoing webhooks signed with HMAC-SHA256, with retries and a delivery log. See [docs/api.md](docs/api.md).
+- Agents as assignees: register agents in Settings > Agents, each with its own token (shown once, stored hashed) and a level (read, comment, write). Assign issues to an agent; it finds them with the `my_issues` MCP tool, and its changes are attributed to it in activity. Writes are rate limited to 60 a minute per agent.
 - Slack integration backend: "Post to Slack" automation action and "Share to Slack" via incoming webhooks, with Block Kit messages and retries. The settings screen is not built yet; see [docs/integrations.md](docs/integrations.md).
 - Integration links: an `integrations` cell type that stores links to Slack, Figma, Sentry, Zendesk, Jira, Google, Teams and GitHub items, detected by URL. The column picker is not built yet.
 
