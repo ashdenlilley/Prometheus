@@ -6,9 +6,10 @@ Status: design for review. No code yet. Issue: OS-359. Size: the full feature is
 - Decided (Ashden): Cloudflare-hosted backend (Workers plus Durable Objects).
 - Decided (Ashden): data on the server is readable by the server (no end-to-end encryption). See Security.
 - Decided (Ashden): the first and, initially, only user is Ashden. The first slice is one account syncing live across his own devices.
+- Decided (Ashden): sign-in uses email magic links, in the first slice.
 
 ## Goals and non-goals
-- First slice: Ashden signs in on each of his devices and sees changes live on the others, with offline edits merged on reconnect.
+- First slice: Ashden signs in by email magic link on each of his devices and sees changes live on the others, with offline edits merged on reconnect.
 - Local-only mode keeps working with no account, and remains the default.
 - Moved out of the first slice: invites, other users, guests and roles (to OS-360 and the follow-ups), presence, user pickers and cross-user mentions.
 - Non-goal: real-time co-editing of doc text (docs keep the OS-354 merge rule), SSO/SAML, or billing.
@@ -29,12 +30,12 @@ Server-authoritative ops on top of the existing format:
 ## Offline behaviour
 Each client keeps its full local SQLite copy, as now. Offline edits queue as ops and are sent on reconnect. Conflicts resolve with the existing per-field rules. Issue numbers keep the existing rule from folder sync and OS-353: a number clash between two of Ashden's devices is resolved on merge for the newer issue. Server-assigned numbers can wait for multiple users.
 
-## Identity and auth (single user)
-- One owner account. No sign-up, no email and no invites in the first slice.
-- First device: Ashden generates an owner setup secret locally and stores it as a Worker secret (`wrangler secret put OWNER_SETUP_SECRET`). Entering it once in the app registers that device. The secret is never in the repo and can be rotated.
-- More devices: a signed-in device shows a one-time pairing code (6 to 8 characters, valid 5 minutes, single use) that the new device enters.
-- Each device gets its own refresh token, stored with `safeStorage`, plus short-lived access tokens (15 minutes). Settings lists devices and can revoke one.
-- Free-text assignee and member names stay as they are. Accounts for other people, magic-link sign-in, roles and guests come with OS-360.
+## Identity and auth (single user, email magic link)
+- One owner account (Ashden's email). No open sign-up and no invites in the first slice; the server only accepts the owner's email.
+- Flow: on a device, Ashden enters his email. The server emails a short-lived (15 minutes), single-use sign-in link. Clicking it issues a session for that device: a per-device refresh token, stored with `safeStorage`, plus short-lived access tokens (15 minutes).
+- Sessions are per device. Settings lists signed-in devices and can revoke one, or sign out everywhere.
+- Email is sent through an email service (Cloudflare Email Sending or Resend) from a verified sender domain.
+- Free-text assignee and member names stay as they are. Accounts for other people, invites, roles and guests come with OS-360, which reuses this sign-in and email service.
 
 ## Migration from a single local file
 "Create workspace from this data" uploads a snapshot as the first ops, using the same path as "Merge this device in" for folder sync. Folder sync and server sync are mutually exclusive per workspace, and the switch is offered in Settings. A local-only workspace never contacts the server.
@@ -42,41 +43,40 @@ Each client keeps its full local SQLite copy, as now. Offline edits queue as ops
 ## Security
 - TLS only. Every op is authorised server-side. Each workspace is isolated in its own Durable Object.
 - Data at rest sits on Cloudflare in plain form for the server to read. That is a step down from folder sync, where the folder holds ciphertext only. Ashden has accepted this trade-off; it keeps the door open for server-side permissions (OS-360).
-- Pairing codes are rate-limited and single use; a revoked device's refresh token stops working immediately.
-- Secrets (the JWT signing key and the owner setup secret) are Worker secrets set with `wrangler secret put`, never in the repo or in `wrangler.toml`.
+- Magic links are single use, expire after 15 minutes, and are rate-limited per email and per IP; only a hash of the link token is stored. A revoked device's refresh token stops working immediately.
+- Secrets (the JWT signing key and the email service API key) are Worker secrets set with `wrangler secret put`, never in the repo or in `wrangler.toml`.
 
 ## Accounts or tokens Ashden needs
 - A Cloudflare account. Durable Objects with SQLite storage are available on the Workers Free plan, which is likely enough for one user; the Workers Paid plan ($5 a month) would only be needed if the free limits are hit. To be confirmed at build time.
 - A Cloudflare API token for deploys, using the "Edit Cloudflare Workers" template and scoped to that account, stored as a GitHub Actions secret, not in the repo.
-- A domain or `workers.dev` subdomain (the latter is free).
-- Nothing else for the first slice. No email service or sender domain is needed, because there is no magic link yet.
-- Later, with other users (OS-360 and follow-ups): an email sending service (Cloudflare Email Service or Resend) API key plus a verified sender domain for magic links, and optionally a GitHub OAuth App.
+- A `workers.dev` subdomain (free) or a domain.
+- An email sending service for magic links: Cloudflare Email Sending or Resend, with its API key stored as a Worker secret, never in the repo.
+- A verified sender domain (SPF/DKIM records on a domain Ashden controls).
 
 ## UI touchpoints
-First slice: connect this workspace to the cloud (setup secret or pairing code), a devices list with "pair a device" and "revoke", sign out, and a "synced or offline" badge. Later: invites, presence, user pickers and cross-user mentions.
+First slice: connect this workspace to the cloud (enter email, then "check your inbox"), a devices list with "revoke", sign out, and a "synced or offline" badge. Later: invites, presence, user pickers and cross-user mentions.
 
 ## Test plan
 - The server module runs in Miniflare/`wrangler dev` for tests.
-- Protocol tests: ordering, catch-up, snapshot, skew rejection, auth failures, pairing-code expiry and reuse, and device revocation.
+- Protocol tests: ordering, catch-up, snapshot, skew rejection, auth failures, magic-link expiry, reuse and wrong-email rejection (with a stubbed email service), and device revocation.
 - Two-device integration test (like `test:sync`, over WebSockets), plus offline edits on both devices and reconnect.
 - Load sanity: 3 devices and 1,000 ops.
 
 ## Follow-up issues (to file after approval)
 First slice (single user):
 1. Server skeleton: a Worker plus a Durable Object, the op log, and the WebSocket protocol, with tests.
-2. Auth: owner setup secret, device pairing, sessions and refresh-token storage, device revocation.
+2. Auth: email magic-link sign-in via the email service, sessions and refresh-token storage, device revocation.
 3. Client transport: a WebSocket sync engine alongside folder sync, with offline queue and catch-up.
 4. Migration from a local file, and the folder-sync/server-sync switch.
 
 Later (when other people join, with OS-360):
-5. Magic-link accounts, invites, roles and guests.
+5. Accounts for other people, invites, roles and guests (reusing the magic-link sign-in).
 6. Users replacing free-text names, plus cross-user mentions and notifications.
 7. Presence and live UI.
 8. Self-hosted Node build (optional).
 
 ## Open questions for Ashden
-1. Is a setup secret plus device pairing codes acceptable for signing in your own devices, instead of email magic links?
-2. When other people join later: magic link only, or GitHub sign-in too?
+1. When other people join later: magic link only, or GitHub sign-in too?
 
 ## Dependencies and suggested build order
 
