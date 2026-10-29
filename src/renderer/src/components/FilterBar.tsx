@@ -13,6 +13,8 @@ export interface ViewQuery {
   setFilter: (f: FilterGroup) => void
   groupBy: string | null
   setGroupBy: (g: string | null) => void
+  rowsBy: string | null
+  setRowsBy: (r: string | null) => void
   sort: Sort | null
   setSort: (s: Sort | null) => void
   hidden: string[]
@@ -25,6 +27,7 @@ export interface ViewQuery {
 interface QueryState {
   filter: FilterGroup
   groupBy: string | null
+  rowsBy: string | null
   sort: Sort | null
   hidden: string[]
 }
@@ -33,7 +36,7 @@ const memory = new Map<string, QueryState>()
 
 export function useViewQuery(project: Project, kind: ViewKind): ViewQuery {
   const key = `${project.id}:${kind}`
-  const [state, setState] = useState<QueryState>(() => memory.get(key) ?? { filter: emptyFilter(), groupBy: null, sort: null, hidden: [] })
+  const [state, setState] = useState<QueryState>(() => memory.get(key) ?? { filter: emptyFilter(), groupBy: null, rowsBy: null, sort: null, hidden: [] })
   const write = (patch: Partial<QueryState>) =>
     setState(s => {
       const next = { ...s, ...patch }
@@ -45,11 +48,13 @@ export function useViewQuery(project: Project, kind: ViewKind): ViewQuery {
     setFilter: filter => write({ filter }),
     groupBy: state.groupBy,
     setGroupBy: groupBy => write({ groupBy }),
+    rowsBy: state.rowsBy,
+    setRowsBy: rowsBy => write({ rowsBy }),
     sort: state.sort,
     setSort: sort => write({ sort }),
     hidden: state.hidden,
     setHidden: hidden => write({ hidden }),
-    applyView: v => write({ filter: v.filter, groupBy: v.groupBy, sort: v.sort, hidden: v.hidden })
+    applyView: v => write({ filter: v.filter, groupBy: v.groupBy, rowsBy: v.rowsBy ?? null, sort: v.sort, hidden: v.hidden })
   }
 }
 
@@ -84,6 +89,22 @@ function valueOptions(project: Project, key: string): { value: string; label: st
   return null
 }
 
+// Shared by the Group and Rows selects; '' is None.
+function groupOptions(project: Project): { value: string; label: string }[] {
+  return [
+    { value: '', label: 'None' },
+    { value: 'status', label: 'Status' },
+    { value: 'priority', label: 'Priority' },
+    { value: 'assignee', label: 'Assignee' },
+    { value: 'labels', label: 'Labels' },
+    { value: 'cycle', label: 'Cycle' },
+    { value: 'milestone', label: 'Milestone' },
+    ...project.columns
+      .filter(c => ['dropdown', 'label', 'status', 'people', 'checkbox', 'text', 'color'].includes(c.type))
+      .map(c => ({ value: c.id, label: c.name }))
+  ]
+}
+
 export function FilterBar({ project, kind, query, showGroup = true }: { project: Project; kind: ViewKind; query: ViewQuery; showGroup?: boolean }) {
   const { dispatch } = useStore()
   const [open, setOpen] = useState(false)
@@ -110,7 +131,7 @@ export function FilterBar({ project, kind, query, showGroup = true }: { project:
   const saveView = async () => {
     const name = await askText('Name this view')
     if (!name) return
-    const view: SavedView = { id: uid(), name, view: kind, filter: f, groupBy: query.groupBy, sort: query.sort, hidden: query.hidden }
+    const view: SavedView = { id: uid(), name, view: kind, filter: f, groupBy: query.groupBy, rowsBy: query.rowsBy, sort: query.sort, hidden: query.hidden }
     dispatch({ type: 'patchProject', id: project.id, patch: { views: [...project.views, view] } })
   }
 
@@ -179,18 +200,20 @@ export function FilterBar({ project, kind, query, showGroup = true }: { project:
         <label className="inline-select">
           Group
           <select className="input-sm" value={query.groupBy ?? ''} onChange={e => query.setGroupBy(e.target.value || null)}>
-            <option value="">None</option>
-            <option value="status">Status</option>
-            <option value="priority">Priority</option>
-            <option value="assignee">Assignee</option>
-            <option value="labels">Labels</option>
-            <option value="cycle">Cycle</option>
-            <option value="milestone">Milestone</option>
-            {project.columns
-              .filter(c => ['dropdown', 'label', 'status', 'people', 'checkbox', 'text', 'color'].includes(c.type))
-              .map(c => (
-                <option key={c.id} value={c.id}>{c.name}</option>
-              ))}
+            {groupOptions(project).map(o => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+        </label>
+      )}
+
+      {kind === 'board' && (
+        <label className="inline-select">
+          Rows
+          <select className="input-sm" aria-label="Rows" value={query.rowsBy ?? ''} onChange={e => query.setRowsBy(e.target.value || null)}>
+            {groupOptions(project).map(o => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
           </select>
         </label>
       )}

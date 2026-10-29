@@ -1,5 +1,5 @@
 import { categoryOf } from './model'
-import { PRIORITIES, type AppData, type Column, type Issue, type Project, type StatusDef } from './types'
+import { PRIORITIES, type AppData, type Column, type Cycle, type Issue, type Project, type StatusDef } from './types'
 
 // Read-side helpers: grouping, progress, summaries and CSV. Shared by renderer views and the main process.
 // Field access and filtering live in ./filter.
@@ -59,6 +59,56 @@ export function groupIssues(
     return groups.sort((a, b) => order.indexOf(a.label) - order.indexOf(b.label))
   }
   return groups.sort((a, b) => (a.label === 'None' || a.label.startsWith('No ') ? 1 : b.label === 'None' || b.label.startsWith('No ') ? -1 : a.label.localeCompare(b.label)))
+}
+
+// Patch that moves an issue into the group `key` from groupIssues. Null when the grouping is not a settable field.
+export function groupPatch(groupBy: string, key: string, project: Project, cycles: Cycle[]): Partial<Issue> | null {
+  switch (groupBy) {
+    case 'status':
+      return { status: key }
+    case 'priority': {
+      const n = PRIORITIES.indexOf(key)
+      return n < 0 ? null : { priority: n }
+    }
+    case 'assignee':
+      return { assignee: key === 'None' ? '' : key }
+    case 'cycle': {
+      if (key === 'No cycle') return { cycleId: undefined }
+      const c = cycles.find(c => c.projectId === project.id && c.name === key)
+      return c ? { cycleId: c.id } : null
+    }
+    case 'milestone': {
+      if (key === 'No milestone') return { milestoneId: undefined }
+      const m = project.milestones.find(m => m.name === key)
+      return m ? { milestoneId: m.id } : null
+    }
+    default:
+      return null
+  }
+}
+
+export interface Lane {
+  key: string
+  label: string
+  count: number
+  columns: Group[]
+}
+
+// Rows come from rowsBy; every lane shows the same columns (built from all issues), filtered to its own issues.
+export function swimlanes(
+  issues: Issue[],
+  project: Project,
+  columnsBy: string | null,
+  rowsBy: string | null,
+  cycleName: (id: string) => string,
+  milestoneName: (id: string) => string
+): Lane[] {
+  const columns = groupIssues(issues, project, columnsBy, cycleName, milestoneName)
+  if (!rowsBy) return [{ key: 'all', label: '', count: issues.length, columns }]
+  return groupIssues(issues, project, rowsBy, cycleName, milestoneName).map(row => {
+    const mine = new Set(row.items)
+    return { key: row.key, label: row.label, count: row.items.length, columns: columns.map(c => ({ ...c, items: c.items.filter(i => mine.has(i)) })) }
+  })
 }
 
 export function progress(issues: Issue[], statuses: StatusDef[]) {

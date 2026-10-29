@@ -131,6 +131,7 @@ export interface SavedView {
   view: 'list' | 'board' | 'table'
   filter: FilterGroup
   groupBy: string | null
+  rowsBy?: string | null
   sort: Sort | null
   hidden: string[]
 }
