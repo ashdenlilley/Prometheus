@@ -26,3 +26,21 @@ jobs:
       - run: npm test
 
       - run: npm run build
+
+  # Tests only. This job never deploys (see deploy-sync-server.yml, which is manual).
+  server:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      - run: npm ci
+        working-directory: server
+
+      - run: npm test
+        working-directory: server

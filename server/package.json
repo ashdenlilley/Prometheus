@@ -1,0 +1,20 @@
+{
+  "name": "prometheus-sync-server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Prometheus cloud sync: a Cloudflare Worker plus one Durable Object per workspace (single owner, email magic-link sign-in).",
+  "type": "module",
+  "scripts": {
+    "build": "esbuild src/index.ts --bundle --format=esm --platform=neutral --target=es2022 --external:cloudflare:* --outfile=dist/worker.js",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run build && node --test test/*.test.mjs",
+    "dev": "wrangler dev"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261029.1",
+    "esbuild": "^0.28.2",
+    "miniflare": "^4.20260730.0",
+    "typescript": "^5.6.3",
+    "wrangler": "^4.155.0"
+  }
+}

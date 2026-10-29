@@ -1,0 +1,3 @@
+# Copy to .dev.vars for `npx wrangler dev`. .dev.vars is gitignored. Placeholders only.
+JWT_SECRET=replace-with-64-random-hex-chars
+EMAIL_API_KEY=replace-with-email-api-key
