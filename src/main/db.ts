@@ -2,6 +2,7 @@ import { dirname, join } from 'path'
 import { promises as fs } from 'fs'
 import initSqlJs, { type Database, type SqlJsStatic } from 'sql.js'
 import type { AppData } from '../shared/types'
+import { AUDIT_LIMIT, type AuditEntry, type AuditFilter, type AuditRow } from '../shared/audit'
 
 // Local SQLite database (sql.js, in-process wasm). One table per entity kind, each row holding
 // the entity as JSON with its parent id indexed. Saves diff against the last write, so only
@@ -55,7 +56,7 @@ export class Store {
   private queue: Promise<void> = Promise.resolve()
   private flushing: Promise<void> = Promise.resolve()
 
-  constructor(private file: string) {}
+  constructor(private file: string, private auditLimit = AUDIT_LIMIT) {}
 
   async open(): Promise<void> {
     const SQL = await sql()
@@ -77,6 +78,7 @@ export class Store {
     // Sync bookkeeping: winning hlc per row (tombstones included) and sync files already applied.
     this.db.run('CREATE TABLE IF NOT EXISTS sync_clock (key TEXT PRIMARY KEY, hlc TEXT NOT NULL)')
     this.db.run('CREATE TABLE IF NOT EXISTS sync_applied (name TEXT PRIMARY KEY)')
+    this.db.run('CREATE TABLE IF NOT EXISTS audit (seq INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, source TEXT NOT NULL, action TEXT NOT NULL, tbl TEXT NOT NULL, target TEXT NOT NULL, fields TEXT)')
   }
 
   clocks(): Map<string, string> {
@@ -119,6 +121,66 @@ export class Store {
       throw err
     }
     return this.flush()
+  }
+
+  // Rows go into the open database only. The persist() call that follows each change writes them, so
+  // there is no separate file write. Only the newest `auditLimit` rows are kept.
+  appendAudit(entries: AuditEntry[]): void {
+    if (!this.db || entries.length === 0) return
+    this.db.run('BEGIN')
+    try {
+      for (const e of entries) {
+        this.db.run('INSERT INTO audit (at, source, action, tbl, target, fields) VALUES (?, ?, ?, ?, ?, ?)', [
+          e.at,
+          e.source,
+          e.action,
+          e.table,
+          e.targetId,
+          e.fields ? JSON.stringify(e.fields) : null
+        ])
+      }
+      const max = Number(this.db.exec('SELECT MAX(seq) FROM audit')[0].values[0][0])
+      this.db.run('DELETE FROM audit WHERE seq <= ?', [max - this.auditLimit])
+      this.db.run('COMMIT')
+    } catch (err) {
+      this.db.run('ROLLBACK')
+      throw err
+    }
+  }
+
+  // Newest first. `before` pages back from the seq of the last row already shown.
+  readAudit(f: AuditFilter = {}): AuditRow[] {
+    if (!this.db) return []
+    const where: string[] = []
+    const args: (string | number)[] = []
+    if (f.source) {
+      where.push('source = ?')
+      args.push(f.source)
+    }
+    if (f.table) {
+      where.push('tbl = ?')
+      args.push(f.table)
+    }
+    if (f.q) {
+      where.push('(target LIKE ? OR action LIKE ? OR fields LIKE ?)')
+      args.push(`%${f.q}%`, `%${f.q}%`, `%${f.q}%`)
+    }
+    if (f.before) {
+      where.push('seq < ?')
+      args.push(f.before)
+    }
+    args.push(f.limit ?? 500)
+    const sql = `SELECT seq, at, source, action, tbl, target, fields FROM audit ${where.length ? `WHERE ${where.join(' AND ')} ` : ''}ORDER BY seq DESC LIMIT ?`
+    const res = this.db.exec(sql, args)
+    return (res[0]?.values ?? []).map(r => ({
+      seq: Number(r[0]),
+      at: String(r[1]),
+      source: String(r[2]) as AuditRow['source'],
+      action: String(r[3]),
+      table: String(r[4]),
+      targetId: String(r[5]),
+      ...(r[6] ? { fields: JSON.parse(String(r[6])) as string[] } : {})
+    }))
   }
 
   // Wipes sync bookkeeping. Used when joining a folder and replaying it from scratch.

@@ -12,9 +12,13 @@ function Svg({ children }: { children: ReactNode }) {
 export const ICONS = {
   issues: <Svg><circle cx="8" cy="8" r="5.75" strokeDasharray="2.5 2" /><path d="M8 5.5v2.5l1.5 1" /></Svg>,
   board: <Svg><rect x="2" y="3" width="3.5" height="10" rx="1" /><rect x="6.25" y="3" width="3.5" height="6.5" rx="1" /><rect x="10.5" y="3" width="3.5" height="8" rx="1" /></Svg>,
+  files: <Svg><rect x="2.5" y="2.5" width="5" height="5" rx="1" /><rect x="8.5" y="2.5" width="5" height="5" rx="1" /><rect x="2.5" y="8.5" width="5" height="5" rx="1" /><rect x="8.5" y="8.5" width="5" height="5" rx="1" /></Svg>,
+  map: <Svg><path d="M8 14s4.5-4.2 4.5-7.5a4.5 4.5 0 0 0-9 0C3.5 9.8 8 14 8 14z" /><circle cx="8" cy="6.5" r="1.5" /></Svg>,
   table: <Svg><rect x="2" y="3" width="12" height="10" rx="2" /><path d="M2 6.5h12M2 10h12M6.5 3v10" /></Svg>,
   timeline: <Svg><path d="M2.5 4.5h7M6 8h7.5M3.5 11.5h5" /></Svg>,
   cycles: <Svg><path d="M13.25 8a5.25 5.25 0 1 1-1.54-3.71" /><path d="M13.25 2.75v2.75H10.5" /></Svg>,
+  workload: <Svg><path d="M2.5 13.5h11" /><path d="M4.5 11V8.5M8 11V5M11.5 11V3" /></Svg>,
+  planning: <Svg><rect x="2.5" y="3" width="4.5" height="10.5" rx="1" /><rect x="9" y="3" width="4.5" height="6" rx="1" /></Svg>,
   roadmap: <Svg><path d="M3.5 13.5v-11" /><path d="M3.5 3h8l-1.75 2.5L11.5 8h-8" /></Svg>,
   plus: <Svg><path d="M8 3v10M3 8h10" /></Svg>,
   close: <Svg><path d="M4 4l8 8M12 4l-8 8" /></Svg>,

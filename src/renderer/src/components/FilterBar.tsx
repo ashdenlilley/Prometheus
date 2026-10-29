@@ -98,7 +98,7 @@ export function fieldOptions(project: Project) {
     { key: 'favourite', label: 'Favourite' }
   ]
   const custom = project.columns
-    .filter(c => !['formula', 'button', 'files', 'created', 'updated', 'timeline', 'mirror'].includes(c.type))
+    .filter(c => !['formula', 'button', 'subtasks', 'files', 'created', 'updated', 'timeline', 'mirror'].includes(c.type))
     .map(c => ({ key: c.id, label: c.name }))
   return [...fixed, ...custom]
 }
@@ -162,10 +162,10 @@ export function FilterBar({ project, kind, query, showGroup = true }: { project:
     query.setFilter({ ...f, conditions: text ? [{ key: 'name', op: 'contains', value: text }, ...rest] : rest })
   }
 
-  const saveView = async () => {
+  const saveView = async (personal: boolean) => {
     const name = await askText('Name this view')
     if (!name) return
-    const view: SavedView = { id: uid(), name, view: kind, filter: f, groupBy: query.groupBy, rowsBy: query.rowsBy, sort: query.sort, hidden: query.hidden, showCompleted: query.showCompleted, chartType: kind === 'chart' ? query.chartType : undefined }
+    const view: SavedView = { id: uid(), name, view: kind, filter: f, groupBy: query.groupBy, rowsBy: query.rowsBy, sort: query.sort, hidden: query.hidden, showCompleted: query.showCompleted, chartType: kind === 'chart' ? query.chartType : undefined, ...(personal && { personal: true }) }
     dispatch({ type: 'patchProject', id: project.id, patch: { views: [...project.views, view] } })
   }
 
@@ -178,6 +178,14 @@ export function FilterBar({ project, kind, query, showGroup = true }: { project:
   }
 
   const active = f.conditions.filter(c => !(c.key === 'name' && c.op === 'contains')).length
+
+  const viewRow = (v: SavedView) => (
+    <div key={v.id} className="popover-row">
+      <button className="popover-item grow" onClick={() => { query.applyView(v); setViewsOpen(false) }}>{v.name}</button>
+      <button className="fav-btn" aria-label={`Favourite ${v.name}`} aria-pressed={!!v.favourite} onClick={() => toggleFavourite(v.id)}>{v.favourite ? '★' : '☆'}</button>
+      <button className="icon-btn" aria-label={`Delete ${v.name}`} onClick={() => deleteView(v.id)}>{ICONS.close}</button>
+    </div>
+  )
 
   return (
     <div className="filter-bar">
@@ -266,14 +274,11 @@ export function FilterBar({ project, kind, query, showGroup = true }: { project:
         {viewsOpen && (
           <div className="popover left filter-pop" role="menu">
             {views.length === 0 && <div className="muted pad small">No saved views yet.</div>}
-            {views.map(v => (
-              <div key={v.id} className="popover-row">
-                <button className="popover-item grow" onClick={() => { query.applyView(v); setViewsOpen(false) }}>{v.name}</button>
-                <button className="fav-btn" aria-label={`Favourite ${v.name}`} aria-pressed={!!v.favourite} onClick={() => toggleFavourite(v.id)}>{v.favourite ? '★' : '☆'}</button>
-                <button className="icon-btn" aria-label={`Delete ${v.name}`} onClick={() => deleteView(v.id)}>{ICONS.close}</button>
-              </div>
-            ))}
-            <button className="popover-item" onClick={() => { setViewsOpen(false); saveView() }}>{ICONS.plus} Save current as view</button>
+            {views.filter(v => !v.personal).map(viewRow)}
+            {views.some(v => v.personal) && <div className="muted pad small">Personal</div>}
+            {views.filter(v => v.personal).map(viewRow)}
+            <button className="popover-item" onClick={() => { setViewsOpen(false); saveView(false) }}>{ICONS.plus} Save current as view</button>
+            <button className="popover-item" aria-label="Save as personal view" onClick={() => { setViewsOpen(false); saveView(true) }}>{ICONS.plus} Save as personal view</button>
           </div>
         )}
       </div>

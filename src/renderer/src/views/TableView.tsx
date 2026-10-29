@@ -14,6 +14,8 @@ import { FavGutter } from '../components/FavGutter'
 import { Menu, QuickAdd, type MenuItem } from '../components/ui'
 import { customSortValue, defaultWidth, fixedSortValue, FIXED_COLUMNS, type FixedKey } from '../columns'
 import { clsx } from '../util'
+import { parseAsanaCsv, parseAsanaJson, parseJiraCsv, type ImportRow } from '@shared/importers'
+import { ImportModal } from '../components/ImportModal'
 
 interface ColumnRef {
   key: string
@@ -48,6 +50,8 @@ export function TableView({ project, onOpen }: { project: Project; onOpen: (id: 
   const [templateId, setTemplateId] = useState('')
   const fileInput = useRef<HTMLInputElement>(null)
   const excelInput = useRef<HTMLInputElement>(null)
+  const jiraInput = useRef<HTMLInputElement>(null)
+  const [pendingImport, setPendingImport] = useState<ImportRow[] | null>(null)
 
   const all = data.issues.filter(i => i.projectId === project.id && !i.triage && !i.archivedAt)
   const filtered = applyFilter(all, query.filter, project)
@@ -90,7 +94,7 @@ export function TableView({ project, onOpen }: { project: Project; onOpen: (id: 
         ? fixedSortValue(sortRef.fixed, i, project)
         : sortRef.column!.progressMode === 'subissues'
           ? progressValue(sortRef.column!, i, all, project.statuses)
-          : customSortValue(sortRef.column!, i, project)
+          : customSortValue(sortRef.column!, i, project, data)
     const sign = query.sort.dir === 'asc' ? 1 : -1
     return [...items].sort((a, b) => {
       const x = value(a)
@@ -270,6 +274,20 @@ export function TableView({ project, onOpen }: { project: Project; onOpen: (id: 
     importRows(rows)
   }
 
+  // JSON is an Asana export. CSV with an Issue key or Summary header is Jira; any other CSV is read as Asana.
+  const importJiraAsana = async (file: File) => {
+    let rows: ImportRow[]
+    try {
+      const text = await file.text()
+      if (file.name.toLowerCase().endsWith('.json')) rows = parseAsanaJson(text)
+      else rows = (parseCSV(text)[0] ?? []).some(h => ['Issue key', 'Summary'].includes(h.trim())) ? parseJiraCsv(text) : parseAsanaCsv(text)
+    } catch {
+      return window.alert(`Could not read ${file.name} as a Jira or Asana export.`)
+    }
+    if (!rows.length) return window.alert('No tasks found in that file.')
+    setPendingImport(rows)
+  }
+
   const tpl = data.templates.find(t => t.id === templateId && t.projectId === project.id)
   const addItem = (title: string, status: string) => {
     const base = tpl
@@ -313,6 +331,8 @@ export function TableView({ project, onOpen }: { project: Project; onOpen: (id: 
         <button className="btn" onClick={exportExcel}>Export Excel</button>
         <button className="btn" onClick={() => excelInput.current?.click()}>Import Excel</button>
         <input ref={excelInput} type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden onChange={e => e.target.files?.[0] && importExcel(e.target.files[0])} />
+        <button className="btn" aria-label="Import from Jira or Asana" onClick={() => jiraInput.current?.click()}>Import Jira/Asana</button>
+        <input ref={jiraInput} type="file" accept=".csv,.json,text/csv,application/json" hidden onChange={e => e.target.files?.[0] && importJiraAsana(e.target.files[0])} />
       </div>
 
       <BulkBar
@@ -447,6 +467,7 @@ export function TableView({ project, onOpen }: { project: Project; onOpen: (id: 
       {editing && (
         <ColumnModal project={project} column={editing === 'new' ? undefined : editing} onClose={() => setEditing(null)} />
       )}
+      {pendingImport && <ImportModal rows={pendingImport} project={project} onClose={() => setPendingImport(null)} />}
     </div>
   )
 }

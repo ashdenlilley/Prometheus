@@ -5,8 +5,12 @@ export type ViewId =
   | 'triage'
   | 'board'
   | 'table'
+  | 'files'
+  | 'map'
   | 'timeline'
   | 'cycles'
+  | 'workload'
+  | 'planning'
   | 'chart'
   | 'calendar'
   | 'roadmap'
@@ -24,8 +28,12 @@ export const PROJECT_VIEWS: { id: ViewId; label: string }[] = [
   { id: 'triage', label: 'Triage' },
   { id: 'board', label: 'Board' },
   { id: 'table', label: 'Table' },
+  { id: 'files', label: 'Files' },
+  { id: 'map', label: 'Map' },
   { id: 'timeline', label: 'Timeline' },
   { id: 'cycles', label: 'Cycles' },
+  { id: 'workload', label: 'Workload' },
+  { id: 'planning', label: 'Planning' },
   { id: 'chart', label: 'Charts' },
   { id: 'calendar', label: 'Calendar' },
   { id: 'activity', label: 'Activity' }
@@ -37,8 +45,12 @@ export const VIEW_LABEL: Record<ViewId, string> = {
   triage: 'Triage',
   board: 'Board',
   table: 'Table',
+  files: 'Files',
+  map: 'Map',
   timeline: 'Timeline',
   cycles: 'Cycles',
+  workload: 'Workload',
+  planning: 'Planning',
   chart: 'Charts',
   calendar: 'Calendar',
   roadmap: 'Roadmap',
