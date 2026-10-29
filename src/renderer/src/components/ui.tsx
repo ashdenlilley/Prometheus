@@ -66,23 +66,27 @@ export interface MenuItem {
   label: string
   onSelect: () => void
   danger?: boolean
+  disabled?: boolean
+  title?: string // tooltip, e.g. why a disabled item is unavailable
   icon?: ReactNode
 }
 
 // Small popover menu anchored under its trigger.
-export function Menu({ items, align = 'left' }: { items: MenuItem[]; align?: 'left' | 'right' }) {
+export function Menu({ items, align = 'left', label = 'Column menu' }: { items: MenuItem[]; align?: 'left' | 'right'; label?: string }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   useOutside(ref, () => setOpen(false), open)
   return (
     <div className="menu" ref={ref}>
-      <button className="icon-btn" onClick={() => setOpen(o => !o)} aria-label="Column menu">{ICONS.more}</button>
+      <button className="icon-btn" onClick={() => setOpen(o => !o)} aria-label={label}>{ICONS.more}</button>
       {open && (
         <div className={`popover ${align}`} role="menu">
           {items.map(item => (
             <button
               key={item.label}
               role="menuitem"
+              disabled={item.disabled}
+              title={item.title}
               className={`popover-item${item.danger ? ' danger' : ''}`}
               onClick={() => {
                 setOpen(false)

@@ -2,12 +2,15 @@ import { useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import type { Column, Issue, Project, SavedView } from '@shared/types'
 import { applyFilter, childrenOf, groupIssues, issuesFromRows, issuesToCSV, issuesToRows, parseCSV, progressValue, summarize, withoutCompleted, type FixedField } from '@shared/query'
 import { resolveColumnLayout } from '@shared/views'
+import { displayAssignee, isAgentAssignee } from '@shared/agents'
 import { createIssue, issueKey, useStore, withValue } from '../store'
+import { AgentBadge } from '../components/AgentBadge'
 import { CellEditor } from '../components/cells'
 import { EstimateSelect, PrioritySelect, StatusDot, StatusSelect } from '../components/fields'
 import { exportXlsx, importXlsx } from '../xlsx'
 import { ICONS } from '../components/icons'
 import { ColumnModal } from '../components/ColumnModal'
+import { PrPill } from '../components/PrPill'
 import { FilterBar, useViewQuery } from '../components/FilterBar'
 import { BulkBar } from '../components/BulkBar'
 import { FavGutter } from '../components/FavGutter'
@@ -63,7 +66,8 @@ export function TableView({ project, onOpen }: { project: Project; onOpen: (id: 
   const layout = resolveColumnLayout(project, activeView)
 
   const baseCols: ColumnRef[] = [
-    ...FIXED_COLUMNS.map(f => ({
+    // The PR column only appears once the project links a repo or an issue has a PR.
+    ...FIXED_COLUMNS.filter(f => f.key !== 'pr' || (project.repos ?? []).length > 0 || data.issues.some(i => i.projectId === project.id && i.prState)).map(f => ({
       key: f.key,
       label: f.label,
       width: project.widths[f.key] ?? f.width,
@@ -193,6 +197,14 @@ export function TableView({ project, onOpen }: { project: Project; onOpen: (id: 
       case 'priority':
         return <PrioritySelect value={i.priority} onChange={priority => update(i.id, { priority })} />
       case 'assignee':
+        if (isAgentAssignee(i.assignee)) {
+          return (
+            <div className="agent-cell">
+              <AgentBadge data={data} assignee={i.assignee} />
+              <button className="btn ghost" aria-label="Clear assignee" onClick={() => update(i.id, { assignee: '' })}>×</button>
+            </div>
+          )
+        }
         return <input className="cell-input" value={i.assignee} placeholder="Unassigned" onChange={e => update(i.id, { assignee: e.target.value })} />
       case 'due':
         return <input className="cell-input" type="date" value={i.dueDate ?? ''} onChange={e => update(i.id, { dueDate: e.target.value || undefined })} />
@@ -222,6 +234,8 @@ export function TableView({ project, onOpen }: { project: Project; onOpen: (id: 
             ))}
           </select>
         )
+      case 'pr':
+        return i.prState ? <PrPill state={i.prState} /> : null
       default:
         return null
     }
@@ -404,7 +418,7 @@ export function TableView({ project, onOpen }: { project: Project; onOpen: (id: 
               <button className="t-group-head" onClick={() => setCollapsed(c => ({ ...c, [g.key]: open }))}>
                 <span className={clsx('caret', !open && 'closed')}>▾</span>
                 {status && <StatusDot status={status} />}
-                <span className="t-group-title" style={{ color: g.color ?? 'inherit' }}>{g.label || 'All items'}</span>
+                <span className="t-group-title" style={{ color: g.color ?? 'inherit' }}>{displayAssignee(data, g.label) || 'All items'}</span>
                 <span className="count">{items.length}</span>
               </button>
 

@@ -1,4 +1,6 @@
 import type { Issue, Project } from '@shared/types'
+import { activeAgents, agentAssignee } from '@shared/agents'
+import { useStore } from '../store'
 
 // Actions for a set of selected issues: status, priority, assignee, label, cycle, favourite, delete.
 export function BulkBar({
@@ -40,6 +42,8 @@ export function BulkBar({
 }
 
 function BulkAssignee({ project, onPatch }: { project: Project; onPatch: (p: Partial<Issue>) => void }) {
+  const { data } = useStore()
+  const agents = activeAgents(data)
   return (
     <select className="input-sm" value="" onChange={e => e.target.value && onPatch({ assignee: e.target.value === '-' ? '' : e.target.value })}>
       <option value="">Assign…</option>
@@ -47,6 +51,13 @@ function BulkAssignee({ project, onPatch }: { project: Project; onPatch: (p: Par
       {project.members.map(m => (
         <option key={m} value={m}>{m}</option>
       ))}
+      {agents.length > 0 && (
+        <optgroup label="Agents">
+          {agents.map(a => (
+            <option key={a.id} value={agentAssignee(a.id)}>🤖 {a.name}</option>
+          ))}
+        </optgroup>
+      )}
     </select>
   )
 }

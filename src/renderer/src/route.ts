@@ -16,11 +16,14 @@ export type ViewId =
   | 'roadmap'
   | 'dashboard'
   | 'activity'
+  | 'docs'
 
 export interface Route {
   spaceId: string | null
   projectId: string | null
   view: ViewId
+  // Open doc when view is 'docs'
+  docId?: string | null
 }
 
 export const PROJECT_VIEWS: { id: ViewId; label: string }[] = [
@@ -36,6 +39,7 @@ export const PROJECT_VIEWS: { id: ViewId; label: string }[] = [
   { id: 'planning', label: 'Planning' },
   { id: 'chart', label: 'Charts' },
   { id: 'calendar', label: 'Calendar' },
+  { id: 'docs', label: 'Docs' },
   { id: 'activity', label: 'Activity' }
 ]
 
@@ -55,5 +59,6 @@ export const VIEW_LABEL: Record<ViewId, string> = {
   calendar: 'Calendar',
   roadmap: 'Roadmap',
   dashboard: 'Dashboard',
-  activity: 'Activity'
+  activity: 'Activity',
+  docs: 'Docs'
 }

@@ -30,8 +30,8 @@ Last checked against the code: 2026-10-29.
 | Activity history per issue | Y (`shared/model.ts` describeChanges, `IssueDetail.tsx` Activity) |
 | Subscriptions and notifications (inbox) | Y (inbox from mentions, automation alerts and subscribed issues; issues are subscribed on create when the project auto-subscribes, and a bell in the drawer toggles it. Changes made locally do not notify; changes from sync or the MCP server do. `shared/subscriptions.ts`, `NotificationsPanel.tsx`) |
 | Favourites | Y (`shared/types.ts` Issue.favourite, `FavGutter.tsx`, `IssueDetail.tsx`) |
-| Templates (issue, project, document) | P (issue templates saved from `IssueDetail.tsx`; project templates saved from Project settings > Templates, with statuses, columns, views, automations, triage rules and optional starter issues, used from New project. `shared/projectTemplates.ts`, `NewProjectModal.tsx`; no document templates) |
-| Documents (project and team docs) | N |
+| Templates (issue, project, document) | P (issue templates saved from `IssueDetail.tsx`; project templates saved from Project settings > Templates, with statuses, columns, views, automations, triage rules and optional starter issues, used from New project. `shared/projectTemplates.ts`, `NewProjectModal.tsx`; doc templates saved with Save as template and used from the Docs view's From template menu) |
+| Documents (project and team docs) | P (Markdown docs under a space or project with a split editor and a sanitised live preview; `KEY-N` mentions link to issues and show as "Mentioned in docs" on the issue; synced, with a conflicted copy kept when two devices edit one body offline. `shared/docs.ts`, `DocsView.tsx`; no team docs UI yet, no rich text, images or co-editing) |
 | Asks and forms (intake) | N |
 | Recurring issues | Y (daily, weekly on chosen weekdays, monthly on a day, or every N days; the next copy is created on the app's tick with catch-up limited to one copy. Each copy has a deterministic ID from the template and period, so two synced devices create the same row and sync merges it. `shared/recurrence.ts`, `shared/model.ts` runRecurrences, `IssueDetail.tsx`) |
 
@@ -43,7 +43,7 @@ Last checked against the code: 2026-10-29.
 | Triage inbox with accept, decline, duplicate | Y (`TriageView.tsx`, `IssueDetail.tsx` Accept and Decline) |
 | Triage rules (auto-assign team, status, labels, priority) | Y (`shared/types.ts` TriageRule, `shared/model.ts` intake, `ProjectSettings.tsx` Triage rules; sets assignee, status, priority, labels, cycle) |
 | Auto-close and auto-archive rules | Y (per project: cancel open issues untouched for N days, archive completed or canceled issues untouched for N days; archived issues are listed and restored in Project settings > Archive, and hidden from Cycles, Triage, command search, dashboard widgets and Activity. `shared/model.ts` runHousekeeping, `shared/live.ts`) |
-| Git branch names and PR status (GitHub, GitLab) | N |
+| Git branch names and PR status (GitHub, GitLab) | P (GitHub only: branch name copy, PR links with state, PR column and filter, status automations. `shared/git.ts`, `main/github.ts`, `IssueDetail.tsx` Pull requests, `GitSection.tsx`. GitLab, CI status and branch creation are missing; see [github.md](github.md)) |
 | Keyboard-first command menu (Cmd+K) | Y (`App.tsx` Cmd+K handler, `CommandPalette.tsx`) |
 | Single-key shortcuts for set status, priority, label, assignee | Y (s, p, l, a and f keys in the issue drawer. `IssueDetail.tsx`) |
 
@@ -65,10 +65,10 @@ Last checked against the code: 2026-10-29.
 |---|---|
 | Built-in automation (auto-close, auto-archive, auto-add to cycle) | Y (`shared/model.ts` runAutomations, applyAction and runHousekeeping; move to current cycle, auto-close on inactivity and auto-archive) |
 | Triggers on issue, project, cycle and initiative changes | Y (issue triggers: status, priority, assignee, due date and custom column changed; project status changed, cycle started or ended, initiative status changed. `shared/types.ts` AutomationTrigger, `shared/model.ts`) |
-| Slack, GitHub, GitLab, Figma, Sentry, Zendesk and similar | N |
-| API and webhooks | P (local HTTP MCP server for agents, `src/main/mcp.ts`; no webhooks, no public REST API) |
+| Slack, GitHub, GitLab, Figma, Sentry, Zendesk and similar | P (GitHub PR status by personal token and polling, `src/main/github.ts`; Slack incoming-webhook backend: post from automations and share an issue, `src/main/slack.ts`, `src/shared/integrations.ts`; settings UI not built. Other providers: link detection only, `parseIntegrationLink`. See [integrations.md](integrations.md)) |
+| API and webhooks | Y (local MCP server for agents, `src/main/mcp.ts`; localhost REST API at /api/v1 with create/read/update for issues and comments, `src/main/rest.ts`; per-project signed webhooks with retries, a delivery log and redeliver, sent from the device that made the change, `src/main/webhooks.ts`, `shared/webhooks.ts`, docs/api.md) |
 | Import from Jira, Asana, CSV | Y (CSV import and export, plus file import of a Jira CSV export and an Asana CSV or JSON export with a preview and status mapping. `ImportModal.tsx`, `shared/importers.ts`; no live API import) |
-| Agents assigned to issues | N (MCP exists for local agents, but assignee is free text and there is no agent assignee type) |
+| Agents assigned to issues | Y (registered agents with their own MCP token and level read/comment/write, `agent:<id>` assignees with a robot badge, `my_issues`/`whoami` tools, activity attributed to the agent; `src/shared/agents.ts`, `src/main/mcp.ts`) |
 
 ## 2. monday.com
 
@@ -81,7 +81,7 @@ Last checked against the code: 2026-10-29.
 | Groups inside a board | Y (group by any column: `shared/query.ts` groupIssues, `FilterBar.tsx`) |
 | Items and subitems (nested table) | Y (sub-issues: `IssueDetail.tsx`, nested rows in `TableView.tsx`) |
 | Item updates (comments with @mentions and attachments) | Y (comments with @mention notifications, file attachments (5 MB cap, stored in the data file) and reactions. `shared/model.ts` addComment) |
-| Docs (rich pages, can embed boards) | N |
+| Docs (rich pages, can embed boards) | P (Markdown docs, see 1.1 Documents; no embedded boards) |
 | Forms (public intake to a board) | P (local intake forms per project; each submission becomes a triage item, also through MCP `submit_form`. `ProjectSettings.tsx` Forms tab, `FormModal.tsx`, `shared/forms.ts`; no public link) |
 
 ### 2.2 Column types
@@ -124,9 +124,9 @@ Columns the API lists, with Prometheus status.
 | Item ID | item_id | Y (`cells.tsx`, `columns.ts`) |
 | Button | button | Y (optional action on click: set status or priority, add a label, notify, create a sub-issue or move to the current cycle, as one undo step; otherwise a click counter. `cells.tsx`, `shared/model.ts` pressButton) |
 | Board relation | board_relation | Y (same as Connect boards, `cells.tsx`) |
-| Doc | — | N |
+| Doc | — | Y (links an issue to one or more docs; chips plus a picker. `cells.tsx`) |
 | Subtasks (as column) | subtasks | P (read-only done/total of sub-issues, sortable. `cells.tsx`, `shared/subtasks.ts`; the cell does not expand or open sub-issues) |
-| Integrations column (GitHub, Jira) | — | N |
+| Integrations column (GitHub, Jira) | — | P (data type and URL detection, no column picker yet) |
 | Mirror and formula | mirror, formula | Y (`cells.tsx` MirrorValue and FormulaValue, `shared/formula.ts`) |
 
 Column-level features: header rename, hide, reorder, resize, pin, sort, group-footer summary (sum, average, count, min, max), per-column description, column default value, column validation (required, unique), column automations. These are listed as prose, not as table rows, so they are not given a status here. Most are present in code (`shared/types.ts` Column has footer, required and description; `TableView.tsx` handles resize, order, sort and hide).
@@ -155,8 +155,8 @@ Column-level features: header rename, hide, reorder, resize, pin, sort, group-fo
 | Trigger-action automations ("when status changes, notify person") | Y (`shared/model.ts` runAutomations, `ProjectSettings.tsx` Automations with built-in recipes from `shared/recipes.ts`; create item can target another project in the same space; notify goes to the local user) |
 | Recipes (templated automations) | N |
 | Cross-board item creation | N (the create-issue action only creates items in the same project) |
-| Integrations (Slack, Teams, GitHub, Jira, Gmail, and others) | N |
-| Webhooks and API | P (local HTTP MCP server, `src/main/mcp.ts`; no webhooks, no REST API) |
+| Integrations (Slack, Teams, GitHub, Jira, Gmail, and others) | P (GitHub PR status and Slack webhook backend only; see [integrations.md](integrations.md)) |
+| Webhooks and API | Y (MCP, localhost REST API and signed outgoing webhooks; see docs/api.md. No REST delete, no public hosted API) |
 | Formula and mirror columns | Y (`shared/formula.ts`, `cells.tsx`) |
 
 ### 2.5 Dashboards and reporting
@@ -175,7 +175,7 @@ Column-level features: header rename, hide, reorder, resize, pin, sort, group-fo
 | Permissions per board and column | N |
 | Notifications and inbox | Y (`NotificationsPanel.tsx`, read state in `shared/model.ts` markNotifications) |
 | Activity log per item and board | Y (per item in `IssueDetail.tsx`, and a project-level Activity view with issue and field filters and paging. `views/ActivityView.tsx`, `shared/activity.ts`) |
-| Templates (board, doc, form) | P (issue templates and project (board) templates; no doc or form templates) |
+| Templates (board, doc, form) | P (issue, project (board) and doc templates; no form templates) |
 | Import and export (CSV, Excel) | Y (CSV and Excel (.xlsx) import and export in `TableView.tsx`, `xlsx.ts`, using read-excel-file and write-excel-file) |
 | Audit log | Y (append-only local log of every change with source (ui, mcp, sync), filters and CSV export; capped at 50,000 rows. Settings > Audit log, `main/db.ts`, `shared/audit.ts`) |
 
@@ -184,16 +184,14 @@ Column-level features: header rename, hide, reorder, resize, pin, sort, group-fo
 Full 1:1 with both products is a multi-quarter build and needs a multi-user backend. The local app already covers most single-user features. What is left is listed below.
 
 **Still missing, feasible locally (single user):**
-- Project and team documents (single user).
-- Document templates.
+- Team documents and images in docs.
 - Cross-project item creation. Recipes.
-- Agent as an assignee type.
 
 **Needs a backend or multi-user:**
 - Accounts, guests, roles, permissions, sharing.
 - Real-time sync between users, and comments with @mentions and notifications across users. (Folder sync between your own devices already exists.)
-- Integrations that depend on third-party OAuth (Slack, GitHub, GitLab, Jira, Gmail, Teams), including git branch and PR status.
-- Webhooks.
+- Integrations that depend on third-party OAuth (Slack, GitLab, Jira, Gmail, Teams). GitHub PR status is partly done with a personal token and polling, not OAuth; GitLab, CI status and branch creation are still missing.
+- Webhooks sent by a server when no device is open (today they are sent by the app on the device that made the change).
 - Forms that accept public submissions.
 - Docs with co-editing.
 
@@ -205,7 +203,7 @@ Each phase ends with typecheck passing and a manual check in the app. Phases are
 1. Sub-issues with parent progress roll-up. **Done.**
 2. Relations (blocks, blocked by, duplicate, related). **Done.**
 3. Comments and activity log per issue. **Done.** Reactions and subscriptions done.
-4. Favourites, estimates, and issue templates. **Done.** T-shirt estimate scale and project templates done. Open: document templates.
+4. Favourites, estimates, and issue templates. **Done.** T-shirt estimate scale and project templates done. Document templates done.
 5. Command menu (Cmd+K) and single-key shortcuts. **Done.** Drawer keys s, p, l, a and f.
 
 **Phase 2: views and filtering**

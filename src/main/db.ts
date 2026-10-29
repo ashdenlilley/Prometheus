@@ -3,14 +3,16 @@ import { promises as fs } from 'fs'
 import initSqlJs, { type Database, type SqlJsStatic } from 'sql.js'
 import type { AppData } from '../shared/types'
 import { AUDIT_LIMIT, type AuditEntry, type AuditFilter, type AuditRow } from '../shared/audit'
+import { DELIVERY_LOG_LIMIT, type DeliveryStatus, type WebhookDelivery } from '../shared/webhooks'
+import type { WebhookEvent } from '../shared/types'
 
 // Local SQLite database (sql.js, in-process wasm). One table per entity kind, each row holding
 // the entity as JSON with its parent id indexed. Saves diff against the last write, so only
 // changed rows are rewritten.
 
-type Table = 'spaces' | 'initiatives' | 'teams' | 'projects' | 'issues' | 'cycles' | 'automations' | 'triage_rules' | 'templates' | 'dashboards' | 'notifications'
+type Table = 'spaces' | 'initiatives' | 'teams' | 'projects' | 'issues' | 'cycles' | 'automations' | 'triage_rules' | 'templates' | 'dashboards' | 'notifications' | 'docs' | 'agents' | 'webhooks' | 'git_links' | 'integrations'
 
-const TABLES: Table[] = ['spaces', 'initiatives', 'teams', 'projects', 'issues', 'cycles', 'automations', 'triage_rules', 'templates', 'dashboards', 'notifications']
+const TABLES: Table[] = ['spaces', 'initiatives', 'teams', 'projects', 'issues', 'cycles', 'automations', 'triage_rules', 'templates', 'dashboards', 'notifications', 'docs', 'agents', 'webhooks', 'git_links', 'integrations']
 
 // AppData key for each table.
 const KEY: Record<Table, keyof AppData> = {
@@ -24,11 +26,17 @@ const KEY: Record<Table, keyof AppData> = {
   triage_rules: 'triageRules',
   templates: 'templates',
   dashboards: 'dashboards',
-  notifications: 'notifications'
+  notifications: 'notifications',
+  docs: 'docs',
+  agents: 'agents',
+  webhooks: 'webhooks',
+  git_links: 'gitLinks',
+  integrations: 'integrations'
 }
 
 // Parent column per table, used to index child lookups.
 const PARENT: Partial<Record<Table, string>> = {
+  git_links: 'issue_id',
   initiatives: 'space_id',
   teams: 'space_id',
   projects: 'space_id',
@@ -37,7 +45,9 @@ const PARENT: Partial<Record<Table, string>> = {
   automations: 'project_id',
   triage_rules: 'project_id',
   templates: 'project_id',
-  dashboards: 'space_id'
+  dashboards: 'space_id',
+  docs: 'space_id',
+  webhooks: 'project_id'
 }
 
 let sqlPromise: Promise<SqlJsStatic> | null = null
@@ -49,6 +59,24 @@ function sql() {
     locateFile: file => join(dirname(require.resolve('sql.js/dist/sql-wasm.js')), file)
   })
   return sqlPromise
+}
+
+const DELIVERY_COLS = 'id, webhook_id, event, payload, status, attempts, next_at, last_code, last_error, created_at, updated_at'
+
+function toDelivery(r: unknown[]): WebhookDelivery {
+  return {
+    id: String(r[0]),
+    webhookId: String(r[1]),
+    event: String(r[2]) as WebhookEvent,
+    payload: String(r[3]),
+    status: String(r[4]) as DeliveryStatus,
+    attempts: Number(r[5]),
+    nextAt: Number(r[6]),
+    lastCode: r[7] == null ? undefined : Number(r[7]),
+    lastError: r[8] == null ? undefined : String(r[8]),
+    createdAt: String(r[9]),
+    updatedAt: String(r[10])
+  }
 }
 
 export class Store {
@@ -81,6 +109,9 @@ export class Store {
     this.db.run('CREATE TABLE IF NOT EXISTS sync_clock (key TEXT PRIMARY KEY, hlc TEXT NOT NULL)')
     this.db.run('CREATE TABLE IF NOT EXISTS sync_applied (name TEXT PRIMARY KEY)')
     this.db.run('CREATE TABLE IF NOT EXISTS audit (seq INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, source TEXT NOT NULL, action TEXT NOT NULL, tbl TEXT NOT NULL, target TEXT NOT NULL, fields TEXT)')
+    // Webhook queue and log. Local to this device: not in AppData, not synced.
+    this.db.run('CREATE TABLE IF NOT EXISTS webhook_deliveries (id TEXT PRIMARY KEY, webhook_id TEXT, event TEXT, payload TEXT, status TEXT, attempts INTEGER, next_at INTEGER, last_code INTEGER, last_error TEXT, created_at TEXT, updated_at TEXT)')
+    this.db.run('CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_webhook ON webhook_deliveries (webhook_id)')
   }
 
   clocks(): Map<string, string> {
@@ -192,6 +223,64 @@ export class Store {
     return this.flush()
   }
 
+  // Webhook deliveries. Rows are written into the open database and flushed to disk straight away,
+  // since nothing else persists until the next data change.
+  enqueueDelivery(d: WebhookDelivery): void {
+    if (!this.db) return
+    this.db.run(
+      'INSERT INTO webhook_deliveries (id, webhook_id, event, payload, status, attempts, next_at, last_code, last_error, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [d.id, d.webhookId, d.event, d.payload, d.status, d.attempts, d.nextAt, d.lastCode ?? null, d.lastError ?? null, d.createdAt, d.updatedAt]
+    )
+    this.db.run(
+      'DELETE FROM webhook_deliveries WHERE webhook_id = ? AND status != \'pending\' AND rowid NOT IN (SELECT rowid FROM webhook_deliveries WHERE webhook_id = ? ORDER BY rowid DESC LIMIT ?)',
+      [d.webhookId, d.webhookId, DELIVERY_LOG_LIMIT]
+    )
+    this.flushDeliveries()
+  }
+
+  dueDeliveries(nowMs: number): WebhookDelivery[] {
+    if (!this.db) return []
+    const res = this.db.exec(`SELECT ${DELIVERY_COLS} FROM webhook_deliveries WHERE status = 'pending' AND next_at <= ? ORDER BY next_at, rowid`, [nowMs])
+    return (res[0]?.values ?? []).map(toDelivery)
+  }
+
+  // Replaces the row with the same id. Callers pass the whole row with the fields they changed.
+  updateDelivery(d: WebhookDelivery): void {
+    if (!this.db) return
+    this.db.run('UPDATE webhook_deliveries SET status = ?, attempts = ?, next_at = ?, last_code = ?, last_error = ?, updated_at = ? WHERE id = ?', [
+      d.status,
+      d.attempts,
+      d.nextAt,
+      d.lastCode ?? null,
+      d.lastError ?? null,
+      d.updatedAt,
+      d.id
+    ])
+    this.flushDeliveries()
+  }
+
+  // Newest first.
+  listDeliveries(webhookId: string, limit = DELIVERY_LOG_LIMIT): WebhookDelivery[] {
+    if (!this.db) return []
+    const res = this.db.exec(`SELECT ${DELIVERY_COLS} FROM webhook_deliveries WHERE webhook_id = ? ORDER BY rowid DESC LIMIT ?`, [webhookId, limit])
+    return (res[0]?.values ?? []).map(toDelivery)
+  }
+
+  getDelivery(id: string): WebhookDelivery | undefined {
+    if (!this.db) return undefined
+    const res = this.db.exec(`SELECT ${DELIVERY_COLS} FROM webhook_deliveries WHERE id = ?`, [id])
+    return res[0]?.values.map(toDelivery)[0]
+  }
+
+  private flushDeliveries() {
+    this.flush().catch(err => console.warn('delivery log write failed', err))
+  }
+
+  // Resolves once queued writes are on disk. Tests wait on it before removing the database directory.
+  settled(): Promise<void> {
+    return this.flushing
+  }
+
   // Wipes sync bookkeeping. Used when joining a folder and replaying it from scratch.
   resetSync() {
     if (!this.db) return
@@ -228,6 +317,11 @@ export class Store {
       templates: all('templates') as AppData['templates'],
       dashboards: all('dashboards') as AppData['dashboards'],
       notifications: all('notifications') as AppData['notifications'],
+      docs: all('docs') as AppData['docs'],
+      agents: all('agents') as AppData['agents'],
+      webhooks: all('webhooks') as AppData['webhooks'],
+      gitLinks: all('git_links') as AppData['gitLinks'],
+      integrations: all('integrations') as AppData['integrations'],
       me
     }
     this.primeCache(data)
@@ -243,7 +337,7 @@ export class Store {
   private primeCache(data: AppData) {
     for (const t of TABLES) {
       const rows = new Map<string, string>()
-      for (const row of data[KEY[t]] as { id: string }[]) rows.set(row.id, JSON.stringify(row))
+      for (const row of (data[KEY[t]] ?? []) as { id: string }[]) rows.set(row.id, JSON.stringify(row))
       this.cache.set(t, rows)
     }
   }
@@ -262,7 +356,12 @@ export class Store {
       triage_rules: data.triageRules.map(r => ({ id: r.id, parent: r.projectId, json: JSON.stringify(r) })),
       templates: data.templates.map(r => ({ id: r.id, parent: r.projectId, json: JSON.stringify(r) })),
       dashboards: data.dashboards.map(r => ({ id: r.id, parent: r.spaceId, json: JSON.stringify(r) })),
-      notifications: data.notifications.map(r => ({ id: r.id, json: JSON.stringify(r) }))
+      notifications: data.notifications.map(r => ({ id: r.id, json: JSON.stringify(r) })),
+      docs: (data.docs ?? []).map(r => ({ id: r.id, parent: r.spaceId, json: JSON.stringify(r) })),
+      agents: (data.agents ?? []).map(r => ({ id: r.id, json: JSON.stringify(r) })),
+      webhooks: (data.webhooks ?? []).map(r => ({ id: r.id, parent: r.projectId, json: JSON.stringify(r) })),
+      git_links: (data.gitLinks ?? []).map(r => ({ id: r.id, parent: r.issueId, json: JSON.stringify(r) })),
+      integrations: (data.integrations ?? []).map(r => ({ id: r.id, json: JSON.stringify(r) }))
     }
 
     db.run('BEGIN')

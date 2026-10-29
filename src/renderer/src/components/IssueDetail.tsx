@@ -1,16 +1,23 @@
 import { useEffect, useRef, useState } from 'react'
-import type { ActivityEntry, Comment, FileRef, Issue, Relation, RelationType } from '@shared/types'
+import type { ActivityEntry, Comment, FileRef, Integration, Issue, Relation, RelationType } from '@shared/types'
 import { childrenOf, progress } from '@shared/query'
-import { DRAWER_SHORTCUTS, drawerShortcut } from '@shared/shortcuts'
+import { integrationsFor } from '@shared/integrations'
+import { DRAWER_SHORTCUTS, drawerShortcut, isCopyBranchShortcut } from '@shared/shortcuts'
+import { branchName } from '@shared/git'
 import { createIssue, issueKey, useStore, withValue } from '../store'
 import { inverseRelations } from '@shared/model'
+import { backlinks } from '@shared/docs'
+import type { Route } from '../route'
 import { availableLabels, labelGroups } from '@shared/labels'
+import { activeAgents, AGENT_PREFIX, agentAssignee, agentText, displayAssignee, isAgentAssignee } from '@shared/agents'
+import { AgentBadge } from './AgentBadge'
 import { nextOccurrence } from '@shared/recurrence'
 import type { Recurrence } from '@shared/types'
 import { CellEditor } from './cells'
 import { EstimateSelect, PrioritySelect, StatusDot, StatusSelect } from './fields'
+import { PrPill } from './PrPill'
 import { ICONS } from './icons'
-import { askText, useEscape } from './ui'
+import { askText, Menu, useEscape, type MenuItem } from './ui'
 import { clsx, fmtDate, parseISO, todayISO, uid } from '../util'
 
 const REL_LABEL: Record<RelationType | 'blocked_by' | 'duplicated_by', string> = {
@@ -27,7 +34,17 @@ const MAX_FILE = 5 * 1024 * 1024
 const REACTIONS = ['👍', '🎉', '❤️', '😄', '👀', '🚀']
 
 // Issue drawer: every field, sub-issues, relations, comments and activity.
-export function IssueDetail({ issueId, onClose, onOpen }: { issueId: string; onClose: () => void; onOpen: (id: string) => void }) {
+export function IssueDetail({
+  issueId,
+  onClose,
+  onOpen,
+  onNavigate
+}: {
+  issueId: string
+  onClose: () => void
+  onOpen: (id: string) => void
+  onNavigate: (route: Route) => void
+}) {
   const { data, dispatch } = useStore()
   const issue = data.issues.find(i => i.id === issueId)
   const project = data.projects.find(p => p.id === issue?.projectId)
@@ -41,6 +58,8 @@ export function IssueDetail({ issueId, onClose, onOpen }: { issueId: string; onC
   const [relTarget, setRelTarget] = useState('')
   const labelsRef = useRef<HTMLInputElement>(null)
   const assigneeRef = useRef<HTMLInputElement>(null)
+  const [sent, setSent] = useState('')
+  const [copied, setCopied] = useState(false)
   useEscape(onClose)
 
   // Single-key shortcuts while not typing (see DRAWER_SHORTCUTS): s status, p priority, f favourite, l labels, a assignee.
@@ -48,7 +67,13 @@ export function IssueDetail({ issueId, onClose, onOpen }: { issueId: string; onC
     if (!issue || !project) return
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement
-      const key = drawerShortcut({ key: e.key, metaKey: e.metaKey, ctrlKey: e.ctrlKey, altKey: e.altKey, typing: !!t.closest('input, textarea, select, [contenteditable]') })
+      const typing = !!t.closest('input, textarea, select, [contenteditable]')
+      if (isCopyBranchShortcut({ code: e.code, metaKey: e.metaKey, ctrlKey: e.ctrlKey, shiftKey: e.shiftKey, altKey: e.altKey, typing })) {
+        e.preventDefault()
+        void copyBranch()
+        return
+      }
+      const key = drawerShortcut({ key: e.key, metaKey: e.metaKey, ctrlKey: e.ctrlKey, altKey: e.altKey, typing })
       if (!key) return
       const statuses = project.statuses
       if (key === 's') {
@@ -71,6 +96,15 @@ export function IssueDetail({ issueId, onClose, onOpen }: { issueId: string; onC
 
   if (!issue || !project) return null
 
+  const slack = integrationsFor(data, issue.projectId)
+  const share = (i: Integration) => {
+    dispatch({ type: 'shareToSlack', issueId: issue.id, integrationId: i.id })
+    setSent(i.name)
+  }
+  const shareItems: MenuItem[] = slack.length
+    ? slack.map(i => ({ label: slack.length > 1 ? `Share to ${i.name}` : 'Share to Slack', onSelect: () => share(i) }))
+    : [{ label: 'Share to Slack', disabled: true, title: 'Add a Slack integration in Settings > Integrations', onSelect: () => {} }]
+
   const patch = (p: Partial<Issue>) => dispatch({ type: 'patchIssue', id: issue.id, patch: p })
   const rec = issue.recurrence
   const today = todayISO()
@@ -92,6 +126,7 @@ export function IssueDetail({ issueId, onClose, onOpen }: { issueId: string; onC
   const childPct = progress(children, project.statuses)
   const parent = data.issues.find(i => i.id === issue.parentId)
   const inverse = inverseRelations(data, issue.id)
+  const docLinks = backlinks(issue.id, data)
   const pool = data.issues.filter(i => i.id !== issue.id)
   const key = (i: Issue) => issueKey(data, i)
 
@@ -226,12 +261,24 @@ export function IssueDetail({ issueId, onClose, onOpen }: { issueId: string; onC
     ...issue.comments.map(c => ({ at: c.at, kind: 'comment' as const, item: c }))
   ].sort((a, b) => a.at.localeCompare(b.at))
 
+  // The prefix comes from Settings > GitHub, read here so a change applies at once.
+  const copyBranch = async () => {
+    const { branchPrefix } = await window.api.git.status()
+    await navigator.clipboard.writeText(branchName(key(issue), issue.title, branchPrefix))
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1400)
+  }
+  const links = (data.gitLinks ?? []).filter(l => l.issueId === issue.id)
+
   return (
     <div className="overlay drawer-overlay" onMouseDown={onClose}>
       <aside className="drawer" onMouseDown={e => e.stopPropagation()}>
         <div className="panel-head">
           <span className="muted key">{key(issue)}</span>
           <div className="row-gap">
+            <button className="btn ghost" title="Copy branch name (Mod+Shift+.)" onClick={copyBranch}>
+              {copied ? 'Copied' : 'Copy branch name'}
+            </button>
             <button
               className={clsx('icon-btn', issue.subscribed && 'on')}
               title="Notify me about changes"
@@ -249,11 +296,13 @@ export function IssueDetail({ issueId, onClose, onOpen }: { issueId: string; onC
             >
               {issue.favourite ? '★' : '☆'}
             </button>
+            <Menu label="Issue actions" align="right" items={shareItems} />
             <button className="btn ghost" onClick={saveTemplate}>Save as template</button>
             <button className="btn danger" onClick={remove}>{ICONS.trash} Delete</button>
             <button className="icon-btn" onClick={onClose} aria-label="Close">{ICONS.close}</button>
           </div>
         </div>
+        {sent && <div className="muted small">Sent to {sent}</div>}
         <div className="muted small drawer-keys">
           {DRAWER_SHORTCUTS.map((s, i) => (
             <span key={s.key}>
@@ -301,12 +350,27 @@ export function IssueDetail({ issueId, onClose, onOpen }: { issueId: string; onC
           </label>
           <label>
             Assignee
-            <input ref={assigneeRef} aria-label="Assignee" className="field-input" list={`people-${project.id}`} value={issue.assignee} onChange={e => patch({ assignee: e.target.value })} />
-            <datalist id={`people-${project.id}`}>
-              {project.members.map(m => (
-                <option key={m} value={m} />
+            {isAgentAssignee(issue.assignee) ? (
+              <div className="agent-cell">
+                <AgentBadge data={data} assignee={issue.assignee} />
+                <button className="btn ghost" aria-label="Clear assignee" onClick={() => patch({ assignee: '' })}>×</button>
+              </div>
+            ) : (
+              <>
+                <input ref={assigneeRef} aria-label="Assignee" className="field-input" list={`people-${project.id}`} value={issue.assignee} onChange={e => patch({ assignee: e.target.value })} />
+                <datalist id={`people-${project.id}`}>
+                  {project.members.map(m => (
+                    <option key={m} value={m} />
+                  ))}
+                </datalist>
+              </>
+            )}
+            <select aria-label="Assign to agent" className="field-input" value="" onChange={e => e.target.value && patch({ assignee: e.target.value })}>
+              <option value="">Assign to agent…</option>
+              {activeAgents(data).map(a => (
+                <option key={a.id} value={agentAssignee(a.id)}>🤖 {a.name}</option>
               ))}
-            </datalist>
+            </select>
           </label>
           <label>
             Labels
@@ -512,6 +576,49 @@ export function IssueDetail({ issueId, onClose, onOpen }: { issueId: string; onC
           </div>
         </section>
 
+        {(!!project.repos?.length || links.length > 0) && (
+          <section className="drawer-section">
+            <div className="section-title-row small">
+              <h3>Pull requests</h3>
+              {!!project.repos?.length && <button className="btn ghost" onClick={() => window.api.git.refresh()}>Refresh</button>}
+            </div>
+            {links.map(l => (
+              <div key={l.id} className="pr-link-row">
+                <PrPill state={l.state} />
+                <button className="link-row" title={l.url} onClick={() => window.api.openExternal(l.url)}>
+                  <span className="muted key">{l.repo}#{l.number}</span>
+                  <span className="grow ellipsis">{l.title}</span>
+                </button>
+                <button className="icon-btn" aria-label={`Unlink ${l.repo}#${l.number}`} title="Unlink" onClick={() => dispatch({ type: 'removeGitLink', id: l.id })}>
+                  {ICONS.close}
+                </button>
+              </div>
+            ))}
+            {links.length === 0 && (
+              <p className="muted small">No linked PRs. Put {key(issue)} in a branch name, PR title or description.</p>
+            )}
+          </section>
+        )}
+
+        {docLinks.length > 0 && (
+          <section className="drawer-section" data-testid="doc-backlinks">
+            <div className="section-title-row small">
+              <h3>Mentioned in docs</h3>
+            </div>
+            <div className="doc-backlinks">
+              {docLinks.map(d => (
+                <button
+                  key={d.id}
+                  className="chip neutral"
+                  onClick={() => onNavigate({ spaceId: d.spaceId, projectId: d.projectId ?? null, view: 'docs', docId: d.id })}
+                >
+                  {d.title}
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
+
         <section className="drawer-section">
           <div className="section-title-row small">
             <h3>Activity</h3>
@@ -519,7 +626,10 @@ export function IssueDetail({ issueId, onClose, onOpen }: { issueId: string; onC
           {timeline.map((t, n) =>
             t.kind === 'activity' ? (
               <div key={`a-${n}`} className="activity-row muted small">
-                {(t.item as ActivityEntry).text} · {fmtDate(t.at.slice(0, 10))}
+                {agentText(data, (t.item as ActivityEntry).text)} · {fmtDate(t.at.slice(0, 10))}
+                {(t.item as ActivityEntry).actor?.startsWith(AGENT_PREFIX) && (
+                  <span className="muted" data-testid="activity-actor"> · by {displayAssignee(data, (t.item as ActivityEntry).actor ?? '')}</span>
+                )}
               </div>
             ) : (
               renderComment(t.item as Comment)

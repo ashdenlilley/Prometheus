@@ -5,7 +5,7 @@
 // the renderer arrive as 'ui' saves, so they are not tagged 'automation' yet (known limitation).
 import type { Op } from './sync'
 
-export type AuditSource = 'ui' | 'mcp' | 'sync' | 'automation'
+export type AuditSource = 'ui' | 'mcp' | 'sync' | 'automation' | 'git'
 
 export interface AuditEntry {
   at: string
