@@ -60,11 +60,11 @@ Suggested order for the eight remaining features (each starts only after its des
 
 1. OS-353 Teams: no dependencies. Gives later features a stable "team" owner.
 2. OS-354 Documents: project and space docs need nothing; team docs need OS-353.
-3. OS-355 Agents as assignees: builds on the existing MCP server. Introduces the "actor" idea that OS-359 reuses.
+3. OS-355 Agents as assignees: builds on the existing MCP server. Introduces the "actor" idea that OS-360 reuses for multiple users.
 4. OS-356 Webhooks and local REST API: builds on the MCP tool layer. Introduces the shared credential store and the outgoing-HTTP delivery queue.
 5. OS-357 Git integration: reuses the credential store from OS-356.
 6. OS-358 Third-party integrations: reuses the credential store and delivery queue from OS-356, and the link model from OS-357.
-7. OS-359 Multi-user and real-time sync: needs OS-353 (membership becomes real accounts) and OS-355 (actor attribution). The only item that needs a backend.
-8. OS-360 Permissions: needs OS-359 (server-side enforcement needs a server and real identities) and OS-353 (team roles).
+7. OS-359 Cloud sync, single account first: one account syncing live across Ashden's devices. Its first slice needs no other feature (OS-353 and OS-355 data simply sync like any other rows), so it can be pulled earlier if live sync matters more. It introduces the backend.
+8. OS-360 Multi-user collaboration and permissions: invites, accounts, guests, roles, presence, user pickers and enforcement. Needs OS-359 (server, op log, device auth) and OS-353 (team roles); uses OS-355's actor model for agents.
 
-Items 1 to 6 keep Prometheus single-user and local-first. Items 7 and 8 change that and should be decided together.
+Items 1 to 6 keep Prometheus single-user and local-first. Item 7 adds an optional backend but stays single-user. Item 8 is where Prometheus becomes multi-user.
