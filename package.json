@@ -14,6 +14,8 @@
     "typecheck": "tsc --noEmit",
     "dist:mac": "npm run build && electron-builder --mac",
     "dist:win": "npm run build && electron-builder --win",
+    "test": "npm run test:unit && npm run test:sync",
+    "test:unit": "node scripts/test-unit.mjs",
     "test:sync": "node scripts/test-sync.mjs"
   },
   "build": {
