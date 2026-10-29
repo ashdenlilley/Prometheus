@@ -166,6 +166,11 @@ export type AutomationTrigger =
   | { type: 'priority_changed'; to: number }
   | { type: 'assignee_changed' }
   | { type: 'due_passed' }
+  | { type: 'column_changed'; columnId: string; to?: string }
+  | { type: 'project_status_changed'; to?: ProjectStatus }
+  | { type: 'cycle_started' }
+  | { type: 'cycle_ended' }
+  | { type: 'initiative_status_changed'; to?: Initiative['status'] }
 
 export type AutomationAction =
   | { type: 'set_status'; status: string }
@@ -173,7 +178,7 @@ export type AutomationAction =
   | { type: 'set_assignee'; assignee: string }
   | { type: 'add_label'; label: string }
   | { type: 'move_to_cycle' }
-  | { type: 'create_issue'; title: string; status?: string }
+  | { type: 'create_issue'; title: string; status?: string; projectId?: string }
   | { type: 'notify'; message: string }
 
 export interface Automation {
@@ -181,6 +186,7 @@ export interface Automation {
   projectId: string
   name: string
   enabled: boolean
+  createdAt?: string
   trigger: AutomationTrigger
   action: AutomationAction
 }
@@ -292,6 +298,8 @@ export interface Cycle {
   endDate: string
   // Set once a cycle was auto rolled over
   rolledOver?: boolean
+  // Keys like "automationId:started" for cycle rules that already ran
+  firedAutomations?: string[]
 }
 
 // Applied to new triage items whose fields match `when`. Sets the given fields; the item stays in triage.

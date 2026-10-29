@@ -112,8 +112,14 @@ export function reducer(s: AppData, a: Action): AppData {
     }
     case 'addInitiative':
       return { ...s, initiatives: [...s.initiatives, a.initiative] }
-    case 'patchInitiative':
-      return { ...s, initiatives: s.initiatives.map(i => (i.id === a.id ? { ...i, ...a.patch } : i)) }
+    case 'patchInitiative': {
+      const out = { ...s, initiatives: s.initiatives.map(i => (i.id === a.id ? { ...i, ...a.patch } : i)) }
+      const before = s.initiatives.find(i => i.id === a.id)
+      if (!before || a.patch.status === undefined || a.patch.status === before.status) return out
+      const projectIds = s.projects.filter(p => p.initiativeId === a.id).map(p => p.id)
+      const rules = s.automations.filter(r => r.enabled && projectIds.includes(r.projectId) && r.trigger.type === 'initiative_status_changed' && (r.trigger.to === undefined || r.trigger.to === a.patch.status))
+      return runProjectRules(out, rules)
+    }
     case 'deleteInitiative':
       return {
         ...s,
@@ -122,15 +128,23 @@ export function reducer(s: AppData, a: Action): AppData {
       }
     case 'addProject':
       return { ...s, projects: [...s.projects, a.project] }
-    case 'patchProject':
-      return mapProject(s, a.id, p => ({ ...p, ...a.patch }))
+    case 'patchProject': {
+      const out = mapProject(s, a.id, p => ({ ...p, ...a.patch }))
+      const before = s.projects.find(p => p.id === a.id)
+      if (!before || a.patch.status === undefined || a.patch.status === before.status) return out
+      const rules = s.automations.filter(r => r.enabled && r.projectId === a.id && r.trigger.type === 'project_status_changed' && (r.trigger.to === undefined || r.trigger.to === a.patch.status))
+      return runProjectRules(out, rules)
+    }
     case 'deleteProject':
       return {
         ...s,
         projects: s.projects.filter(p => p.id !== a.id),
         issues: s.issues.filter(i => i.projectId !== a.id),
         cycles: s.cycles.filter(c => c.projectId !== a.id),
-        automations: s.automations.filter(x => x.projectId !== a.id),
+        // Rules elsewhere that create issues in this project can no longer run
+        automations: s.automations
+          .filter(x => x.projectId !== a.id)
+          .map(x => (x.action.type === 'create_issue' && x.action.projectId === a.id ? { ...x, enabled: false } : x)),
         triageRules: s.triageRules.filter(r => r.projectId !== a.id),
         templates: s.templates.filter(t => t.projectId !== a.id)
       }
@@ -294,7 +308,7 @@ export function markRolledOver(s: AppData, today: string): AppData {
 // Timed automations (due date passed). Each rule fires once per issue per due date.
 export function runTimedRules(s: AppData, today: string): AppData {
   const rules = s.automations.filter(r => r.enabled && r.trigger.type === 'due_passed')
-  let out = s
+  let out = runCycleRules(s, today)
   for (const rule of rules) {
     const project = out.projects.find(p => p.id === rule.projectId)
     const candidates = out.issues.filter(i => i.projectId === rule.projectId && i.dueDate && i.dueDate < today)
@@ -304,7 +318,7 @@ export function runTimedRules(s: AppData, today: string): AppData {
       const key = `${rule.id}:${issue.dueDate}`
       if (issue.firedAutomations?.includes(key)) continue
       out = mapIssue(out, issue.id, i => ({ ...i, firedAutomations: [...(i.firedAutomations ?? []), key] }))
-      out = applyAction(out, issue.id, rule.action, rule.name)
+      out = applyAction(out, issue.id, rule)
     }
   }
   return out
@@ -446,18 +460,34 @@ function triggerFires(t: Automation['trigger'], before: Issue, after: Issue): bo
       return before.assignee !== after.assignee
     case 'due_passed':
       return !!after.dueDate && after.dueDate < today() && before.dueDate !== after.dueDate
+    case 'column_changed': {
+      const was = before.values[t.columnId]
+      const now = after.values[t.columnId]
+      if (JSON.stringify(was) === JSON.stringify(now)) return false
+      if (t.to === undefined) return true
+      // Multi-value columns (labels-style arrays) match when they contain the value
+      return Array.isArray(now) ? now.some(v => String(v) === t.to) : now !== undefined && String(now) === t.to
+    }
+    // Object triggers (project, cycle, initiative) are run by their own reducer cases, not by issue updates
+    case 'project_status_changed':
+    case 'cycle_started':
+    case 'cycle_ended':
+    case 'initiative_status_changed':
+      return false
   }
 }
 
 function runAutomations(s: AppData, before: Issue, after: Issue, project: Project | undefined): AppData {
   if (!project) return s
   const rules = s.automations.filter(r => r.enabled && r.projectId === project.id && triggerFires(r.trigger, before, after))
-  return rules.reduce((acc, rule) => applyAction(acc, after.id, rule.action, rule.name), s)
+  // Actions use updateIssue(..., false), so an automation never fires another automation (depth 1)
+  return rules.reduce((acc, rule) => applyAction(acc, after.id, rule), s)
 }
 
-function applyAction(s: AppData, issueId: string, action: AutomationAction, ruleName: string): AppData {
+function applyAction(s: AppData, issueId: string, rule: Automation): AppData {
   const issue = s.issues.find(i => i.id === issueId)
   if (!issue) return s
+  const action = rule.action
   switch (action.type) {
     case 'set_status':
       return updateIssue(s, issueId, { status: action.status }, false)
@@ -472,24 +502,99 @@ function applyAction(s: AppData, issueId: string, action: AutomationAction, rule
       return cycle ? updateIssue(s, issueId, { cycleId: cycle.id }, false) : s
     }
     case 'create_issue': {
-      // Follow-up work becomes a sub-issue of the item that triggered it.
       const project = s.projects.find(p => p.id === issue.projectId)
-      const child = createIssue(s, issue.projectId, action.title, {
-        status: action.status ?? project?.statuses[0]?.id ?? 'backlog',
-        parentId: issueId
-      })
+      if (!action.projectId || action.projectId === issue.projectId) {
+        // Follow-up work becomes a sub-issue of the item that triggered it.
+        const child = createIssue(s, issue.projectId, action.title, {
+          status: action.status ?? project?.statuses[0]?.id ?? 'backlog',
+          parentId: issueId
+        })
+        return { ...s, issues: [...s.issues, child] }
+      }
+      const target = s.projects.find(p => p.id === action.projectId)
+      if (!target || target.spaceId !== project?.spaceId) {
+        // Target gone or in another space: stop the rule rather than create work somewhere unexpected
+        return disableAutomation(s, rule)
+      }
+      // A cross-project item is not a sub-issue: it relates back to the trigger issue instead
+      const status = target.statuses.some(st => st.id === action.status) ? action.status : target.statuses[0]?.id ?? 'backlog'
+      const child = createIssue(s, target.id, action.title, { status, relations: [{ type: 'related', targetId: issueId }] })
       return { ...s, issues: [...s.issues, child] }
     }
     case 'notify':
       return {
         ...s,
         notifications: [
-          { id: crypto.randomUUID(), at: new Date().toISOString(), text: `${action.message} (${ruleName})`, issueId, read: false },
+          { id: crypto.randomUUID(), at: new Date().toISOString(), text: `${action.message} (${rule.name})`, issueId, read: false },
           ...s.notifications
         ].slice(0, 200)
       }
   }
 }
+
+function disableAutomation(s: AppData, rule: Automation): AppData {
+  return {
+    ...s,
+    automations: s.automations.map(x => (x.id === rule.id ? { ...x, enabled: false } : x)),
+    notifications: [
+      { id: crypto.randomUUID(), at: new Date().toISOString(), text: `Automation "${rule.name}" was disabled: its target project no longer exists`, read: false },
+      ...s.notifications
+    ].slice(0, 200)
+  }
+}
+
+// Object triggers run the same actions on a set of issues, unfinished ones only. Notify adds one notification with no issue.
+function applyObjectAction(s: AppData, automation: Automation, issueIds: string[]): AppData {
+  const action = automation.action
+  if (action.type === 'notify') {
+    return {
+      ...s,
+      notifications: [
+        { id: crypto.randomUUID(), at: new Date().toISOString(), text: `${action.message} (${automation.name})`, read: false },
+        ...s.notifications
+      ].slice(0, 200)
+    }
+  }
+  if (!['set_status', 'set_priority', 'set_assignee', 'add_label'].includes(action.type)) return s
+  const project = s.projects.find(p => p.id === automation.projectId)
+  return issueIds.reduce((acc, id) => {
+    const issue = acc.issues.find(i => i.id === id)
+    if (!issue) return acc
+    const cat = categoryOf(project, issue.status)
+    return cat === 'completed' || cat === 'canceled' ? acc : applyAction(acc, id, automation)
+  }, s)
+}
+
+// Object-trigger rules act on the issues of their own project
+function runProjectRules(s: AppData, rules: Automation[]): AppData {
+  return rules.reduce((acc, r) => applyObjectAction(acc, r, acc.issues.filter(i => i.projectId === r.projectId).map(i => i.id)), s)
+}
+
+// Cycle start and end rules fire once per cycle. The start (or end) must be on or after the rule's createdAt day
+// (missing createdAt means today), so cycles that were already over before the rule existed do not fire.
+export function runCycleRules(s: AppData, today: string): AppData {
+  let out = s
+  for (const rule of s.automations) {
+    if (!rule.enabled || (rule.trigger.type !== 'cycle_started' && rule.trigger.type !== 'cycle_ended')) continue
+    const started = rule.trigger.type === 'cycle_started'
+    const since = rule.createdAt ? toISO(new Date(rule.createdAt)) : today
+    for (const cycle of s.cycles.filter(c => c.projectId === rule.projectId)) {
+      const edge = started ? cycle.startDate : cycle.endDate
+      if (started ? edge > today : edge >= today) continue
+      // Only edges on or after the rule's creation day: a cycle already running when the rule was made does not fire "started"
+      if (edge < since) continue
+      const key = `${rule.id}:${started ? 'started' : 'ended'}`
+      if (out.cycles.find(c => c.id === cycle.id)?.firedAutomations?.includes(key)) continue
+      out = {
+        ...out,
+        cycles: out.cycles.map(c => (c.id === cycle.id ? { ...c, firedAutomations: [...(c.firedAutomations ?? []), key] } : c))
+      }
+      out = applyObjectAction(out, rule, out.issues.filter(i => i.cycleId === cycle.id).map(i => i.id))
+    }
+  }
+  return out
+}
+
 
 export function createIssue(data: AppData, projectId: string, title: string, patch: Partial<Issue> = {}): Issue {
   const now = new Date().toISOString()
