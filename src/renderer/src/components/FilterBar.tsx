@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
 import type { Condition, FilterGroup, Project, SavedView, Sort } from '@shared/types'
-import { emptyFilter, FIXED_FIELDS } from '@shared/query'
+import { emptyFilter, FIXED_FIELDS, viewShowsCompleted } from '@shared/query'
 import { useStore } from '../store'
 import { askText, useOutside } from './ui'
 import { ICONS } from './icons'
@@ -19,6 +19,8 @@ export interface ViewQuery {
   setSort: (s: Sort | null) => void
   hidden: string[]
   setHidden: (h: string[]) => void
+  showCompleted: boolean
+  setShowCompleted: (s: boolean) => void
   applyView: (v: SavedView) => void
 }
 
@@ -30,13 +32,14 @@ interface QueryState {
   rowsBy: string | null
   sort: Sort | null
   hidden: string[]
+  showCompleted: boolean
 }
 
 const memory = new Map<string, QueryState>()
 
 export function useViewQuery(project: Project, kind: ViewKind): ViewQuery {
   const key = `${project.id}:${kind}`
-  const [state, setState] = useState<QueryState>(() => memory.get(key) ?? { filter: emptyFilter(), groupBy: null, rowsBy: null, sort: null, hidden: [] })
+  const [state, setState] = useState<QueryState>(() => memory.get(key) ?? { filter: emptyFilter(), groupBy: null, rowsBy: null, sort: null, hidden: [], showCompleted: true })
   const write = (patch: Partial<QueryState>) =>
     setState(s => {
       const next = { ...s, ...patch }
@@ -54,7 +57,9 @@ export function useViewQuery(project: Project, kind: ViewKind): ViewQuery {
     setSort: sort => write({ sort }),
     hidden: state.hidden,
     setHidden: hidden => write({ hidden }),
-    applyView: v => write({ filter: v.filter, groupBy: v.groupBy, rowsBy: v.rowsBy ?? null, sort: v.sort, hidden: v.hidden })
+    showCompleted: state.showCompleted,
+    setShowCompleted: showCompleted => write({ showCompleted }),
+    applyView: v => write({ filter: v.filter, groupBy: v.groupBy, rowsBy: v.rowsBy ?? null, sort: v.sort, hidden: v.hidden, showCompleted: viewShowsCompleted(v) })
   }
 }
 
@@ -131,7 +136,7 @@ export function FilterBar({ project, kind, query, showGroup = true }: { project:
   const saveView = async () => {
     const name = await askText('Name this view')
     if (!name) return
-    const view: SavedView = { id: uid(), name, view: kind, filter: f, groupBy: query.groupBy, rowsBy: query.rowsBy, sort: query.sort, hidden: query.hidden }
+    const view: SavedView = { id: uid(), name, view: kind, filter: f, groupBy: query.groupBy, rowsBy: query.rowsBy, sort: query.sort, hidden: query.hidden, showCompleted: query.showCompleted }
     dispatch({ type: 'patchProject', id: project.id, patch: { views: [...project.views, view] } })
   }
 
@@ -217,6 +222,11 @@ export function FilterBar({ project, kind, query, showGroup = true }: { project:
           </select>
         </label>
       )}
+
+      <label className="inline-select">
+        <input type="checkbox" aria-label="Show completed" checked={query.showCompleted} onChange={e => query.setShowCompleted(e.target.checked)} />
+        Show completed
+      </label>
 
       <div className="menu" ref={viewsRef}>
         <button className="btn" onClick={() => setViewsOpen(o => !o)}>Views{views.length ? ` (${views.length})` : ''}</button>

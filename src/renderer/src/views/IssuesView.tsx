@@ -1,4 +1,4 @@
-import { applyFilter, groupIssues } from '@shared/query'
+import { applyFilter, groupIssues, withoutCompleted } from '@shared/query'
 import { useState } from 'react'
 import { createIssue, useStore } from '../store'
 import { IssueRow } from '../components/IssueRow'
@@ -15,11 +15,12 @@ export function IssuesView({ project, onOpen }: { project: Project; onOpen: (id:
   const { data, dispatch } = useStore()
   const query = useViewQuery(project, 'list')
   const [picked, setPicked] = useState<Set<string>>(new Set())
-  const issues = applyFilter(
+  const filtered = applyFilter(
     data.issues.filter(i => i.projectId === project.id && !i.triage),
     query.filter,
     project
   )
+  const issues = query.showCompleted ? filtered : withoutCompleted(filtered, project)
   const sorted = query.sort
     ? [...issues].sort((a, b) => {
         const va = a[query.sort!.key as 'title'] ?? ''

@@ -1,5 +1,5 @@
 import { categoryOf } from './model'
-import { PRIORITIES, type AppData, type Column, type Cycle, type Issue, type Project, type StatusDef } from './types'
+import { PRIORITIES, type AppData, type Column, type Cycle, type Issue, type Project, type SavedView, type StatusDef } from './types'
 
 // Read-side helpers: grouping, progress, summaries and CSV. Shared by renderer views and the main process.
 // Field access and filtering live in ./filter.
@@ -109,6 +109,19 @@ export function swimlanes(
     const mine = new Set(row.items)
     return { key: row.key, label: row.label, count: row.items.length, columns: columns.map(c => ({ ...c, items: c.items.filter(i => mine.has(i)) })) }
   })
+}
+
+// Drops issues in a completed or canceled status. Used when "Show completed" is off.
+export function withoutCompleted(issues: Issue[], project: Project | undefined): Issue[] {
+  return issues.filter(i => {
+    const cat = categoryOf(project, i.status)
+    return cat !== 'completed' && cat !== 'canceled'
+  })
+}
+
+// Saved views from before the toggle existed have no flag; they show completed issues.
+export function viewShowsCompleted(v: Pick<SavedView, 'showCompleted'>): boolean {
+  return v.showCompleted ?? true
 }
 
 export function progress(issues: Issue[], statuses: StatusDef[]) {
