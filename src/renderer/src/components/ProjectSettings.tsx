@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { triggerDefault } from '@shared/live'
 import type { Automation, AutomationAction, AutomationTrigger, Project, ProjectStatus, StatusCategory, StatusDef } from '@shared/types'
 import { issueKey, useStore } from '../store'
 import { fieldOptions } from './FilterBar'
@@ -496,6 +497,7 @@ function Automations({ project }: { project: Project }) {
             onChange={e => {
               const next = e.target.value as AutomationTrigger['type']
               setTrigger(next)
+              setTriggerValue(triggerDefault(next, project.statuses))
               if (OBJECT_TRIGGERS.includes(next) && !OBJECT_ACTIONS.includes(action)) setAction('notify')
             }}
           >

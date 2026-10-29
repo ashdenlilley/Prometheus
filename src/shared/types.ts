@@ -54,6 +54,7 @@ export type ColumnType =
   | 'files'
   | 'world_clock'
   | 'time_tracking'
+  | 'subtasks'
 
 export interface SelectOption {
   id: string
@@ -90,6 +91,8 @@ export interface Column {
   required?: boolean
   // formula: expression over other numeric columns by name, e.g. "Estimate * 2"
   formula?: string
+  buttonAction?: AutomationAction // button: run this on click; unset = click counter only
+  buttonLabel?: string
   // progress: 'subissues' derives the value from sub-issues; manual (default, unset) uses the stored value
   progressMode?: 'manual' | 'subissues'
   // board_relation: target project id. mirror: relation column id + field to show.
@@ -121,6 +124,13 @@ export interface Space {
   color: string
   labels?: LabelDef[] // shared labels for every project in the space
   projectTemplates?: ProjectTemplate[]
+  folders?: Folder[]
+}
+
+export interface Folder {
+  id: string
+  name: string
+  collapsed?: boolean
 }
 
 export interface Initiative {
@@ -160,6 +170,7 @@ export interface SavedView {
   showCompleted?: boolean
   chartType?: 'bar' | 'pie' | 'line'
   favourite?: boolean
+  personal?: boolean // this device only; never synced
   order?: string[] // table column order for this view; falls back to project.order
 }
 
@@ -223,8 +234,10 @@ export interface Project {
   lead: string
   // Unset means points; 'tshirt' shows XS..XL but stores 1, 2, 3, 5, 8
   estimateScale?: 'points' | 'tshirt'
+  mapTiles?: string // optional tile URL template; unset = offline map
   members: string[]
   initiativeId?: string
+  folderId?: string // unset = space root
   statuses: StatusDef[]
   columns: Column[]
   // Column widths in px, keyed by fixed column key or custom column id
@@ -240,6 +253,7 @@ export interface Project {
   cycleLength: number
   autoCycles: boolean
   autoRollOver?: boolean
+  capacity?: Record<string, number> // workload: max points per person per week
   // Housekeeping: cancel issues untouched for N days; archive completed/canceled issues untouched for N days
   autoClose?: { days: number; status: string }
   autoArchive?: { days: number }
@@ -339,6 +353,7 @@ export interface Cycle {
   name: string
   startDate: string
   endDate: string
+  capacity?: number // planned points budget
   // Set once a cycle was auto rolled over
   rolledOver?: boolean
   // Keys like "automationId:started" for cycle rules that already ran

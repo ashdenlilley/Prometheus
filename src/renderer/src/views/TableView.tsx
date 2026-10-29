@@ -94,7 +94,7 @@ export function TableView({ project, onOpen }: { project: Project; onOpen: (id: 
         ? fixedSortValue(sortRef.fixed, i, project)
         : sortRef.column!.progressMode === 'subissues'
           ? progressValue(sortRef.column!, i, all, project.statuses)
-          : customSortValue(sortRef.column!, i, project)
+          : customSortValue(sortRef.column!, i, project, data)
     const sign = query.sort.dir === 'asc' ? 1 : -1
     return [...items].sort((a, b) => {
       const x = value(a)

@@ -3,6 +3,7 @@ import type { IntakeForm, Project } from '@shared/types'
 import { issueKey, useStore } from '../store'
 import { PriorityText } from '../components/fields'
 import { QuickAdd } from '../components/ui'
+import { isLive } from '@shared/live'
 import { createIssue } from '@shared/model'
 import { ICONS } from '../components/icons'
 import { fmtDate } from '../util'
@@ -13,8 +14,8 @@ import { FormModal } from '../components/FormModal'
 export function TriageView({ project, onOpen }: { project: Project; onOpen: (id: string) => void }) {
   const { data, dispatch } = useStore()
   const [dupOf, setDupOf] = useState<Record<string, string>>({})
-  const items = data.issues.filter(i => i.projectId === project.id && i.triage)
-  const pool = data.issues.filter(i => i.projectId === project.id && !i.triage)
+  const items = data.issues.filter(i => i.projectId === project.id && i.triage && isLive(i))
+  const pool = data.issues.filter(i => i.projectId === project.id && !i.triage && isLive(i))
 
   const accept = (id: string, status: string) => dispatch({ type: 'patchIssue', id, patch: { triage: false, status } })
   const decline = (id: string) => dispatch({ type: 'deleteIssue', id })
