@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { isLive } from '@shared/live'
 import logo from './assets/logo.png'
 import { createIssue, useStore } from './store'
 import { ICONS } from './components/icons'
@@ -18,8 +19,12 @@ import { IssuesView } from './views/IssuesView'
 import { TriageView } from './views/TriageView'
 import { BoardView } from './views/BoardView'
 import { TableView } from './views/TableView'
+import { FilesView } from './views/FilesView'
+import { MapView } from './views/MapView'
 import { TimelineView } from './views/TimelineView'
 import { CyclesView } from './views/CyclesView'
+import { WorkloadView } from './views/WorkloadView'
+import { PlanningView } from './views/PlanningView'
 import { ChartView } from './views/ChartView'
 import { CalendarView } from './views/CalendarView'
 import { ActivityView } from './views/ActivityView'
@@ -158,10 +163,18 @@ export default function App() {
         return <BoardView project={project} onOpen={setOpenIssueId} />
       case 'table':
         return <TableView project={project} onOpen={setOpenIssueId} />
+      case 'files':
+        return <FilesView project={project} onOpen={setOpenIssueId} />
+      case 'map':
+        return <MapView key={project.id} project={project} onOpen={setOpenIssueId} />
       case 'timeline':
         return <TimelineView project={project} onOpen={setOpenIssueId} />
       case 'cycles':
         return <CyclesView project={project} onOpen={setOpenIssueId} />
+      case 'workload':
+        return <WorkloadView project={project} />
+      case 'planning':
+        return <PlanningView project={project} onOpen={setOpenIssueId} />
       case 'chart':
         return <ChartView project={project} />
       case 'calendar':
@@ -238,7 +251,7 @@ export default function App() {
     { id: 'new-space', label: 'New space', group: 'Create', run: () => setCreatingSpace(true) },
     { id: 'settings', label: 'App settings and MCP', group: 'Settings', run: () => setSettings(true) },
     { id: 'pin', label: pinned ? 'Collapse sidebar' : 'Pin sidebar', group: 'View', run: togglePin },
-    ...data.issues.map(i => {
+    ...data.issues.filter(isLive).map(i => {
       const p = data.projects.find(x => x.id === i.projectId)
       return {
         id: `issue-${i.id}`,

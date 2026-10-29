@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { isLive } from '@shared/live'
 import type { Cycle, Issue, Project, StatusDef } from '@shared/types'
 import { addDays, dayDiff, todayISO } from '@shared/dates'
 import { categoryOf } from '@shared/model'
@@ -17,7 +18,7 @@ export function CyclesView({ project, onOpen }: { project: Project; onOpen: (id:
   const [ccRange, setCcRange] = useState('project')
 
   const cycles = data.cycles.filter(c => c.projectId === project.id).sort((a, b) => a.startDate.localeCompare(b.startDate))
-  const issues = data.issues.filter(i => i.projectId === project.id)
+  const issues = data.issues.filter(i => i.projectId === project.id && isLive(i))
   const unassigned = issues.filter(i => !i.cycleId && !i.triage && categoryOf(project, i.status) !== 'completed' && categoryOf(project, i.status) !== 'canceled')
 
   // Automatic cycles: append cycles until one covers today.

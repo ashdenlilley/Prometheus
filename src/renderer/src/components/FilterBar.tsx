@@ -98,7 +98,7 @@ export function fieldOptions(project: Project) {
     { key: 'favourite', label: 'Favourite' }
   ]
   const custom = project.columns
-    .filter(c => !['formula', 'button', 'files', 'created', 'updated', 'timeline', 'mirror'].includes(c.type))
+    .filter(c => !['formula', 'button', 'subtasks', 'files', 'created', 'updated', 'timeline', 'mirror'].includes(c.type))
     .map(c => ({ key: c.id, label: c.name }))
   return [...fixed, ...custom]
 }

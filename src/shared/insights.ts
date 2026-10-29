@@ -1,4 +1,5 @@
 import type { AppData, Cycle, Issue, ProjectStatus, ProjectUpdate, StatusDef } from './types'
+import { isLive } from './live'
 import { addDays, dayDiff } from './dates'
 import { progress } from './query'
 
@@ -50,7 +51,7 @@ export function portfolioRows(data: AppData, spaceId: string, projectId?: string
   return data.projects
     .filter(p => p.spaceId === spaceId && (!projectId || p.id === projectId))
     .map(p => {
-      const issues = data.issues.filter(i => i.projectId === p.id && !i.triage)
+      const issues = data.issues.filter(i => i.projectId === p.id && !i.triage && isLive(i))
       const latest = [...p.updates].sort((a, b) => (a.at < b.at ? 1 : -1))[0]
       return { id: p.id, name: p.name, status: p.status, lead: p.lead, pct: progress(issues, p.statuses).pct, targetDate: p.targetDate, health: latest?.health }
     })
