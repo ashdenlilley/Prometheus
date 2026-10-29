@@ -1,7 +1,9 @@
-import type { Column, ColumnType, Issue, Project } from '@shared/types'
+import type { AppData, Column, ColumnType, Issue, Project } from '@shared/types'
 import { FIXED_FIELDS, fieldValue, customValue, type FixedField } from '@shared/query'
 import { categoryOf } from '@shared/model'
 import { dateValueMs } from '@shared/datetime'
+import { subtaskSummary } from '@shared/subtasks'
+import { voteCount } from '@shared/votes'
 
 export const COLUMN_TYPE_INFO: { type: ColumnType; label: string; glyph: string; group: string }[] = [
   { type: 'text', label: 'Text', glyph: 'Aa', group: 'Basic' },
@@ -36,6 +38,7 @@ export const COLUMN_TYPE_INFO: { type: ColumnType; label: string; glyph: string;
   { type: 'auto_number', label: 'Auto number', glyph: '1.', group: 'Advanced' },
   { type: 'item_id', label: 'Item ID', glyph: '#ID', group: 'Advanced' },
   { type: 'button', label: 'Button', glyph: '▣', group: 'Advanced' },
+  { type: 'subtasks', label: 'Subtasks', glyph: '⊞', group: 'Advanced' },
   { type: 'created', label: 'Creation log', glyph: '+', group: 'Advanced' },
   { type: 'updated', label: 'Last updated', glyph: '↻', group: 'Advanced' }
 ]
@@ -100,10 +103,12 @@ export function fixedSortValue(key: FixedKey, i: Issue, project: Project): strin
   }
 }
 
-export function customSortValue(col: Column, i: Issue, project: Project): string | number {
+export function customSortValue(col: Column, i: Issue, project: Project, data: AppData): string | number {
   if (col.type === 'created') return i.createdAt
   if (col.type === 'updated') return i.updatedAt
   if (col.type === 'auto_number' || col.type === 'item_id') return i.number
+  if (col.type === 'vote') return voteCount(i.values[col.id])
+  if (col.type === 'subtasks') return subtaskSummary(data, i.id).ratio
   const v = customValue(i, col)
   if (typeof v === 'number') return v
   if (typeof v === 'boolean') return v ? 1 : 0

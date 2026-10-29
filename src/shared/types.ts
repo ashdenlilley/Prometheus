@@ -54,6 +54,7 @@ export type ColumnType =
   | 'files'
   | 'world_clock'
   | 'time_tracking'
+  | 'subtasks'
 
 export interface SelectOption {
   id: string
@@ -90,6 +91,8 @@ export interface Column {
   required?: boolean
   // formula: expression over other numeric columns by name, e.g. "Estimate * 2"
   formula?: string
+  buttonAction?: AutomationAction // button: run this on click; unset = click counter only
+  buttonLabel?: string
   // progress: 'subissues' derives the value from sub-issues; manual (default, unset) uses the stored value
   progressMode?: 'manual' | 'subissues'
   // board_relation: target project id. mirror: relation column id + field to show.
@@ -241,6 +244,7 @@ export interface Project {
   cycleLength: number
   autoCycles: boolean
   autoRollOver?: boolean
+  capacity?: Record<string, number> // workload: max points per person per week
   // Housekeeping: cancel issues untouched for N days; archive completed/canceled issues untouched for N days
   autoClose?: { days: number; status: string }
   autoArchive?: { days: number }
@@ -322,6 +326,7 @@ export interface Cycle {
   name: string
   startDate: string
   endDate: string
+  capacity?: number // planned points budget
   // Set once a cycle was auto rolled over
   rolledOver?: boolean
   // Keys like "automationId:started" for cycle rules that already ran

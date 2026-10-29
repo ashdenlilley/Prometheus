@@ -2,6 +2,8 @@ import { categoryOf, createIssue } from './model'
 import { PRIORITIES, type AppData, type Column, type Cycle, type Issue, type Project, type SavedView, type StatusDef } from './types'
 import { formatEstimate, parseEstimate } from './estimate'
 import { toISO } from './dates'
+import { subtaskLabel, subtaskSummary } from './subtasks'
+import { voteCount } from './votes'
 
 // Read-side helpers: grouping, progress, summaries and CSV. Shared by renderer views and the main process.
 // Field access and filtering live in ./filter.
@@ -212,7 +214,11 @@ export function issuesToRows(data: AppData, project: Project, issues: Issue[]): 
   const header = ['Key', 'Title', 'Status', 'Priority', 'Assignee', 'Labels', 'Start', 'Due', 'Estimate', 'Cycle', ...project.columns.map(c => c.name)]
   const rows = issues.map(i => {
     const cycle = data.cycles.find(c => c.id === i.cycleId)?.name
-    const custom = project.columns.map(c => (c.progressMode === 'subissues' ? progressValue(c, i, data.issues, project.statuses) : customValue(i, c)))
+    const custom = project.columns.map(c =>
+      c.progressMode === 'subissues' ? progressValue(c, i, data.issues, project.statuses)
+        : c.type === 'vote' ? voteCount(i.values[c.id])
+          : c.type === 'subtasks' ? subtaskLabel(subtaskSummary(data, i.id))
+            : customValue(i, c))
     return [
       `${project.key}-${i.number}`,
       i.title,

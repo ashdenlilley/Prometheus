@@ -4,6 +4,8 @@ import { evaluateFormula, fieldValue, formatNumber, progressValue } from '@share
 import { fromLocalInput, toLocalInput } from '@shared/datetime'
 import { formatLocation, parseLocation } from '@shared/location'
 import { elapsedHours, formatElapsed, startTimer, stopTimer } from '@shared/timetrack'
+import { subtaskLabel, subtaskSummary } from '@shared/subtasks'
+import { toggleVote, voters } from '@shared/votes'
 import { useStore } from '../store'
 import { PillSelect, PrioritySelect } from './fields'
 import { ICONS } from './icons'
@@ -198,22 +200,27 @@ export function CellEditor({ column, project, value, issue, onChange, variant = 
       )
 
     case 'vote': {
-      const count = num ?? 0
+      const list = voters(value)
+      const mine = list.includes(data.me)
       return (
-        <button type="button" className="vote-btn" onClick={() => onChange(count + 1)} title="Vote">
-          👍 {count}
+        <button type="button" className={clsx('vote-btn', mine && 'on')} aria-pressed={mine} onClick={() => onChange(toggleVote(value, data.me))} title={list.join(', ') || 'No votes'}>
+          👍 {list.length}
         </button>
       )
     }
 
     case 'button': {
       const count = num ?? 0
+      const press = column.buttonAction && issue ? () => dispatch({ type: 'pressButton', issueId: issue.id, columnId: column.id }) : () => onChange(count + 1)
       return (
-        <button type="button" className="btn subtle" onClick={() => onChange(count + 1)} title="Click count">
-          {column.name} {count ? `(${count})` : ''}
+        <button type="button" className="btn subtle" onClick={press} title="Click count">
+          {column.buttonAction ? column.buttonLabel || column.name : column.name} {count ? `(${count})` : ''}
         </button>
       )
     }
+
+    case 'subtasks':
+      return <span className="muted small">{issue ? subtaskLabel(subtaskSummary(data, issue.id)) : ''}</span>
 
     case 'board_relation':
     case 'dependency':
