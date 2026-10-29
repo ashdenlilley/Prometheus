@@ -246,6 +246,24 @@ export interface Project {
   milestones: Milestone[]
   updates: ProjectUpdate[]
   views: SavedView[]
+  forms?: IntakeForm[]
+}
+
+// One field of a local intake form. key: 'title' | 'description' | 'priority' | 'labels' | 'dueDate' | column id
+export interface FormField {
+  key: string /* 'title' | 'description' | 'priority' | 'labels' | 'dueDate' | column id */
+  label?: string
+  help?: string
+  required?: boolean
+}
+
+// Local intake form: each submission becomes a triage item. labels are added to every submission.
+export interface IntakeForm {
+  id: string
+  name: string
+  description?: string
+  fields: FormField[]
+  labels?: string[]
 }
 
 export interface Comment {

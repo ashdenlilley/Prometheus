@@ -1,11 +1,12 @@
 import http from 'http'
-import { randomBytes, timingSafeEqual } from 'crypto'
+import { randomBytes, randomUUID, timingSafeEqual } from 'crypto'
 import { join } from 'path'
 import { promises as fs } from 'fs'
 import { type AppData, type Issue, type Project, type RelationType, type StatusDef } from '../shared/types'
 import { categoryOf, createIssue, issueKey, reducer, type Action } from '../shared/model'
 import { blankProject } from '../shared/seed'
 import { progress } from '../shared/query'
+import { submissionToIssue } from '../shared/forms'
 
 // Local MCP server (streamable HTTP, JSON responses only). Binds to 127.0.0.1 and requires a bearer token.
 
@@ -389,6 +390,41 @@ const TOOLS: Tool[] = [
       const patch = issuePatch(project, data, a)
       if (!patch.status) patch.status = project.statuses[0]?.id ?? 'backlog'
       const issue = createIssue(data, project.id, requireString(a, 'title'), patch)
+      apply({ type: 'addIssue', issue })
+      return issueView({ ...data, issues: [...data.issues, issue] }, issue)
+    }
+  },
+  {
+    name: 'list_forms',
+    description: 'List a project\'s intake forms with their fields.',
+    inputSchema: { type: 'object', properties: { projectId: str('Project id or key') }, required: ['projectId'] },
+    run: (a, { data }) =>
+      (findProject(data, a).forms ?? []).map(f => ({ id: f.id, name: f.name, description: f.description ?? null, labels: f.labels ?? [], fields: f.fields }))
+  },
+  {
+    name: 'submit_form',
+    description: 'Submit a local intake form. The answer becomes an item in the project triage inbox.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        projectId: str('Project id or key'),
+        form: str('Form name or id'),
+        answers: { type: 'object', description: 'Answers keyed by field key, e.g. { "title": "Login fails" }' }
+      },
+      required: ['projectId', 'form']
+    },
+    run: (a, { data, apply }) => {
+      const project = findProject(data, a)
+      const forms = project.forms ?? []
+      const form = forms.find(f => f.id === a.form || f.name.toLowerCase() === String(a.form).toLowerCase())
+      if (!form) throw new Error(`Form not found. Forms: ${forms.map(f => f.name).join(', ') || 'none'}`)
+      const number = data.issues.filter(i => i.projectId === project.id).reduce((m, i) => Math.max(m, i.number), 0) + 1
+      const { issue, errors } = submissionToIssue(form, project, (a.answers ?? {}) as Record<string, unknown>, {
+        id: randomUUID(),
+        number,
+        now: new Date().toISOString()
+      })
+      if (!issue) throw new Error(errors.join('; '))
       apply({ type: 'addIssue', issue })
       return issueView({ ...data, issues: [...data.issues, issue] }, issue)
     }
