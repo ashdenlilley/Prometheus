@@ -187,8 +187,7 @@ describe('write tools change host data', () => {
     assert.equal(data.issues[0].title, 'Fix login')
   })
 
-  // BUG: update_issue returns issueView(data, issue) built from the pre-patch data, so the reply shows the old status and title.
-  test('update_issue replies with the updated issue', { todo: 'BUG: update_issue reply is built from pre-update data and shows the old status' }, async () => {
+  test('update_issue replies with the updated issue', async () => {
     const updated = await ok('update_issue', { key: 'PRM-1', status: 'in_progress', title: 'Fix login' })
     assert.equal(updated.status, 'in_progress')
     assert.equal(updated.title, 'Fix login')
