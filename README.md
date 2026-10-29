@@ -42,6 +42,12 @@ For gaps compared with Linear and monday.com, see [docs/feature-parity.md](docs/
 
 - Node 22 (pinned in `.nvmrc`; run `nvm use` if you use nvm).
 
+To run the app (Electron 45):
+
+- **macOS 13 (Ventura) or later**, Apple silicon (arm64) or Intel (x64). `npm run dist:mac` builds a DMG for both.
+- **Windows 10 or later**, x64. `npm run dist:win` builds an NSIS installer. 32-bit (ia32) Windows is not supported.
+- **Linux** is not a release target. For testing, `npx electron-builder --linux dir` builds an unpacked x64 app in `dist/linux-unpacked/`. 32-bit ARM (armv7l) is not supported.
+
 ## Run
 
 ```sh
