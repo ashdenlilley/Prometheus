@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { Column, ColumnType, Project, SelectOption } from '@shared/types'
+import { PRIORITIES, type AutomationAction, type Column, type ColumnType, type Project, type SelectOption } from '@shared/types'
 import { useStore } from '../store'
 import { COLUMN_TYPE_INFO, HAS_OPTIONS, LABEL_COLORS } from '../columns'
 import { ICONS } from './icons'
@@ -12,6 +12,12 @@ const STATUS_DEFAULTS: SelectOption[] = [
   { id: 'stuck', label: 'Stuck', color: '#e2445c' },
   { id: 'idle', label: 'Not started', color: '#c4c4c4' }
 ]
+
+// Button "On click": count only, or one automation action. Mirrors AutomationAction, which the reducer runs.
+type ButtonKind = 'count' | NonNullable<Column['buttonAction']>['type']
+
+const actionText = (a?: AutomationAction) =>
+  a?.type === 'add_label' ? a.label : a?.type === 'notify' ? a.message : a?.type === 'create_issue' ? a.title : ''
 
 // Add a new column (no `column`) or edit an existing one.
 export function ColumnModal({ project, column, onClose }: { project: Project; column?: Column; onClose: () => void }) {
@@ -32,6 +38,11 @@ export function ColumnModal({ project, column, onClose }: { project: Project; co
   const [relationColumnId, setRelationColumnId] = useState(column?.relationColumnId ?? '')
   const [mirrorField, setMirrorField] = useState(column?.mirrorField ?? 'title')
   const [required, setRequired] = useState(!!column?.required)
+  const [buttonLabel, setButtonLabel] = useState(column?.buttonLabel ?? '')
+  const [buttonKind, setButtonKind] = useState<ButtonKind>(column?.buttonAction?.type ?? 'count')
+  const [buttonText, setButtonText] = useState(actionText(column?.buttonAction))
+  const [buttonStatus, setButtonStatus] = useState(column?.buttonAction?.type === 'set_status' ? column.buttonAction.status : project.statuses[0]?.id ?? '')
+  const [buttonPriority, setButtonPriority] = useState(column?.buttonAction?.type === 'set_priority' ? column.buttonAction.priority : 1)
 
   const hasOptions = HAS_OPTIONS.includes(type)
   const space = data.projects.filter(p => p.spaceId === project.spaceId && p.id !== project.id)
@@ -45,9 +56,26 @@ export function ColumnModal({ project, column, onClose }: { project: Project; co
     }
   }
 
+  // Empty text leaves the action unset, so the button only counts clicks.
+  const buttonAction = (): AutomationAction | undefined => {
+    const text = buttonText.trim()
+    switch (buttonKind) {
+      case 'set_status': return { type: 'set_status', status: buttonStatus }
+      case 'set_priority': return { type: 'set_priority', priority: buttonPriority }
+      case 'move_to_cycle': return { type: 'move_to_cycle' }
+      case 'add_label': return text ? { type: 'add_label', label: text } : undefined
+      case 'notify': return text ? { type: 'notify', message: text } : undefined
+      case 'create_issue': return text ? { type: 'create_issue', title: text } : undefined
+      default: return undefined
+    }
+  }
+
   const save = () => {
     if (!name.trim()) return
+    const action = type === 'button' ? buttonAction() : undefined
     const patch: Partial<Column> = {
+      buttonAction: action,
+      buttonLabel: action && buttonLabel.trim() ? buttonLabel.trim() : undefined,
       name: name.trim(),
       type,
       description: description || undefined,
@@ -220,6 +248,40 @@ export function ColumnModal({ project, column, onClose }: { project: Project; co
             <option value="subissues">From sub-issues</option>
           </select>
         </label>
+      )}
+
+      {type === 'button' && (
+        <>
+          <label className="field">
+            Button label
+            <input className="field-input" aria-label="Button label" value={buttonLabel} placeholder={name || 'Button'} onChange={e => setButtonLabel(e.target.value)} />
+          </label>
+          <label className="field">
+            On click
+            <select className="field-input" aria-label="Button action" value={buttonKind} onChange={e => setButtonKind(e.target.value as ButtonKind)}>
+              <option value="count">Count clicks only</option>
+              <option value="set_status">Set status</option>
+              <option value="set_priority">Set priority</option>
+              <option value="add_label">Add label</option>
+              <option value="notify">Notify</option>
+              <option value="create_issue">Create sub-issue</option>
+              <option value="move_to_cycle">Move to current cycle</option>
+            </select>
+          </label>
+          {buttonKind === 'set_status' && (
+            <select className="field-input" aria-label="Button status" value={buttonStatus} onChange={e => setButtonStatus(e.target.value)}>
+              {project.statuses.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
+            </select>
+          )}
+          {buttonKind === 'set_priority' && (
+            <select className="field-input" aria-label="Button priority" value={buttonPriority} onChange={e => setButtonPriority(Number(e.target.value))}>
+              {PRIORITIES.map((p, n) => <option key={p} value={n}>{p}</option>)}
+            </select>
+          )}
+          {['add_label', 'notify', 'create_issue'].includes(buttonKind) && (
+            <input className="field-input" aria-label="Button text" value={buttonText} placeholder={buttonKind === 'notify' ? 'Message' : buttonKind === 'add_label' ? 'Label' : 'Sub-issue title'} onChange={e => setButtonText(e.target.value)} />
+          )}
+        </>
       )}
 
       {(type === 'number' || type === 'progress' || type === 'formula') && (

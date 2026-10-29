@@ -48,6 +48,7 @@ export type Action =
   | { type: 'addComment'; issueId: string; comment: Comment }
   | { type: 'deleteComment'; issueId: string; commentId: string }
   | { type: 'toggleReaction'; issueId: string; commentId: string; emoji: string; by: string }
+  | { type: 'pressButton'; issueId: string; columnId: string }
   | { type: 'addRelation'; issueId: string; relation: Relation }
   | { type: 'removeRelation'; issueId: string; index: number }
   | { type: 'addCycle'; cycle: Cycle }
@@ -214,6 +215,17 @@ export function reducer(s: AppData, a: Action): AppData {
           return { ...c, reactions }
         })
       }))
+    case 'pressButton': {
+      // One step: count the click, then run the column's action (if any) as its own automation.
+      const issue = s.issues.find(i => i.id === a.issueId)
+      const column = s.projects.find(p => p.id === issue?.projectId)?.columns.find(c => c.id === a.columnId)
+      if (!issue || !column) return s
+      const count = typeof issue.values[a.columnId] === 'number' ? (issue.values[a.columnId] as number) : 0
+      const next = updateIssue(s, a.issueId, { values: { ...issue.values, [a.columnId]: count + 1 } })
+      if (!column.buttonAction) return next
+      const rule: Automation = { id: 'button:' + column.id, projectId: issue.projectId, name: column.buttonLabel || column.name, enabled: true, trigger: { type: 'column_changed', columnId: column.id }, action: column.buttonAction }
+      return applyAction(next, a.issueId, rule)
+    }
     case 'addRelation':
       return mapIssue(s, a.issueId, i => ({ ...i, relations: [...i.relations, a.relation] }))
     case 'removeRelation':
