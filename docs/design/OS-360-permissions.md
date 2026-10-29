@@ -4,18 +4,18 @@ Status: design for review. No code yet. Issue: OS-360. Size: XL overall, split i
 
 ## Scope change
 After the OS-359 revision (#48), OS-359 ships one account (Ashden) syncing across his own devices. Everything that brings in other people now lives here, on top of that server and sync:
-- Accounts for other people, sign-in by email magic link (optionally GitHub later), and invites to a workspace.
+- Accounts for other people and invites to a workspace. Sign-in reuses OS-359's email magic link and email service (optionally GitHub later).
 - Roles and guests, and the permission rules below.
 - Presence (who is online, who is viewing an issue).
 - User pickers: `me` and free-text assignee/member names become `userId` plus a display name in cloud workspaces. Existing names are mapped on invite ("Link 'Sam' to sam@...").
 - Cross-user mentions and notifications.
 
 ## Why it waits for OS-359
-In a single-user local app, every "permission" can be bypassed by editing the local file, so enforcement only means something on a server. OS-359 provides that server, the op log and device auth; this feature adds users and rules to it.
+In a single-user local app, every "permission" can be bypassed by editing the local file, so enforcement only means something on a server. OS-359 provides that server, the op log, magic-link sign-in with per-device sessions, and the email service; this feature adds other users, invites and rules to it.
 
 ## Accounts, invites and sign-in
-- The owner (Ashden, already paired through OS-359) invites someone by email with a role. The invite is a single-use link, valid 7 days, sent by magic link.
-- A new user signs in with a magic link on each device. Sessions reuse OS-359's model: per-device refresh token in `safeStorage`, 15-minute access tokens, revocable.
+- The owner (Ashden, already signed in through OS-359) invites someone by email with a role. The invite is a single-use link, valid 7 days, sent through OS-359's email service.
+- Invited users sign in with OS-359's magic-link flow and per-device sessions, unchanged; the server just accepts members' emails as well as the owner's.
 - `Membership { userId, workspaceId, role }` is added on the server; removing a member revokes their sessions and stops their sync immediately.
 
 ## Role model
@@ -52,14 +52,13 @@ Workspace settings > Members (invite, change role, remove), sign-in by magic lin
 
 ## Security
 - Deny by default for guests.
-- Invite and magic links are single use, expire, and are rate-limited per email and per IP.
+- Invite links are single use, expire, and are rate-limited per email and per IP (magic links already are, in OS-359).
 - Hidden data is never sent to the client.
 - Every refusal is logged in the audit log (OS-351).
 - A rule change takes effect on the server first, then clients resync.
 
 ## Accounts or tokens Ashden needs
-These moved here from OS-359:
-- An email sending service for invites and magic links: Cloudflare Email Service or Resend, with an API key stored as a Worker secret (`wrangler secret put`), never in the repo, plus a verified sender domain (SPF/DKIM records on a domain Ashden controls).
+Nothing new is required: the Cloudflare account, email service and verified sender domain come from OS-359 and are reused for invites.
 - Optional: a GitHub OAuth App (client ID and secret, as Worker secrets) for "Sign in with GitHub".
 - Possibly the Workers Paid plan ($5 a month) once several users are active; to be confirmed against the free limits.
 
@@ -72,7 +71,7 @@ These moved here from OS-359:
 - UI tests are secondary.
 
 ## Follow-up issues (to file after approval)
-1. Accounts, magic-link sign-in and invites (moved from OS-359).
+1. Accounts for other people and invites (reusing OS-359's magic-link sign-in).
 2. Users replacing free-text names, user pickers, cross-user mentions and notifications (moved from OS-359).
 3. Presence and live UI (moved from OS-359).
 4. Roles, guests and server-side enforcement with the shared rule function.
@@ -82,7 +81,7 @@ These moved here from OS-359:
 1. Are owner, member, viewer and guest enough, or do you need custom roles?
 2. Should hidden columns be hidden per role only, or per named user too?
 3. Should restricted projects be invisible, or visible by name but locked?
-4. Magic link only, or GitHub sign-in too? (Moved from OS-359.)
+4. Magic link only, or GitHub sign-in too?
 5. Who are the first people you would invite? That decides whether guests and column rules are in the first slice or can wait.
 
 ## Dependencies and suggested build order
