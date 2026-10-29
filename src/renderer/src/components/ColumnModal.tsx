@@ -24,8 +24,10 @@ export function ColumnModal({ project, column, onClose }: { project: Project; co
   )
   const [numberFormat, setNumberFormat] = useState<NonNullable<Column['numberFormat']>>(column?.numberFormat ?? 'plain')
   const [currency, setCurrency] = useState(column?.currency ?? 'USD')
+  const [includeTime, setIncludeTime] = useState(!!column?.includeTime)
   const [footer, setFooter] = useState<NonNullable<Column['footer']> | ''>(column?.footer ?? '')
   const [formula, setFormula] = useState(column?.formula ?? '')
+  const [progressMode, setProgressMode] = useState<NonNullable<Column['progressMode']>>(column?.progressMode ?? 'manual')
   const [linkProjectId, setLinkProjectId] = useState(column?.linkProjectId ?? '')
   const [relationColumnId, setRelationColumnId] = useState(column?.relationColumnId ?? '')
   const [mirrorField, setMirrorField] = useState(column?.mirrorField ?? 'title')
@@ -52,8 +54,10 @@ export function ColumnModal({ project, column, onClose }: { project: Project; co
       options: hasOptions ? options.filter(o => o.label.trim()) : undefined,
       numberFormat: type === 'number' ? numberFormat : undefined,
       currency: type === 'number' && numberFormat === 'currency' ? currency : undefined,
+      includeTime: type === 'date' && includeTime ? true : undefined,
       footer: footer || undefined,
       formula: type === 'formula' ? formula : undefined,
+      progressMode: type === 'progress' && progressMode === 'subissues' ? progressMode : undefined,
       linkProjectId: type === 'board_relation' ? linkProjectId || undefined : undefined,
       relationColumnId: type === 'mirror' ? relationColumnId || undefined : undefined,
       mirrorField: type === 'mirror' ? mirrorField : undefined,
@@ -124,6 +128,13 @@ export function ColumnModal({ project, column, onClose }: { project: Project; co
             </label>
           )}
         </div>
+      )}
+
+      {type === 'date' && (
+        <label className="field-row">
+          <input type="checkbox" aria-label="Include time" checked={includeTime} onChange={e => setIncludeTime(e.target.checked)} />
+          Include time
+        </label>
       )}
 
       {type === 'formula' && (
@@ -199,6 +210,16 @@ export function ColumnModal({ project, column, onClose }: { project: Project; co
             </button>
           </div>
         </div>
+      )}
+
+      {type === 'progress' && (
+        <label className="field">
+          Progress source
+          <select className="field-input" aria-label="Progress source" value={progressMode} onChange={e => setProgressMode(e.target.value as typeof progressMode)}>
+            <option value="manual">Manual</option>
+            <option value="subissues">From sub-issues</option>
+          </select>
+        </label>
       )}
 
       {(type === 'number' || type === 'progress' || type === 'formula') && (

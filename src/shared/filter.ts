@@ -1,4 +1,5 @@
 import type { Column, Condition, CellValue, FilterGroup, Issue, Project } from './types'
+import { dateValueMs } from './datetime'
 
 // Field access and filtering. Used by the renderer views and by automation rules in the reducer,
 // so it depends only on types.
@@ -67,7 +68,7 @@ export function isEmpty(v: FieldValue) {
   return v === undefined || v === '' || (Array.isArray(v) && v.length === 0)
 }
 
-function matches(c: Condition, v: FieldValue): boolean {
+function matches(c: Condition, v: FieldValue, isDate = false): boolean {
   switch (c.op) {
     case 'empty':
       return isEmpty(v)
@@ -83,16 +84,22 @@ function matches(c: Condition, v: FieldValue): boolean {
       return String(v ?? '').toLowerCase().includes(needle)
     }
     case 'gt':
-      return v !== undefined && c.value !== undefined && (typeof v === 'number' ? v > Number(c.value) : String(v) > String(c.value))
+      return v !== undefined && c.value !== undefined && (typeof v === 'number' ? v > Number(c.value) : compare(isDate, v, c.value) > 0)
     case 'lt':
-      return v !== undefined && c.value !== undefined && (typeof v === 'number' ? v < Number(c.value) : String(v) < String(c.value))
+      return v !== undefined && c.value !== undefined && (typeof v === 'number' ? v < Number(c.value) : compare(isDate, v, c.value) < 0)
   }
+}
+
+// Date columns compare as epoch ms so date-only and timestamp values order correctly.
+function compare(isDate: boolean, a: FieldValue, b: NonNullable<Condition['value']>): number {
+  if (isDate) return dateValueMs(String(a)) - dateValueMs(String(b))
+  return String(a) > String(b) ? 1 : String(a) < String(b) ? -1 : 0
 }
 
 export function applyFilter(issues: Issue[], filter: FilterGroup, project: Project | undefined): Issue[] {
   if (filter.conditions.length === 0) return issues
   return issues.filter(i => {
-    const hits = filter.conditions.map(c => matches(c, fieldValue(i, c.key, project)))
+    const hits = filter.conditions.map(c => matches(c, fieldValue(i, c.key, project), project?.columns.find(col => col.id === c.key)?.type === 'date'))
     return filter.match === 'all' ? hits.every(Boolean) : hits.some(Boolean)
   })
 }

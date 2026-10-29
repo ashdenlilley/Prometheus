@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { Issue, Project } from '@shared/types'
 import { applyFilter, groupPatch, progress, swimlanes, withoutCompleted, type Group, type Lane } from '@shared/query'
+import { formatEstimate } from '@shared/estimate'
 import { createIssue, issueKey, useStore } from '../store'
 import { PriorityText, StatusDot } from '../components/fields'
 import { FilterBar, useViewQuery } from '../components/FilterBar'
@@ -225,7 +226,7 @@ function BoardCard({
         <PriorityText value={issue.priority} />
         {issue.dueDate && <span className="muted">{fmtDate(issue.dueDate)}</span>}
         {issue.assignee && <span className="muted">{issue.assignee}</span>}
-        {issue.estimate !== undefined && <span className="muted">{issue.estimate} pts</span>}
+        {issue.estimate !== undefined && <span className="muted">{project.estimateScale === 'tshirt' ? formatEstimate(issue.estimate, 'tshirt') : `${issue.estimate} pts`}</span>}
         {sub && <span className="muted">{sub.done}/{sub.total} sub</span>}
         {issue.labels.map(l => (
           <span key={l} className="tag">{l}</span>

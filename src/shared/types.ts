@@ -83,11 +83,15 @@ export interface Column {
   // number: display format and currency code
   numberFormat?: 'plain' | 'currency' | 'percent' | 'decimal'
   currency?: string
+  // date: also store and edit a time of day (unset = date only)
+  includeTime?: boolean
   // footer summary under each group
   footer?: 'none' | 'sum' | 'avg' | 'count' | 'min' | 'max'
   required?: boolean
   // formula: expression over other numeric columns by name, e.g. "Estimate * 2"
   formula?: string
+  // progress: 'subissues' derives the value from sub-issues; manual (default, unset) uses the stored value
+  progressMode?: 'manual' | 'subissues'
   // board_relation: target project id. mirror: relation column id + field to show.
   linkProjectId?: string
   relationColumnId?: string
@@ -189,6 +193,8 @@ export interface Project {
   targetDate?: string
   status: ProjectStatus
   lead: string
+  // Unset means points; 'tshirt' shows XS..XL but stores 1, 2, 3, 5, 8
+  estimateScale?: 'points' | 'tshirt'
   members: string[]
   initiativeId?: string
   statuses: StatusDef[]

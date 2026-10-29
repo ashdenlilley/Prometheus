@@ -1,9 +1,10 @@
 import { useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import type { Column, Issue, Project } from '@shared/types'
-import { applyFilter, childrenOf, groupIssues, issuesToCSV, parseCSV, summarize, withoutCompleted, type FixedField } from '@shared/query'
+import { applyFilter, childrenOf, groupIssues, issuesToCSV, parseCSV, progressValue, summarize, withoutCompleted, type FixedField } from '@shared/query'
 import { createIssue, issueKey, useStore, withValue } from '../store'
 import { CellEditor } from '../components/cells'
-import { PrioritySelect, StatusDot, StatusSelect } from '../components/fields'
+import { parseEstimate } from '@shared/estimate'
+import { EstimateSelect, PrioritySelect, StatusDot, StatusSelect } from '../components/fields'
 import { ICONS } from '../components/icons'
 import { ColumnModal } from '../components/ColumnModal'
 import { FilterBar, useViewQuery } from '../components/FilterBar'
@@ -79,7 +80,11 @@ export function TableView({ project, onOpen }: { project: Project; onOpen: (id: 
   const sortItems = (items: Issue[]) => {
     if (!query.sort || !sortRef) return items
     const value = (i: Issue) =>
-      sortRef.fixed ? fixedSortValue(sortRef.fixed, i, project) : customSortValue(sortRef.column!, i, project)
+      sortRef.fixed
+        ? fixedSortValue(sortRef.fixed, i, project)
+        : sortRef.column!.progressMode === 'subissues'
+          ? progressValue(sortRef.column!, i, all, project.statuses)
+          : customSortValue(sortRef.column!, i, project)
     const sign = query.sort.dir === 'asc' ? 1 : -1
     return [...items].sort((a, b) => {
       const x = value(a)
@@ -175,7 +180,9 @@ export function TableView({ project, onOpen }: { project: Project; onOpen: (id: 
       case 'start':
         return <input className="cell-input" type="date" value={i.startDate ?? ''} onChange={e => update(i.id, { startDate: e.target.value || undefined })} />
       case 'estimate':
-        return <input className="cell-input num" type="number" value={i.estimate ?? ''} onChange={e => update(i.id, { estimate: e.target.value === '' ? undefined : Number(e.target.value) })} />
+        return project.estimateScale === 'tshirt'
+          ? <EstimateSelect className="cell-input" value={i.estimate} onChange={estimate => update(i.id, { estimate })} />
+          : <input className="cell-input num" type="number" value={i.estimate ?? ''} onChange={e => update(i.id, { estimate: e.target.value === '' ? undefined : Number(e.target.value) })} />
       case 'labels':
         return <input className="cell-input" value={i.labels.join(', ')} placeholder="Add labels" onChange={e => update(i.id, { labels: e.target.value.split(',').map(s => s.trim()).filter(Boolean) })} />
       case 'cycle':
@@ -241,6 +248,7 @@ export function TableView({ project, onOpen }: { project: Project; onOpen: (id: 
     const priorityAt = col('Priority')
     const assigneeAt = col('Assignee')
     const dueAt = col('Due')
+    const estimateAt = col('Estimate')
     const issues = body
       .filter(r => r[titleAt]?.trim())
       .map(r => {
@@ -251,7 +259,9 @@ export function TableView({ project, onOpen }: { project: Project; onOpen: (id: 
           status,
           priority: pri > 0 ? pri : 0,
           assignee: assigneeAt >= 0 ? r[assigneeAt] : '',
-          dueDate: dueAt >= 0 && r[dueAt] ? r[dueAt] : undefined
+          dueDate: dueAt >= 0 && r[dueAt] ? r[dueAt] : undefined,
+          // Letters (XS–XL) or numbers, so an exported t-shirt project imports back.
+          estimate: estimateAt >= 0 ? parseEstimate(r[estimateAt] ?? '', project.estimateScale) : undefined
         })
       })
     if (issues.length) dispatch({ type: 'addIssues', issues: issues.reduce<Issue[]>((acc, i) => [...acc, { ...i, number: i.number + acc.length }], []) })
@@ -393,7 +403,7 @@ export function TableView({ project, onOpen }: { project: Project; onOpen: (id: 
                   <div className="t-cell" />
                   {cols.map(c => (
                     <div key={c.key} className="t-cell">
-                      {c.column ? summarize(c.column, items) : ''}
+                      {c.column ? summarize(c.column, items, all, project.statuses) : ''}
                     </div>
                   ))}
                   <div className="t-cell t-actions" />

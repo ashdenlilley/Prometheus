@@ -1,5 +1,6 @@
 import { categoryOf } from './model'
 import { PRIORITIES, type AppData, type Column, type Cycle, type Issue, type Project, type SavedView, type StatusDef } from './types'
+import { formatEstimate } from './estimate'
 
 // Read-side helpers: grouping, progress, summaries and CSV. Shared by renderer views and the main process.
 // Field access and filtering live in ./filter.
@@ -135,14 +136,25 @@ export function childrenOf(issues: Issue[], parentId: string) {
   return issues.filter(i => i.parentId === parentId)
 }
 
+// Manual mode reads the stored value. Subissues mode uses sub-issue completion; with none, the issue counts as one item.
+export function progressValue(column: Column, issue: Issue, issues: Issue[], statuses: StatusDef[]): number {
+  if (column.progressMode !== 'subissues') {
+    const v = issue.values[column.id]
+    return Math.min(100, Math.max(0, typeof v === 'number' ? v : 0))
+  }
+  const subs = childrenOf(issues, issue.id)
+  return progress(subs.length ? subs : [issue], statuses).pct
+}
+
 export function openIssue(project: Project | undefined, issue: Issue) {
   const c = categoryOf(project, issue.status)
   return c !== 'completed' && c !== 'canceled'
 }
 
 // Column summary for a group footer.
-export function summarize(col: Column, items: Issue[]): string {
-  const values = items.map(i => i.values[col.id])
+// issues and statuses are only read for progress columns (computed sub-issue progress).
+export function summarize(col: Column, items: Issue[], issues: Issue[] = items, statuses: StatusDef[] = []): string {
+  const values = items.map(i => (col.progressMode === 'subissues' ? progressValue(col, i, issues, statuses) : i.values[col.id]))
   const nums = values.filter((v): v is number => typeof v === 'number')
   const fmt = (n: number) => formatNumber(n, col)
   switch (col.footer ?? defaultFooter(col)) {
@@ -196,7 +208,7 @@ export function issuesToCSV(data: AppData, project: Project, issues: Issue[]): s
   const rows = issues.map(i => {
     const cycle = data.cycles.find(c => c.id === i.cycleId)?.name
     // Raw values: the whole row is escaped once below.
-    const custom = project.columns.map(c => customValue(i, c))
+    const custom = project.columns.map(c => (c.progressMode === 'subissues' ? progressValue(c, i, data.issues, project.statuses) : customValue(i, c)))
     return [
       `${project.key}-${i.number}`,
       i.title,
@@ -206,7 +218,7 @@ export function issuesToCSV(data: AppData, project: Project, issues: Issue[]): s
       i.labels.join('; '),
       i.startDate,
       i.dueDate,
-      i.estimate,
+      formatEstimate(i.estimate, project.estimateScale),
       cycle,
       ...custom
     ].map(csvCell).join(',')
