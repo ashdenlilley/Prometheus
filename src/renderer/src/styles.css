@@ -1943,6 +1943,27 @@ select.field-input:focus {
   font-size: 12px;
 }
 
+.label-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.label-chips .tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.label-add {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
+}
+
 /* ───────────── Topbar breadcrumb ───────────── */
 .crumbs {
   display: flex;

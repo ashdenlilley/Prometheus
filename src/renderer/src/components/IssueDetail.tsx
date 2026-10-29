@@ -4,6 +4,7 @@ import { childrenOf, progress } from '@shared/query'
 import { DRAWER_SHORTCUTS, drawerShortcut } from '@shared/shortcuts'
 import { createIssue, issueKey, useStore, withValue } from '../store'
 import { inverseRelations } from '@shared/model'
+import { availableLabels, labelGroups } from '@shared/labels'
 import { nextOccurrence } from '@shared/recurrence'
 import type { Recurrence } from '@shared/types'
 import { CellEditor } from './cells'
@@ -313,10 +314,19 @@ export function IssueDetail({ issueId, onClose, onOpen }: { issueId: string; onC
               ref={labelsRef}
               aria-label="Labels"
               className="field-input"
+              list="label-suggestions"
               defaultValue={issue.labels.join(', ')}
               placeholder="bug, ui"
               onBlur={e => patch({ labels: e.target.value.split(',').map(s => s.trim()).filter(Boolean) })}
             />
+            <datalist id="label-suggestions">
+              {availableLabels(data, project).map(l => (
+                <option key={l.name} value={l.name} label={l.group ? `${l.group} › ${l.name}` : undefined} />
+              ))}
+            </datalist>
+            {labelGroups(data, project.spaceId).length > 0 && (
+              <span className="muted small">Group: {labelGroups(data, project.spaceId).join(' / ')} (one of)</span>
+            )}
           </label>
           <label>
             Estimate

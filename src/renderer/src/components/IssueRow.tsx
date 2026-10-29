@@ -8,6 +8,7 @@ export function IssueRow({ issue, onOpen, fav = true }: { issue: Issue; onOpen: 
   const { data } = useStore()
   const project = data.projects.find(p => p.id === issue.projectId) as Project | undefined
   const status = project?.statuses.find(s => s.id === issue.status)
+  const shared = data.spaces.find(sp => sp.id === project?.spaceId)?.labels ?? []
   return (
     <div className="row fav-host" onClick={() => onOpen(issue.id)}>
       {fav && <FavGutter issue={issue} />}
@@ -15,7 +16,7 @@ export function IssueRow({ issue, onOpen, fav = true }: { issue: Issue; onOpen: 
       <span className="muted key">{issueKey(data, issue)}</span>
       <span className="grow">{issue.title}</span>
       {issue.labels.map(l => (
-        <span key={l} className="tag">{l}</span>
+        <span key={l} className="tag" style={{ color: shared.find(d => d.name === l)?.color }}>{l}</span>
       ))}
       <PriorityText value={issue.priority} />
       {issue.dueDate && <span className="muted">{fmtDate(issue.dueDate)}</span>}

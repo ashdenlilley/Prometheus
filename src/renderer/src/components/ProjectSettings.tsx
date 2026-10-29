@@ -5,6 +5,8 @@ import { fieldOptions } from './FilterBar'
 import type { Initiative, Operator, TriageRule } from '@shared/types'
 import { RECIPES, recipeAutomation, type Blank, type Recipe } from '@shared/recipes'
 import { ICONS } from './icons'
+import { projectTemplateFrom } from '@shared/projectTemplates'
+import type { ProjectTemplate } from '@shared/types'
 import { askText, Modal } from './ui'
 import { LABEL_COLORS } from '../columns'
 import { uid, clsx, todayISO, fmtDate } from '../util'
@@ -683,6 +685,24 @@ function TriageRules({ project }: { project: Project }) {
 function Templates({ project }: { project: Project }) {
   const { data, dispatch } = useStore()
   const templates = data.templates.filter(t => t.projectId === project.id)
+  const [withIssues, setWithIssues] = useState(false)
+  const space = data.spaces.find(sp => sp.id === project.spaceId)
+  const saved = space?.projectTemplates ?? []
+  const write = (next: ProjectTemplate[]) => space && dispatch({ type: 'patchSpace', id: space.id, patch: { projectTemplates: next } })
+
+  const saveAsTemplate = async () => {
+    const name = await askText('Template name', project.name)
+    if (!name?.trim()) return
+    write([...saved, projectTemplateFrom(data, project.id, name.trim(), withIssues, uid(), new Date().toISOString())])
+  }
+
+  // A blank name reverts the field to the saved one.
+  const rename = (t: ProjectTemplate, input: HTMLInputElement) => {
+    const next = input.value.trim()
+    if (!next) input.value = t.name
+    else if (next !== t.name) write(saved.map(x => (x.id === t.id ? { ...x, name: next } : x)))
+  }
+
   return (
     <div className="settings-form">
       {templates.map(t => (
@@ -692,6 +712,27 @@ function Templates({ project }: { project: Project }) {
         </div>
       ))}
       {templates.length === 0 && <div className="muted small">Open an item and choose Save as template.</div>}
+      <div className="section-title-row small">
+        <h3>Project templates</h3>
+      </div>
+      <div className="option-row">
+        <label className="small">
+          <input type="checkbox" aria-label="Include starter issues" checked={withIssues} onChange={e => setWithIssues(e.target.checked)} /> Include issues as starter issues
+        </label>
+        <button className="btn subtle" aria-label="Save project as template" onClick={saveAsTemplate}>{ICONS.plus} Save project as template</button>
+      </div>
+      {saved.map(t => (
+        <div key={t.id} className="option-row">
+          <input
+            className="field-input grow"
+            aria-label={`Rename template ${t.name}`}
+            defaultValue={t.name}
+            onBlur={e => rename(t, e.currentTarget)}
+            onKeyDown={e => e.key === 'Enter' && e.currentTarget.blur()}
+          />
+          <button className="icon-btn" aria-label={`Delete project template ${t.name}`} onClick={() => write(saved.filter(x => x.id !== t.id))}>{ICONS.trash}</button>
+        </div>
+      ))}
     </div>
   )
 }

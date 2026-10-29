@@ -98,10 +98,29 @@ export interface Column {
   mirrorField?: string
 }
 
+export interface LabelDef {
+  name: string
+  color: string
+  group?: string
+}
+
+// Snapshot of a project's setup, copied into new projects with new ids.
+export interface ProjectTemplate {
+  id: string
+  name: string
+  project: Project
+  automations: Automation[]
+  triageRules: TriageRule[]
+  issues: Issue[]
+  createdAt: string
+}
+
 export interface Space {
   id: string
   name: string
   color: string
+  labels?: LabelDef[] // shared labels for every project in the space
+  projectTemplates?: ProjectTemplate[]
 }
 
 export interface Initiative {
