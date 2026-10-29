@@ -1,6 +1,7 @@
 import type { Column, ColumnType, Issue, Project } from '@shared/types'
 import { FIXED_FIELDS, fieldValue, customValue, type FixedField } from '@shared/query'
 import { categoryOf } from '@shared/model'
+import { dateValueMs } from '@shared/datetime'
 
 export const COLUMN_TYPE_INFO: { type: ColumnType; label: string; glyph: string; group: string }[] = [
   { type: 'text', label: 'Text', glyph: 'Aa', group: 'Basic' },
@@ -107,6 +108,7 @@ export function customSortValue(col: Column, i: Issue, project: Project): string
   if (typeof v === 'number') return v
   if (typeof v === 'boolean') return v ? 1 : 0
   if (typeof v === 'string') {
+    if (col.type === 'date') return dateValueMs(v)
     if (col.type === 'status') return project.statuses.findIndex(s => s.id === v)
     if (col.type === 'dropdown' || col.type === 'label') return col.options?.findIndex(o => o.id === v) ?? -1
     return v.toLowerCase()

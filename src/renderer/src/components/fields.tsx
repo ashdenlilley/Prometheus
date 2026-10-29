@@ -1,4 +1,5 @@
 import { PRIORITIES, type StatusDef } from '@shared/types'
+import { formatEstimate, parseEstimate, TSHIRT } from '@shared/estimate'
 import { clsx } from '../util'
 import { PRIORITY_COLORS } from '../columns'
 
@@ -45,6 +46,17 @@ export function StatusSelect({ value, statuses, onChange }: { value: string; sta
       options={statuses.map(s => ({ value: s.id, label: s.label, color: s.color }))}
       onChange={onChange}
     />
+  )
+}
+
+export function EstimateSelect({ value, className, onChange }: { value: number | undefined; className: string; onChange: (v: number | undefined) => void }) {
+  return (
+    <select className={className} aria-label="Estimate" value={formatEstimate(value, 'tshirt')} onChange={e => onChange(parseEstimate(e.target.value, 'tshirt'))}>
+      <option value="">None</option>
+      {TSHIRT.map(([label]) => (
+        <option key={label} value={label}>{label}</option>
+      ))}
+    </select>
   )
 }
 

@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import type { CellValue, Column, DateRange, FileRef, Issue, Project, SelectOption } from '@shared/types'
-import { evaluateFormula, fieldValue, formatNumber } from '@shared/query'
+import { evaluateFormula, fieldValue, formatNumber, progressValue } from '@shared/query'
+import { fromLocalInput, toLocalInput } from '@shared/datetime'
 import { useStore } from '../store'
 import { PillSelect, PrioritySelect } from './fields'
 import { ICONS } from './icons'
@@ -26,6 +27,7 @@ const MAX_FILE = 5 * 1024 * 1024
 
 // One editor per column type. variant 'cell' is the compact in-table look; 'field' is the drawer look.
 export function CellEditor({ column, project, value, issue, onChange, variant = 'field' }: CellEditorProps) {
+  const { data } = useStore()
   const cls = variant === 'cell' ? 'cell-input' : 'field-input'
   const str = typeof value === 'string' ? value : ''
   const num = typeof value === 'number' ? value : undefined
@@ -92,6 +94,9 @@ export function CellEditor({ column, project, value, issue, onChange, variant = 
       return <ChipPicker options={options} selected={asIds(value)} onChange={ids => onChange(ids)} />
 
     case 'date':
+      if (column.includeTime) {
+        return <input className={cls} type="datetime-local" value={str ? toLocalInput(str) : ''} onChange={e => onChange(fromLocalInput(e.target.value) || undefined)} />
+      }
       return <input className={cls} type="date" value={str} onChange={e => onChange(e.target.value || undefined)} />
 
     case 'week':
@@ -154,7 +159,13 @@ export function CellEditor({ column, project, value, issue, onChange, variant = 
       return <Rating value={num} onChange={onChange} />
 
     case 'progress':
-      return <ProgressEdit value={num ?? 0} onChange={onChange} />
+      return (
+        <ProgressEdit
+          value={issue ? progressValue(column, issue, data.issues, project.statuses) : num ?? 0}
+          readOnly={column.progressMode === 'subissues'}
+          onChange={onChange}
+        />
+      )
 
     case 'vote': {
       const count = num ?? 0
@@ -422,13 +433,13 @@ function Rating({ value, onChange }: { value: number | undefined; onChange: (v: 
   )
 }
 
-function ProgressEdit({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+function ProgressEdit({ value, readOnly, onChange }: { value: number; readOnly?: boolean; onChange: (v: number) => void }) {
   return (
     <div className="progress-edit">
       <div className="progress-track">
         <div className="progress-fill" style={{ width: `${value}%` }} />
       </div>
-      <input type="range" min={0} max={100} value={value} onChange={e => onChange(Number(e.target.value))} />
+      {!readOnly && <input type="range" min={0} max={100} value={value} onChange={e => onChange(Number(e.target.value))} />}
       <span className="progress-label">{value}%</span>
     </div>
   )

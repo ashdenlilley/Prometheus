@@ -7,7 +7,7 @@ import { inverseRelations } from '@shared/model'
 import { nextOccurrence } from '@shared/recurrence'
 import type { Recurrence } from '@shared/types'
 import { CellEditor } from './cells'
-import { PrioritySelect, StatusDot, StatusSelect } from './fields'
+import { EstimateSelect, PrioritySelect, StatusDot, StatusSelect } from './fields'
 import { ICONS } from './icons'
 import { askText, useEscape } from './ui'
 import { clsx, fmtDate, parseISO, todayISO, uid } from '../util'
@@ -232,13 +232,17 @@ export function IssueDetail({ issueId, onClose, onOpen }: { issueId: string; onC
           </label>
           <label>
             Estimate
-            <input
-              className="field-input"
-              type="number"
-              min={0}
-              value={issue.estimate ?? ''}
-              onChange={e => patch({ estimate: e.target.value === '' ? undefined : Number(e.target.value) })}
-            />
+            {project.estimateScale === 'tshirt' ? (
+              <EstimateSelect className="field-input" value={issue.estimate} onChange={estimate => patch({ estimate })} />
+            ) : (
+              <input
+                className="field-input"
+                type="number"
+                min={0}
+                value={issue.estimate ?? ''}
+                onChange={e => patch({ estimate: e.target.value === '' ? undefined : Number(e.target.value) })}
+              />
+            )}
           </label>
           <label>
             Cycle

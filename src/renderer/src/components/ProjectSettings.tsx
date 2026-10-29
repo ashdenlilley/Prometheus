@@ -73,6 +73,13 @@ function General({ project }: { project: Project }) {
         <input className="field-input" value={project.lead} onChange={e => patch({ lead: e.target.value })} />
       </label>
       <label className="field">
+        Estimate scale
+        <select className="field-input" aria-label="Estimate scale" value={project.estimateScale ?? 'points'} onChange={e => patch({ estimateScale: e.target.value as Project['estimateScale'] })}>
+          <option value="points">Points</option>
+          <option value="tshirt">T-shirt (XS–XL)</option>
+        </select>
+      </label>
+      <label className="field">
         Members (comma separated, used for People columns and assignee suggestions)
         <input
           className="field-input"
