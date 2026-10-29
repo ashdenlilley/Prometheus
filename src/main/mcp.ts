@@ -3,7 +3,7 @@ import { randomBytes, timingSafeEqual } from 'crypto'
 import { join } from 'path'
 import { promises as fs } from 'fs'
 import { type AppData, type Issue, type Project, type RelationType, type StatusDef } from '../shared/types'
-import { categoryOf, createIssue, issueKey, type Action } from '../shared/model'
+import { categoryOf, createIssue, issueKey, reducer, type Action } from '../shared/model'
 import { blankProject } from '../shared/seed'
 import { progress } from '../shared/query'
 
@@ -407,8 +407,10 @@ const TOOLS: Tool[] = [
     run: (a, { data, apply }) => {
       const issue = findIssue(data, a)
       const project = data.projects.find(p => p.id === issue.projectId)
-      apply({ type: 'patchIssue', id: issue.id, patch: issuePatch(project, data, a) })
-      return issueView(data, issue)
+      const action = { type: 'patchIssue' as const, id: issue.id, patch: issuePatch(project, data, a) }
+      apply(action)
+      const next = reducer(data, action)
+      return issueView(next, next.issues.find(i => i.id === issue.id) ?? issue)
     }
   },
   {
