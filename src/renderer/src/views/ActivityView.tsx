@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { isLive } from '@shared/live'
 import type { Project } from '@shared/types'
 import { ACTIVITY_FIELDS, page, projectActivity } from '@shared/activity'
 import { issueKey, useStore } from '../store'
@@ -13,7 +14,7 @@ export function ActivityView({ project, onOpen }: { project: Project; onOpen: (i
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
   const [pageIndex, setPageIndex] = useState(0)
-  const issues = data.issues.filter(i => i.projectId === project.id).sort((a, b) => a.number - b.number)
+  const issues = data.issues.filter(i => i.projectId === project.id && isLive(i)).sort((a, b) => a.number - b.number)
   const entries = projectActivity(data, project.id, { issueId: issueId || undefined, field: field || undefined, from: from || undefined, to: to || undefined })
   const pages = Math.max(1, Math.ceil(entries.length / PAGE_SIZE))
   const current = Math.min(pageIndex, pages - 1)
