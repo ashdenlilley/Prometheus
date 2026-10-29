@@ -7,6 +7,8 @@ export interface PaletteItem {
   label: string
   group: string
   hint?: string
+  // Searched but not shown
+  keywords?: string
   run: () => void
 }
 
@@ -24,7 +26,7 @@ export function CommandPalette({ items, onClose }: { items: PaletteItem[]; onClo
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase()
     if (!q) return items.slice(0, 60)
-    return items.filter(i => `${i.label} ${i.group} ${i.hint ?? ''}`.toLowerCase().includes(q)).slice(0, 60)
+    return items.filter(i => `${i.label} ${i.group} ${i.hint ?? ''} ${i.keywords ?? ''}`.toLowerCase().includes(q)).slice(0, 60)
   }, [items, query])
 
   useEffect(() => setCursor(0), [query])
