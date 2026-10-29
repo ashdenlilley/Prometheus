@@ -240,6 +240,7 @@ export interface Project {
   cycleLength: number
   autoCycles: boolean
   autoRollOver?: boolean
+  capacity?: Record<string, number> // workload: max points per person per week
   // Housekeeping: cancel issues untouched for N days; archive completed/canceled issues untouched for N days
   autoClose?: { days: number; status: string }
   autoArchive?: { days: number }
@@ -321,6 +322,7 @@ export interface Cycle {
   name: string
   startDate: string
   endDate: string
+  capacity?: number // planned points budget
   // Set once a cycle was auto rolled over
   rolledOver?: boolean
   // Keys like "automationId:started" for cycle rules that already ran

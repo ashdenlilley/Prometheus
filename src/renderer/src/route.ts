@@ -7,6 +7,8 @@ export type ViewId =
   | 'table'
   | 'timeline'
   | 'cycles'
+  | 'workload'
+  | 'planning'
   | 'chart'
   | 'calendar'
   | 'roadmap'
@@ -26,6 +28,8 @@ export const PROJECT_VIEWS: { id: ViewId; label: string }[] = [
   { id: 'table', label: 'Table' },
   { id: 'timeline', label: 'Timeline' },
   { id: 'cycles', label: 'Cycles' },
+  { id: 'workload', label: 'Workload' },
+  { id: 'planning', label: 'Planning' },
   { id: 'chart', label: 'Charts' },
   { id: 'calendar', label: 'Calendar' },
   { id: 'activity', label: 'Activity' }
@@ -39,6 +43,8 @@ export const VIEW_LABEL: Record<ViewId, string> = {
   table: 'Table',
   timeline: 'Timeline',
   cycles: 'Cycles',
+  workload: 'Workload',
+  planning: 'Planning',
   chart: 'Charts',
   calendar: 'Calendar',
   roadmap: 'Roadmap',

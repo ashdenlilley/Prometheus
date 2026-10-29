@@ -1434,6 +1434,19 @@ select.field-input:focus {
   transition: width 200ms ease;
 }
 
+/* ───────────── Workload and planning ───────────── */
+.planning-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 12px; }
+.planning-load.over, .workload-table td.over { color: var(--danger); }
+.workload-table { border-collapse: collapse; }
+.workload-table th, .workload-table td { padding: 6px 10px; text-align: left; border-bottom: 1px solid var(--line, rgba(128, 128, 128, 0.2)); }
+.workload-table td.over { background: rgba(255, 69, 58, 0.15); font-weight: 600; }
+.planning-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.planning-col { min-height: 120px; padding: 8px; border-radius: 8px; background: var(--surface-2, rgba(128, 128, 128, 0.06)); }
+.planning-col h3 { margin: 0 0 6px; }
+.planning-row { display: grid; grid-template-columns: auto 1fr auto auto; gap: 8px; align-items: center; padding: 6px; border-radius: 6px; cursor: grab; }
+.planning-row:focus-visible { outline: 2px solid var(--accent, #0a84ff); }
+.planning-title { all: unset; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 /* ───────────── Timeline and roadmap ───────────── */
 .timeline {
   flex: 1;

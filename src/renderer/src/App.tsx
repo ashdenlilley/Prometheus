@@ -20,6 +20,8 @@ import { BoardView } from './views/BoardView'
 import { TableView } from './views/TableView'
 import { TimelineView } from './views/TimelineView'
 import { CyclesView } from './views/CyclesView'
+import { WorkloadView } from './views/WorkloadView'
+import { PlanningView } from './views/PlanningView'
 import { ChartView } from './views/ChartView'
 import { CalendarView } from './views/CalendarView'
 import { ActivityView } from './views/ActivityView'
@@ -162,6 +164,10 @@ export default function App() {
         return <TimelineView project={project} onOpen={setOpenIssueId} />
       case 'cycles':
         return <CyclesView project={project} onOpen={setOpenIssueId} />
+      case 'workload':
+        return <WorkloadView project={project} />
+      case 'planning':
+        return <PlanningView project={project} onOpen={setOpenIssueId} />
       case 'chart':
         return <ChartView project={project} />
       case 'calendar':
