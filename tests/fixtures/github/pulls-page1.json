@@ -1,0 +1,35 @@
+[
+  {
+    "number": 12,
+    "title": "Fix login (OS-1)",
+    "body": "Closes OS-1",
+    "html_url": "https://github.com/acme/app/pull/12",
+    "state": "open",
+    "draft": false,
+    "merged_at": null,
+    "updated_at": "2026-10-03T10:00:00Z",
+    "head": { "ref": "os-1-fix-login" }
+  },
+  {
+    "number": 11,
+    "title": "WIP: OS-2 spike",
+    "body": null,
+    "html_url": "https://github.com/acme/app/pull/11",
+    "state": "open",
+    "draft": true,
+    "merged_at": null,
+    "updated_at": "2026-10-02T09:00:00Z",
+    "head": { "ref": "os-2-spike" }
+  },
+  {
+    "number": 10,
+    "title": "Bump dependencies",
+    "body": null,
+    "html_url": "https://github.com/acme/app/pull/10",
+    "state": "closed",
+    "draft": false,
+    "merged_at": "2026-10-01T08:00:00Z",
+    "updated_at": "2026-10-01T08:00:00Z",
+    "head": { "ref": "chore/deps" }
+  }
+]

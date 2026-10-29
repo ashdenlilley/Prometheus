@@ -10,9 +10,9 @@ import type { WebhookEvent } from '../shared/types'
 // the entity as JSON with its parent id indexed. Saves diff against the last write, so only
 // changed rows are rewritten.
 
-type Table = 'spaces' | 'initiatives' | 'teams' | 'projects' | 'issues' | 'cycles' | 'automations' | 'triage_rules' | 'templates' | 'dashboards' | 'notifications' | 'docs' | 'agents' | 'webhooks'
+type Table = 'spaces' | 'initiatives' | 'teams' | 'projects' | 'issues' | 'cycles' | 'automations' | 'triage_rules' | 'templates' | 'dashboards' | 'notifications' | 'docs' | 'agents' | 'webhooks' | 'git_links'
 
-const TABLES: Table[] = ['spaces', 'initiatives', 'teams', 'projects', 'issues', 'cycles', 'automations', 'triage_rules', 'templates', 'dashboards', 'notifications', 'docs', 'agents', 'webhooks']
+const TABLES: Table[] = ['spaces', 'initiatives', 'teams', 'projects', 'issues', 'cycles', 'automations', 'triage_rules', 'templates', 'dashboards', 'notifications', 'docs', 'agents', 'webhooks', 'git_links']
 
 // AppData key for each table.
 const KEY: Record<Table, keyof AppData> = {
@@ -29,11 +29,13 @@ const KEY: Record<Table, keyof AppData> = {
   notifications: 'notifications',
   docs: 'docs',
   agents: 'agents',
-  webhooks: 'webhooks'
+  webhooks: 'webhooks',
+  git_links: 'gitLinks'
 }
 
 // Parent column per table, used to index child lookups.
 const PARENT: Partial<Record<Table, string>> = {
+  git_links: 'issue_id',
   initiatives: 'space_id',
   teams: 'space_id',
   projects: 'space_id',
@@ -310,6 +312,7 @@ export class Store {
       docs: all('docs') as AppData['docs'],
       agents: all('agents') as AppData['agents'],
       webhooks: all('webhooks') as AppData['webhooks'],
+      gitLinks: all('git_links') as AppData['gitLinks'],
       me
     }
     this.primeCache(data)
@@ -347,7 +350,8 @@ export class Store {
       notifications: data.notifications.map(r => ({ id: r.id, json: JSON.stringify(r) })),
       docs: (data.docs ?? []).map(r => ({ id: r.id, parent: r.spaceId, json: JSON.stringify(r) })),
       agents: (data.agents ?? []).map(r => ({ id: r.id, json: JSON.stringify(r) })),
-      webhooks: (data.webhooks ?? []).map(r => ({ id: r.id, parent: r.projectId, json: JSON.stringify(r) }))
+      webhooks: (data.webhooks ?? []).map(r => ({ id: r.id, parent: r.projectId, json: JSON.stringify(r) })),
+      git_links: (data.gitLinks ?? []).map(r => ({ id: r.id, parent: r.issueId, json: JSON.stringify(r) }))
     }
 
     db.run('BEGIN')

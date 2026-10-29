@@ -15,6 +15,8 @@ import { McpController, type McpKeys } from './mcp'
 import { LEGACY_AGENT, agentAssignee, displayAssignee, isAgentAssignee, stampActor } from '../shared/agents'
 import { Store } from './db'
 import { SyncEngine } from './sync'
+import { CredentialStore, type Sealer } from './credentials'
+import { FixtureGitHubClient, GitPoller, HttpGitHubClient, type GitHubClient } from './github'
 import { installMenu } from './menu'
 import { WebhookDispatcher, WebhookSecrets } from './webhooks'
 import { WEBHOOK_EVENTS, urlAllowed, webhookEvents, type WebhookDelivery } from '../shared/webhooks'
@@ -161,7 +163,7 @@ function applyLocal(action: Action, source: AuditSource, actor: string, stampAs?
   audit(auditEntries(ops, source, new Date().toISOString(), action.type))
   enqueueWebhooks(prev, next, actor)
   // Notifications are deliberately left out of the sync op log, so they stay local to this device.
-  const by = stampAs && isAgentAssignee(stampAs) ? displayAssignee(prev, stampAs) : source === 'mcp' ? 'MCP' : 'Prometheus'
+  const by = stampAs && isAgentAssignee(stampAs) ? displayAssignee(prev, stampAs) : source === 'mcp' ? 'MCP' : source === 'git' ? 'Git' : 'Prometheus'
   state = subscriptionNotifications(prev, next, by)
   void persist(state)
   broadcast(state)
@@ -197,11 +199,94 @@ function mcpKeys(): McpKeys | undefined {
   }
 }
 
+// GitHub. The token lives in the credential store (OS keychain when available). Settings are per device.
+const GITHUB_TOKEN = 'github.token'
+interface GitSettings {
+  pollMinutes: number
+  branchPrefix: string
+  login: string | null
+}
+
+let credentials: CredentialStore | null = null
+let gitSettings: GitSettings = { pollMinutes: 2, branchPrefix: '', login: null }
+let poller: GitPoller | null = null
+let pollerRun = 0
+const gitSettingsFile = () => join(dataDir(), 'git-settings.json')
+const tokenOf = () => credentials!.get(GITHUB_TOKEN)
+// PROMETHEUS_GITHUB_FIXTURES is for tests only: it swaps the network client for fixture files.
+const githubClient = (token: () => Promise<string | null>): GitHubClient =>
+  process.env.PROMETHEUS_GITHUB_FIXTURES ? new FixtureGitHubClient(process.env.PROMETHEUS_GITHUB_FIXTURES, token) : new HttpGitHubClient(token)
+
+async function initGit() {
+  // Keychain sealing needs the app ready, so the store is made here rather than at import.
+  // On Linux without a keyring Electron falls back to a fixed key ('basic_text'), which is not real protection,
+  // so that counts as no keychain. Fixture runs (tests only) accept it.
+  const weakLinux = process.platform === 'linux' && safeStorage.getSelectedStorageBackend() === 'basic_text' && !process.env.PROMETHEUS_GITHUB_FIXTURES
+  const sealer = !weakLinux && (await safeStorage.isAsyncEncryptionAvailable())
+    ? ({
+        seal: async text => (await safeStorage.encryptStringAsync(text)).toString('base64'),
+        open: async sealed => {
+          try {
+            return (await safeStorage.decryptStringAsync(Buffer.from(sealed, 'base64'))).result
+          } catch {
+            return null
+          }
+        }
+      } satisfies Sealer)
+    : undefined
+  credentials = new CredentialStore(join(dataDir(), 'credentials.json'), sealer)
+  try {
+    gitSettings = { ...gitSettings, ...JSON.parse(await fs.readFile(gitSettingsFile(), 'utf8')) }
+  } catch {
+    // No settings yet: the defaults stand
+  }
+}
+
+async function saveGitSettings(patch: Partial<GitSettings>) {
+  gitSettings = { ...gitSettings, ...patch }
+  await fs.writeFile(gitSettingsFile(), JSON.stringify(gitSettings, null, 2))
+}
+
+// Polls while data is loaded and a token is saved. Called again whenever either changes; a stale call stops.
+async function startPoller() {
+  const run = ++pollerRun
+  poller?.stop()
+  poller = null
+  const hasToken = !!credentials && (await credentials.has(GITHUB_TOKEN))
+  if (run !== pollerRun || !hasToken || !state) return
+  poller = new GitPoller({
+    client: githubClient(tokenOf),
+    read: () => state,
+    apply: action => applyLocal(action, 'git', 'git'),
+    intervalMs: gitSettings.pollMinutes * 60_000
+  })
+  poller.start()
+}
+
+// The token itself is never returned: only its last four characters.
+async function gitStatus() {
+  const token = credentials ? await tokenOf() : null
+  const poll = poller?.status() ?? { lastPoll: null, error: null, backoffUntil: null }
+  return {
+    hasToken: !!token,
+    login: token ? gitSettings.login : null,
+    tokenHint: token ? token.slice(-4) : null,
+    pollMinutes: gitSettings.pollMinutes,
+    branchPrefix: gitSettings.branchPrefix,
+    lastPoll: poll.lastPoll,
+    error: poll.error,
+    backoffUntil: poll.backoffUntil
+  }
+}
+
+const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err))
+
 ipcMain.handle('data:load', async () => {
   const db = await openStore()
   state = await loadInitial(db)
   base = state
   await sync!.init()
+  void startPoller()
   return state
 })
 
@@ -289,6 +374,48 @@ ipcMain.handle('agents:create', (_event, name: string, color: string, level: Age
   return created
 })
 
+ipcMain.handle('git:status', () => gitStatus())
+ipcMain.handle('git:setToken', async (_event, token: string) => {
+  const value = token.trim()
+  // The token is only ever kept sealed by the OS keychain, never in plain text.
+  if (!credentials?.sealed) return { ok: false, error: 'No OS keychain is available on this device, so the token cannot be stored safely.' }
+  try {
+    const { login } = await githubClient(async () => value).viewer()
+    await credentials!.set(GITHUB_TOKEN, value)
+    await saveGitSettings({ login })
+  } catch (err) {
+    return { ok: false, error: errorText(err) }
+  }
+  await startPoller()
+  return gitStatus()
+})
+ipcMain.handle('git:clearToken', async () => {
+  await credentials!.delete(GITHUB_TOKEN)
+  await saveGitSettings({ login: null })
+  await startPoller()
+  return gitStatus()
+})
+ipcMain.handle('git:test', async () => {
+  try {
+    return { ok: true, login: (await githubClient(tokenOf).viewer()).login }
+  } catch (err) {
+    return { ok: false, error: errorText(err) }
+  }
+})
+ipcMain.handle('git:refresh', async () => {
+  await poller?.pollOnce()
+  return gitStatus()
+})
+// Only these two settings are accepted from the renderer; anything else in the patch is ignored.
+ipcMain.handle('git:setSettings', async (_event, patch: { pollMinutes?: unknown; branchPrefix?: unknown }) => {
+  const next: Partial<GitSettings> = {}
+  if (typeof patch?.pollMinutes === 'number' && Number.isFinite(patch.pollMinutes)) next.pollMinutes = Math.min(15, Math.max(1, Math.round(patch.pollMinutes)))
+  if (typeof patch?.branchPrefix === 'string') next.branchPrefix = patch.branchPrefix.trim().slice(0, 40)
+  await saveGitSettings(next)
+  poller?.setInterval(gitSettings.pollMinutes * 60_000)
+  return gitStatus()
+})
+
 // Sync folder. The default is the iCloud Drive folder on each platform; the user can pick any folder.
 function defaultSyncFolder() {
   return isMac
@@ -347,6 +474,7 @@ app.whenReady().then(async () => {
   // Packaged builds take the icon from the bundle; dev runs need it set explicitly.
   if (isMac && !app.isPackaged) app.dock?.setIcon(join(__dirname, '../../build/icon.png'))
   installMenu(isMac)
+  await initGit()
   mcp = new McpController(dataDir(), host, mcpKeys())
   createWindow()
   try {
@@ -362,6 +490,7 @@ app.whenReady().then(async () => {
 app.on('before-quit', () => {
   dispatcher?.stop()
   void mcp?.stop()
+  poller?.stop()
   void sync?.flushNow()
 })
 

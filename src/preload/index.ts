@@ -44,6 +44,14 @@ contextBridge.exposeInMainWorld('api', {
     setEnabled: (enabled: boolean) => ipcRenderer.invoke('mcp:setEnabled', enabled) as Promise<McpStatus>,
     regenerate: () => ipcRenderer.invoke('mcp:regenerate') as Promise<McpStatus>
   },
+  git: {
+    status: () => ipcRenderer.invoke('git:status') as Promise<GitStatus>,
+    setToken: (token: string) => ipcRenderer.invoke('git:setToken', token) as Promise<GitStatus | { ok: false; error: string }>,
+    clearToken: () => ipcRenderer.invoke('git:clearToken') as Promise<GitStatus>,
+    test: () => ipcRenderer.invoke('git:test') as Promise<{ ok: boolean; login?: string; error?: string }>,
+    refresh: () => ipcRenderer.invoke('git:refresh') as Promise<GitStatus>,
+    setSettings: (settings: { pollMinutes?: number; branchPrefix?: string }) => ipcRenderer.invoke('git:setSettings', settings) as Promise<GitStatus>
+  },
   webhooks: {
     create: (projectId: string, url: string, events: WebhookEvent[], allowLocal: boolean) =>
       ipcRenderer.invoke('webhooks:create', projectId, url, events, allowLocal) as Promise<{ webhook: Webhook; secret: string }>,
@@ -54,6 +62,17 @@ contextBridge.exposeInMainWorld('api', {
     redeliver: (deliveryId: string) => ipcRenderer.invoke('webhooks:redeliver', deliveryId) as Promise<string>
   }
 })
+
+export interface GitStatus {
+  hasToken: boolean
+  login: string | null
+  tokenHint: string | null // last four characters of the token only
+  pollMinutes: number
+  branchPrefix: string
+  lastPoll: number | null
+  error: string | null
+  backoffUntil: number | null
+}
 
 export interface McpStatus {
   enabled: boolean

@@ -21,7 +21,8 @@ export const COLLECTIONS = [
   'dashboards',
   'docs',
   'agents',
-  'webhooks'
+  'webhooks',
+  'gitLinks'
 ] as const
 // Notifications are left out: they are a feed, not user data.
 export type Collection = (typeof COLLECTIONS)[number]

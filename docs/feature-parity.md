@@ -43,7 +43,7 @@ Last checked against the code: 2026-10-29.
 | Triage inbox with accept, decline, duplicate | Y (`TriageView.tsx`, `IssueDetail.tsx` Accept and Decline) |
 | Triage rules (auto-assign team, status, labels, priority) | Y (`shared/types.ts` TriageRule, `shared/model.ts` intake, `ProjectSettings.tsx` Triage rules; sets assignee, status, priority, labels, cycle) |
 | Auto-close and auto-archive rules | Y (per project: cancel open issues untouched for N days, archive completed or canceled issues untouched for N days; archived issues are listed and restored in Project settings > Archive, and hidden from Cycles, Triage, command search, dashboard widgets and Activity. `shared/model.ts` runHousekeeping, `shared/live.ts`) |
-| Git branch names and PR status (GitHub, GitLab) | N |
+| Git branch names and PR status (GitHub, GitLab) | P (GitHub only: branch name copy, PR links with state, PR column and filter, status automations. `shared/git.ts`, `main/github.ts`, `IssueDetail.tsx` Pull requests, `GitSection.tsx`. GitLab, CI status and branch creation are missing; see [github.md](github.md)) |
 | Keyboard-first command menu (Cmd+K) | Y (`App.tsx` Cmd+K handler, `CommandPalette.tsx`) |
 | Single-key shortcuts for set status, priority, label, assignee | Y (s, p, l, a and f keys in the issue drawer. `IssueDetail.tsx`) |
 
@@ -190,7 +190,7 @@ Full 1:1 with both products is a multi-quarter build and needs a multi-user back
 **Needs a backend or multi-user:**
 - Accounts, guests, roles, permissions, sharing.
 - Real-time sync between users, and comments with @mentions and notifications across users. (Folder sync between your own devices already exists.)
-- Integrations that depend on third-party OAuth (Slack, GitHub, GitLab, Jira, Gmail, Teams), including git branch and PR status.
+- Integrations that depend on third-party OAuth (Slack, GitLab, Jira, Gmail, Teams). GitHub PR status is partly done with a personal token and polling, not OAuth; GitLab, CI status and branch creation are still missing.
 - Webhooks sent by a server when no device is open (today they are sent by the app on the device that made the change).
 - Forms that accept public submissions.
 - Docs with co-editing.

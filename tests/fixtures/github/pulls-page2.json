@@ -1,0 +1,13 @@
+[
+  {
+    "number": 9,
+    "title": "Old OS-1 attempt",
+    "body": null,
+    "html_url": "https://github.com/acme/app/pull/9",
+    "state": "closed",
+    "draft": false,
+    "merged_at": null,
+    "updated_at": "2026-09-01T00:00:00Z",
+    "head": { "ref": "os-1-old" }
+  }
+]

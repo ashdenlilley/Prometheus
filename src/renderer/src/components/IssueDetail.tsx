@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ActivityEntry, Comment, FileRef, Issue, Relation, RelationType } from '@shared/types'
 import { childrenOf, progress } from '@shared/query'
-import { DRAWER_SHORTCUTS, drawerShortcut } from '@shared/shortcuts'
+import { DRAWER_SHORTCUTS, drawerShortcut, isCopyBranchShortcut } from '@shared/shortcuts'
+import { branchName } from '@shared/git'
 import { createIssue, issueKey, useStore, withValue } from '../store'
 import { inverseRelations } from '@shared/model'
 import { backlinks } from '@shared/docs'
@@ -13,6 +14,7 @@ import { nextOccurrence } from '@shared/recurrence'
 import type { Recurrence } from '@shared/types'
 import { CellEditor } from './cells'
 import { EstimateSelect, PrioritySelect, StatusDot, StatusSelect } from './fields'
+import { PrPill } from './PrPill'
 import { ICONS } from './icons'
 import { askText, useEscape } from './ui'
 import { clsx, fmtDate, parseISO, todayISO, uid } from '../util'
@@ -55,6 +57,7 @@ export function IssueDetail({
   const [relTarget, setRelTarget] = useState('')
   const labelsRef = useRef<HTMLInputElement>(null)
   const assigneeRef = useRef<HTMLInputElement>(null)
+  const [copied, setCopied] = useState(false)
   useEscape(onClose)
 
   // Single-key shortcuts while not typing (see DRAWER_SHORTCUTS): s status, p priority, f favourite, l labels, a assignee.
@@ -62,7 +65,13 @@ export function IssueDetail({
     if (!issue || !project) return
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement
-      const key = drawerShortcut({ key: e.key, metaKey: e.metaKey, ctrlKey: e.ctrlKey, altKey: e.altKey, typing: !!t.closest('input, textarea, select, [contenteditable]') })
+      const typing = !!t.closest('input, textarea, select, [contenteditable]')
+      if (isCopyBranchShortcut({ code: e.code, metaKey: e.metaKey, ctrlKey: e.ctrlKey, shiftKey: e.shiftKey, altKey: e.altKey, typing })) {
+        e.preventDefault()
+        void copyBranch()
+        return
+      }
+      const key = drawerShortcut({ key: e.key, metaKey: e.metaKey, ctrlKey: e.ctrlKey, altKey: e.altKey, typing })
       if (!key) return
       const statuses = project.statuses
       if (key === 's') {
@@ -241,12 +250,24 @@ export function IssueDetail({
     ...issue.comments.map(c => ({ at: c.at, kind: 'comment' as const, item: c }))
   ].sort((a, b) => a.at.localeCompare(b.at))
 
+  // The prefix comes from Settings > GitHub, read here so a change applies at once.
+  const copyBranch = async () => {
+    const { branchPrefix } = await window.api.git.status()
+    await navigator.clipboard.writeText(branchName(key(issue), issue.title, branchPrefix))
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1400)
+  }
+  const links = (data.gitLinks ?? []).filter(l => l.issueId === issue.id)
+
   return (
     <div className="overlay drawer-overlay" onMouseDown={onClose}>
       <aside className="drawer" onMouseDown={e => e.stopPropagation()}>
         <div className="panel-head">
           <span className="muted key">{key(issue)}</span>
           <div className="row-gap">
+            <button className="btn ghost" title="Copy branch name (Mod+Shift+.)" onClick={copyBranch}>
+              {copied ? 'Copied' : 'Copy branch name'}
+            </button>
             <button
               className={clsx('icon-btn', issue.subscribed && 'on')}
               title="Notify me about changes"
@@ -541,6 +562,30 @@ export function IssueDetail({
             <button className="btn" onClick={addRelation} disabled={!relTarget}>Add</button>
           </div>
         </section>
+
+        {(!!project.repos?.length || links.length > 0) && (
+          <section className="drawer-section">
+            <div className="section-title-row small">
+              <h3>Pull requests</h3>
+              {!!project.repos?.length && <button className="btn ghost" onClick={() => window.api.git.refresh()}>Refresh</button>}
+            </div>
+            {links.map(l => (
+              <div key={l.id} className="pr-link-row">
+                <PrPill state={l.state} />
+                <button className="link-row" title={l.url} onClick={() => window.api.openExternal(l.url)}>
+                  <span className="muted key">{l.repo}#{l.number}</span>
+                  <span className="grow ellipsis">{l.title}</span>
+                </button>
+                <button className="icon-btn" aria-label={`Unlink ${l.repo}#${l.number}`} title="Unlink" onClick={() => dispatch({ type: 'removeGitLink', id: l.id })}>
+                  {ICONS.close}
+                </button>
+              </div>
+            ))}
+            {links.length === 0 && (
+              <p className="muted small">No linked PRs. Put {key(issue)} in a branch name, PR title or description.</p>
+            )}
+          </section>
+        )}
 
         {docLinks.length > 0 && (
           <section className="drawer-section" data-testid="doc-backlinks">
