@@ -791,6 +791,53 @@ select.field-input:focus {
   color: var(--muted);
 }
 
+/* Comment attachments and reactions */
+.comment-files {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.comment-thumb {
+  display: block;
+  max-width: 160px;
+  margin-top: 6px;
+  border-radius: 6px;
+}
+
+.comment-reactions,
+.reaction-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.reaction-chip {
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: none;
+  color: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.reaction-chip.on {
+  border-color: var(--accent);
+  background: var(--accent-soft, transparent);
+}
+
+.reaction-picker button {
+  padding: 2px 4px;
+  border: none;
+  background: none;
+  font-size: 16px;
+  cursor: pointer;
+}
+
 /* ───────────── Popovers and menus ───────────── */
 .menu,
 .chip-picker {

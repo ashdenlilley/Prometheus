@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { ActivityEntry, Comment, Issue, Relation, RelationType } from '@shared/types'
+import type { ActivityEntry, Comment, FileRef, Issue, Relation, RelationType } from '@shared/types'
 import { childrenOf, progress } from '@shared/query'
 import { DRAWER_SHORTCUTS, drawerShortcut } from '@shared/shortcuts'
 import { createIssue, issueKey, useStore, withValue } from '../store'
@@ -22,6 +22,8 @@ const REL_LABEL: Record<RelationType | 'blocked_by' | 'duplicated_by', string> =
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const toNum = (v: string) => (v === '' ? undefined : Number(v))
+const MAX_FILE = 5 * 1024 * 1024
+const REACTIONS = ['👍', '🎉', '❤️', '😄', '👀', '🚀']
 
 // Issue drawer: every field, sub-issues, relations, comments and activity.
 export function IssueDetail({ issueId, onClose, onOpen }: { issueId: string; onClose: () => void; onOpen: (id: string) => void }) {
@@ -29,6 +31,10 @@ export function IssueDetail({ issueId, onClose, onOpen }: { issueId: string; onC
   const issue = data.issues.find(i => i.id === issueId)
   const project = data.projects.find(p => p.id === issue?.projectId)
   const [comment, setComment] = useState('')
+  const [files, setFiles] = useState<FileRef[]>([])
+  const [fileError, setFileError] = useState('')
+  const [reacting, setReacting] = useState<string | null>(null)
+  const fileInput = useRef<HTMLInputElement>(null)
   const [subTitle, setSubTitle] = useState('')
   const [relType, setRelType] = useState<RelationType>('blocks')
   const [relTarget, setRelTarget] = useState('')
@@ -122,14 +128,80 @@ export function IssueDetail({ issueId, onClose, onOpen }: { issueId: string; onC
 
   const addComment = () => {
     const body = comment.trim()
-    if (!body) return
+    if (!body && files.length === 0) return
     dispatch({
       type: 'addComment',
       issueId: issue.id,
-      comment: { id: uid(), author: data.me, body, at: new Date().toISOString() }
+      comment: { id: uid(), author: data.me, body, at: new Date().toISOString(), ...(files.length ? { files } : {}) }
     })
     setComment('')
+    setFiles([])
+    setFileError('')
   }
+
+  // Same 5 MB limit and data-URL reading as FilesEdit in cells.tsx.
+  const attach = (list: FileList | null) => {
+    if (!list) return
+    setFileError('')
+    Array.from(list).forEach(f => {
+      if (f.size > MAX_FILE) return setFileError(`${f.name} is over 5 MB`)
+      const reader = new FileReader()
+      reader.onload = () => setFiles(prev => [...prev, { name: f.name, size: f.size, dataUrl: String(reader.result) }])
+      reader.readAsDataURL(f)
+    })
+  }
+
+  const toggleReaction = (commentId: string, emoji: string) =>
+    dispatch({ type: 'toggleReaction', issueId: issue.id, commentId, emoji, by: data.me })
+
+  const reactionChips = (c: Comment) => {
+    const list = c.reactions ?? []
+    return [...new Set(list.map(r => r.emoji))].map(emoji => {
+      const mine = list.some(r => r.emoji === emoji && r.by === data.me)
+      return (
+        <button key={emoji} type="button" className={clsx('reaction-chip', mine && 'on')} aria-pressed={mine} onClick={() => toggleReaction(c.id, emoji)}>
+          {emoji} {list.filter(r => r.emoji === emoji).length}
+        </button>
+      )
+    })
+  }
+
+  const renderComment = (c: Comment) => (
+    <div key={c.id} className="comment">
+      <div className="comment-head small">
+        <b>{c.author}</b>
+        <span className="muted">{new Date(c.at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}</span>
+        <button className="icon-btn" aria-label="Add reaction" onClick={() => setReacting(reacting === c.id ? null : c.id)}>☺</button>
+        <button className="icon-btn" aria-label="Delete comment" onClick={() => dispatch({ type: 'deleteComment', issueId: issue.id, commentId: c.id })}>{ICONS.close}</button>
+      </div>
+      {c.body && <div className="comment-body">{c.body}</div>}
+      {c.files?.map((f, n) =>
+        /^data:image\//.test(f.dataUrl) ? (
+          <img key={n} className="comment-thumb" src={f.dataUrl} alt={f.name} />
+        ) : (
+          <a key={n} className="small" href={f.dataUrl} download={f.name}>{f.name}</a>
+        )
+      )}
+      {!!c.reactions?.length && <div className="comment-reactions">{reactionChips(c)}</div>}
+      {reacting === c.id && (
+        <div className="reaction-picker">
+          {REACTIONS.map(e => (
+            <button
+              key={e}
+              type="button"
+              aria-label={`React ${e}`}
+              onClick={() => {
+                toggleReaction(c.id, e)
+                setReacting(null)
+              }}
+            >
+              {e}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
 
   const addSub = () => {
     const title = subTitle.trim()
@@ -159,6 +231,15 @@ export function IssueDetail({ issueId, onClose, onOpen }: { issueId: string; onC
         <div className="panel-head">
           <span className="muted key">{key(issue)}</span>
           <div className="row-gap">
+            <button
+              className={clsx('icon-btn', issue.subscribed && 'on')}
+              title="Notify me about changes"
+              aria-label={issue.subscribed ? 'Unsubscribe' : 'Subscribe'}
+              onClick={() => patch({ subscribed: !issue.subscribed })}
+              aria-pressed={!!issue.subscribed}
+            >
+              {ICONS.bell}
+            </button>
             <button
               className={clsx('icon-btn', issue.favourite && 'on')}
               title={issue.favourite ? 'Remove from favourites (f)' : 'Add to favourites (f)'}
@@ -424,14 +505,7 @@ export function IssueDetail({ issueId, onClose, onOpen }: { issueId: string; onC
                 {(t.item as ActivityEntry).text} · {fmtDate(t.at.slice(0, 10))}
               </div>
             ) : (
-              <div key={(t.item as Comment).id} className="comment">
-                <div className="comment-head small">
-                  <b>{(t.item as Comment).author}</b>
-                  <span className="muted">{new Date(t.at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}</span>
-                  <button className="icon-btn" aria-label="Delete comment" onClick={() => dispatch({ type: 'deleteComment', issueId: issue.id, commentId: (t.item as Comment).id })}>{ICONS.close}</button>
-                </div>
-                <div className="comment-body">{(t.item as Comment).body}</div>
-              </div>
+              renderComment(t.item as Comment)
             )
           )}
           <textarea
@@ -444,8 +518,22 @@ export function IssueDetail({ issueId, onClose, onOpen }: { issueId: string; onC
               if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) addComment()
             }}
           />
+          <div className="comment-files">
+            {files.map((f, n) => (
+              <span key={`${f.name}-${n}`} className="chip neutral">
+                {f.name}
+                <button type="button" className="chip-x" aria-label={`Remove ${f.name}`} onClick={() => setFiles(files.filter((_, x) => x !== n))}>×</button>
+              </span>
+            ))}
+            <button type="button" className="btn subtle" aria-label="Attach file to comment" onClick={() => fileInput.current?.click()}>Attach</button>
+            <input ref={fileInput} type="file" multiple hidden onChange={e => {
+              attach(e.target.files)
+              e.target.value = '' // so the same file can be attached again after removing it
+            }} />
+            {fileError && <span className="error small">{fileError}</span>}
+          </div>
           <div className="actions">
-            <button className="btn primary" onClick={addComment} disabled={!comment.trim()}>Comment</button>
+            <button className="btn primary" onClick={addComment} disabled={!comment.trim() && files.length === 0}>Comment</button>
           </div>
         </section>
       </aside>

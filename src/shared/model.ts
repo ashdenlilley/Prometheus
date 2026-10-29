@@ -46,6 +46,7 @@ export type Action =
   | { type: 'deleteIssues'; ids: string[] }
   | { type: 'addComment'; issueId: string; comment: Comment }
   | { type: 'deleteComment'; issueId: string; commentId: string }
+  | { type: 'toggleReaction'; issueId: string; commentId: string; emoji: string; by: string }
   | { type: 'addRelation'; issueId: string; relation: Relation }
   | { type: 'removeRelation'; issueId: string; index: number }
   | { type: 'addCycle'; cycle: Cycle }
@@ -149,10 +150,18 @@ export function reducer(s: AppData, a: Action): AppData {
           return { ...i, values: withValue(i.values, a.columnId, undefined) }
         })
       }
-    case 'addIssue':
-      return { ...s, issues: [...s.issues, intake(s, a.issue)] }
-    case 'addIssues':
-      return { ...s, issues: [...s.issues, ...a.issues.map(i => intake(s, i))] }
+    case 'addIssue': {
+      const project = s.projects.find(p => p.id === a.issue.projectId)
+      const issue = a.issue.subscribed === undefined && project?.autoSubscribe !== false ? { ...a.issue, subscribed: true } : a.issue
+      return { ...s, issues: [...s.issues, intake(s, issue)] }
+    }
+    case 'addIssues': {
+      const issues = a.issues.map(i => {
+        const project = s.projects.find(p => p.id === i.projectId)
+        return i.subscribed === undefined && project?.autoSubscribe !== false ? { ...i, subscribed: true } : i
+      })
+      return { ...s, issues: [...s.issues, ...issues.map(i => intake(s, i))] }
+    }
     case 'patchIssue':
       return updateIssue(s, a.id, a.patch)
     case 'patchIssues':
@@ -177,6 +186,18 @@ export function reducer(s: AppData, a: Action): AppData {
     }
     case 'deleteComment':
       return mapIssue(s, a.issueId, i => ({ ...i, comments: i.comments.filter(c => c.id !== a.commentId) }))
+    case 'toggleReaction':
+      // Like mapIssue, this leaves updatedAt alone: a reaction is not an issue edit.
+      return mapIssue(s, a.issueId, i => ({
+        ...i,
+        comments: i.comments.map(c => {
+          if (c.id !== a.commentId) return c
+          const same = (r: { emoji: string; by: string }) => r.emoji === a.emoji && r.by === a.by
+          const current = c.reactions ?? []
+          const reactions = current.some(same) ? current.filter(r => !same(r)) : [...current, { emoji: a.emoji, by: a.by }]
+          return { ...c, reactions }
+        })
+      }))
     case 'addRelation':
       return mapIssue(s, a.issueId, i => ({ ...i, relations: [...i.relations, a.relation] }))
     case 'removeRelation':

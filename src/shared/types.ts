@@ -207,6 +207,7 @@ export interface Project {
   order?: string[]
   // Table/board hidden fixed or custom column keys
   hiddenColumns: string[]
+  autoSubscribe?: boolean // default true: issues created in this project start subscribed
   // WIP limit per status id (board warns when exceeded)
   wipLimits: Record<string, number>
   // Automatic cycle creation: length in days, and whether to create the next one on load
@@ -223,6 +224,8 @@ export interface Comment {
   author: string
   body: string
   at: string
+  files?: FileRef[]
+  reactions?: { emoji: string; by: string }[]
 }
 
 export type RelationType = 'blocks' | 'duplicate' | 'related'
@@ -261,6 +264,7 @@ export interface Issue {
   firedAutomations?: string[]
   // Triage inbox: new items wait here until accepted or declined
   triage?: boolean
+  subscribed?: boolean // the local user follows the issue; changes from MCP or sync notify them
   relations: Relation[]
   comments: Comment[]
   activity: ActivityEntry[]
