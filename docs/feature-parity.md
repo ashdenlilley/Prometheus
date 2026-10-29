@@ -66,7 +66,7 @@ Last checked against the code: 2026-10-29.
 | Built-in automation (auto-close, auto-archive, auto-add to cycle) | Y (`shared/model.ts` runAutomations, applyAction and runHousekeeping; move to current cycle, auto-close on inactivity and auto-archive) |
 | Triggers on issue, project, cycle and initiative changes | Y (issue triggers: status, priority, assignee, due date and custom column changed; project status changed, cycle started or ended, initiative status changed. `shared/types.ts` AutomationTrigger, `shared/model.ts`) |
 | Slack, GitHub, GitLab, Figma, Sentry, Zendesk and similar | N |
-| API and webhooks | P (local HTTP MCP server for agents, `src/main/mcp.ts`; no webhooks, no public REST API) |
+| API and webhooks | Y (local MCP server for agents, `src/main/mcp.ts`; localhost REST API at /api/v1 with create/read/update for issues and comments, `src/main/rest.ts`; per-project signed webhooks with retries, a delivery log and redeliver, sent from the device that made the change, `src/main/webhooks.ts`, `shared/webhooks.ts`, docs/api.md) |
 | Import from Jira, Asana, CSV | Y (CSV import and export, plus file import of a Jira CSV export and an Asana CSV or JSON export with a preview and status mapping. `ImportModal.tsx`, `shared/importers.ts`; no live API import) |
 | Agents assigned to issues | Y (registered agents with their own MCP token and level read/comment/write, `agent:<id>` assignees with a robot badge, `my_issues`/`whoami` tools, activity attributed to the agent; `src/shared/agents.ts`, `src/main/mcp.ts`) |
 
@@ -156,7 +156,7 @@ Column-level features: header rename, hide, reorder, resize, pin, sort, group-fo
 | Recipes (templated automations) | N |
 | Cross-board item creation | N (the create-issue action only creates items in the same project) |
 | Integrations (Slack, Teams, GitHub, Jira, Gmail, and others) | N |
-| Webhooks and API | P (local HTTP MCP server, `src/main/mcp.ts`; no webhooks, no REST API) |
+| Webhooks and API | Y (MCP, localhost REST API and signed outgoing webhooks; see docs/api.md. No REST delete, no public hosted API) |
 | Formula and mirror columns | Y (`shared/formula.ts`, `cells.tsx`) |
 
 ### 2.5 Dashboards and reporting
@@ -191,7 +191,7 @@ Full 1:1 with both products is a multi-quarter build and needs a multi-user back
 - Accounts, guests, roles, permissions, sharing.
 - Real-time sync between users, and comments with @mentions and notifications across users. (Folder sync between your own devices already exists.)
 - Integrations that depend on third-party OAuth (Slack, GitHub, GitLab, Jira, Gmail, Teams), including git branch and PR status.
-- Webhooks.
+- Webhooks sent by a server when no device is open (today they are sent by the app on the device that made the change).
 - Forms that accept public submissions.
 - Docs with co-editing.
 

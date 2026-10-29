@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { Agent, AppData } from '../shared/types'
+import type { Agent, AppData, Webhook, WebhookEvent } from '../shared/types'
 import type { AuditFilter, AuditRow } from '../shared/audit'
+import type { WebhookDelivery } from '../shared/webhooks'
 
 contextBridge.exposeInMainWorld('api', {
   platform: process.platform,
@@ -42,6 +43,15 @@ contextBridge.exposeInMainWorld('api', {
     status: () => ipcRenderer.invoke('mcp:status') as Promise<McpStatus>,
     setEnabled: (enabled: boolean) => ipcRenderer.invoke('mcp:setEnabled', enabled) as Promise<McpStatus>,
     regenerate: () => ipcRenderer.invoke('mcp:regenerate') as Promise<McpStatus>
+  },
+  webhooks: {
+    create: (projectId: string, url: string, events: WebhookEvent[], allowLocal: boolean) =>
+      ipcRenderer.invoke('webhooks:create', projectId, url, events, allowLocal) as Promise<{ webhook: Webhook; secret: string }>,
+    rotateSecret: (id: string) => ipcRenderer.invoke('webhooks:rotateSecret', id) as Promise<string>,
+    remove: (id: string) => ipcRenderer.invoke('webhooks:remove', id) as Promise<void>,
+    test: (id: string) => ipcRenderer.invoke('webhooks:test', id) as Promise<string>,
+    deliveries: (id: string) => ipcRenderer.invoke('webhooks:deliveries', id) as Promise<WebhookDelivery[]>,
+    redeliver: (deliveryId: string) => ipcRenderer.invoke('webhooks:redeliver', deliveryId) as Promise<string>
   }
 })
 

@@ -5,7 +5,7 @@ import { promises as fs } from 'fs'
 import type { Agent, AppData } from '../shared/types'
 import { reducer, type Action } from '../shared/model'
 import { applyOps, Clock, diffOps } from '../shared/sync'
-import { AUDIT_LIMIT, auditEntries, toCsv, type AuditEntry, type AuditFilter } from '../shared/audit'
+import { AUDIT_LIMIT, auditEntries, toCsv, type AuditEntry, type AuditFilter, type AuditSource } from '../shared/audit'
 import { subscriptionNotifications } from '../shared/subscriptions'
 import { migrate } from '../shared/migrate'
 import { seed } from '../shared/seed'
@@ -16,6 +16,10 @@ import { LEGACY_AGENT, agentAssignee, displayAssignee, isAgentAssignee, stampAct
 import { Store } from './db'
 import { SyncEngine } from './sync'
 import { installMenu } from './menu'
+import { WebhookDispatcher, WebhookSecrets } from './webhooks'
+import { WEBHOOK_EVENTS, urlAllowed, webhookEvents, type WebhookDelivery } from '../shared/webhooks'
+import { randomUUID } from 'crypto'
+import type { Webhook, WebhookEvent } from '../shared/types'
 
 // Live UI testing only: expose Chrome DevTools on localhost when PROMETHEUS_DEBUG_PORT is set.
 if (process.env.PROMETHEUS_DEBUG_PORT) app.commandLine.appendSwitch('remote-debugging-port', process.env.PROMETHEUS_DEBUG_PORT)
@@ -31,12 +35,31 @@ let state: AppData | null = null
 let base: AppData | null = null
 let store: Store | null = null
 let sync: SyncEngine | null = null
+let secrets: WebhookSecrets | null = null
+let dispatcher: WebhookDispatcher | null = null
 
 async function openStore(): Promise<Store> {
   if (store) return store
   const next = new Store(join(dataDir(), 'prometheus.db'))
   await next.open()
   store = next
+  // Webhook secrets use the same OS keychain as the sync key. Plaintext only where no keychain exists.
+  secrets = new WebhookSecrets(
+    dataDir(),
+    (await safeStorage.isAsyncEncryptionAvailable())
+      ? {
+          seal: async text => (await safeStorage.encryptStringAsync(text)).toString('base64'),
+          open: async sealed => (await safeStorage.decryptStringAsync(Buffer.from(sealed, 'base64'))).result
+        }
+      : undefined
+  )
+  dispatcher = new WebhookDispatcher({
+    store: next,
+    getSecret: id => secrets!.getSecret(id),
+    read: () => state,
+    apply: action => applyLocal(action, 'automation', 'me')
+  })
+  dispatcher.start()
   sync = new SyncEngine(dataDir(), next, {
     read: () => state!,
     write: applyRemote,
@@ -92,6 +115,20 @@ function audit(entries: AuditEntry[]) {
   }
 }
 
+// Queues outgoing webhooks for changes made on this device. Sync changes never call this.
+// Like audit, a failure here must not break the change itself.
+function enqueueWebhooks(prev: AppData, next: AppData, actor: string) {
+  try {
+    const events = webhookEvents(prev, next, actor, new Date().toISOString())
+    if (events.length === 0) return
+    dispatcher?.enqueue(events)
+    // Send now rather than on the next 15 s tick. setImmediate lets the caller store the new state first.
+    setImmediate(() => void dispatcher?.tick())
+  } catch (err) {
+    console.warn('webhook enqueue failed', err)
+  }
+}
+
 function broadcast(data: AppData) {
   base = data
   for (const win of BrowserWindow.getAllWindows()) {
@@ -110,25 +147,30 @@ function applyRemote(next: AppData) {
   broadcast(next)
 }
 
+// One path for changes made in the main process: MCP calls, webhook settings from the UI, and the dispatcher.
+// stampAs, when given, marks new activity entries with that actor (an agent assignee for MCP and REST calls).
+function applyLocal(action: Action, source: AuditSource, actor: string, stampAs?: string) {
+  if (!state || !sync) throw new Error('Prometheus has not loaded its data yet')
+  const prev = state
+  const reduced = reducer(prev, action)
+  if (reduced === prev) return
+  const next = stampAs ? stampActor(prev, reduced, stampAs) : reduced
+  state = next
+  const ops = diffOps(prev, next, sync.clock)
+  sync.record(ops)
+  audit(auditEntries(ops, source, new Date().toISOString(), action.type))
+  enqueueWebhooks(prev, next, actor)
+  // Notifications are deliberately left out of the sync op log, so they stay local to this device.
+  const by = stampAs && isAgentAssignee(stampAs) ? displayAssignee(prev, stampAs) : source === 'mcp' ? 'MCP' : 'Prometheus'
+  state = subscriptionNotifications(prev, next, by)
+  void persist(state)
+  broadcast(state)
+}
+
 const host = {
   read: () => state,
-  apply(action: Action, actor?: string) {
-    if (!state || !sync) throw new Error('Prometheus has not loaded its data yet')
-    const prev = state
-    const next = reducer(prev, action)
-    if (next === prev) return
-    // Activity written here is attributed to the calling agent. Without an actor, that is the shared token.
-    const who = actor ?? agentAssignee(LEGACY_AGENT.id)
-    const stamped = stampActor(prev, next, who)
-    state = stamped
-    const ops = diffOps(prev, stamped, sync.clock)
-    sync.record(ops)
-    audit(auditEntries(ops, 'mcp', new Date().toISOString(), action.type))
-    // Notifications are deliberately left out of the sync op log, so they stay local to this device.
-    state = subscriptionNotifications(prev, stamped, isAgentAssignee(who) ? displayAssignee(prev, who) : 'MCP')
-    void persist(state)
-    broadcast(state)
-  }
+  // Activity written here is attributed to the calling agent. Without an actor, that is the shared token.
+  apply: (action: Action, actor?: string) => applyLocal(action, 'mcp', 'mcp', actor ?? agentAssignee(LEGACY_AGENT.id))
 }
 
 // The keychain is only reliable once the app is ready (Linux reports it unavailable before that),
@@ -171,6 +213,7 @@ ipcMain.handle('data:save', (_event, incoming: AppData) => {
     base = incoming
     return persist(incoming)
   }
+  const prev = state
   const ops = diffOps(base ?? state, incoming, sync.clock)
   if (ops.length === 0) {
     base = incoming
@@ -187,6 +230,7 @@ ipcMain.handle('data:save', (_event, incoming: AppData) => {
   const remoteAhead = JSON.stringify(merged) !== JSON.stringify(incoming)
   state = merged
   audit(auditEntries(ops, 'ui', new Date().toISOString()))
+  enqueueWebhooks(prev, merged, 'me')
   void persist(merged)
   if (remoteAhead) broadcast(merged)
   else base = incoming
@@ -195,6 +239,40 @@ ipcMain.handle('data:save', (_event, incoming: AppData) => {
 // Only web links leave the app; anything else is ignored.
 ipcMain.handle('shell:open', (_event, url: string) => {
   if (/^https?:\/\//i.test(url)) return shell.openExternal(url)
+})
+
+// Webhook config goes through applyLocal (audited as ui), so it syncs and reaches the renderer like any other change.
+ipcMain.handle('webhooks:create', async (_event, projectId: string, url: string, events: WebhookEvent[], allowLocal: boolean) => {
+  if (!state || !secrets) throw new Error('Prometheus has not loaded its data yet')
+  if (!state.projects.some(p => p.id === projectId)) throw new Error('Project not found')
+  const check = urlAllowed(url, allowLocal)
+  if (!check.ok) throw new Error(check.reason)
+  if (events.length === 0 || events.some(e => !WEBHOOK_EVENTS.includes(e))) throw new Error('Pick at least one valid event')
+  const webhook: Webhook = { id: randomUUID(), projectId, url, events, enabled: true, allowLocal, createdAt: new Date().toISOString() }
+  const secret = await secrets.createSecret(webhook.id)
+  applyLocal({ type: 'addWebhook', webhook }, 'ui', 'me')
+  return { webhook, secret }
+})
+ipcMain.handle('webhooks:rotateSecret', (_event, id: string) => {
+  if (!state?.webhooks?.some(w => w.id === id)) throw new Error('Webhook not found')
+  return secrets!.rotateSecret(id)
+})
+ipcMain.handle('webhooks:remove', async (_event, id: string) => {
+  applyLocal({ type: 'deleteWebhook', id }, 'ui', 'me')
+  await secrets!.deleteSecret(id)
+})
+ipcMain.handle('webhooks:test', (_event, id: string) => {
+  const delivery = dispatcher?.testSend(id)
+  if (!delivery) throw new Error('Webhook not found')
+  void dispatcher!.tick()
+  return delivery
+})
+ipcMain.handle('webhooks:deliveries', (_event, id: string) => store?.listDeliveries(id) ?? ([] as WebhookDelivery[]))
+ipcMain.handle('webhooks:redeliver', (_event, deliveryId: string) => {
+  const copy = dispatcher?.redeliver(deliveryId)
+  if (!copy) throw new Error('Delivery not found')
+  void dispatcher!.tick()
+  return copy
 })
 
 ipcMain.handle('mcp:status', () => mcpReady().status())
@@ -282,6 +360,7 @@ app.whenReady().then(async () => {
 })
 
 app.on('before-quit', () => {
+  dispatcher?.stop()
   void mcp?.stop()
   void sync?.flushNow()
 })

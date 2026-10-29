@@ -8,13 +8,14 @@ import { LEGACY_AGENT, WriteLimiter, agentAssignee } from '../shared/agents'
 import { blankProject } from '../shared/seed'
 import { progress } from '../shared/query'
 import { submissionToIssue } from '../shared/forms'
+import { restRoute } from './rest'
 
 // Local MCP server (streamable HTTP, JSON responses only). Binds to 127.0.0.1 and requires a bearer token.
 
 const PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26']
 const DEFAULT_PORT = 7878
 const PORT_TRIES = 8
-const MAX_BODY = 1024 * 1024
+export const MAX_BODY = 1024 * 1024
 
 export interface McpHost {
   read(): AppData | null
@@ -633,6 +634,22 @@ const fail = (id: RpcMessage['id'], code: number, message: string) => ({ jsonrpc
 
 const isMessage = (m: unknown): m is RpcMessage => typeof m === 'object' && m !== null && !Array.isArray(m)
 
+// Runs one tool against the live data. Shared by the MCP handler and the REST API (rest.ts).
+export type ToolResult = { ok: true; value: unknown } | { ok: false; message: string }
+
+// REST calls run as the shared token's legacy agent (write level), as before agents existed.
+export function callTool(name: string, args: Record<string, unknown>, host: McpHost, caller: Caller = LEGACY_AGENT): ToolResult {
+  const tool = TOOLS.find(t => t.name === name)
+  if (!tool) return { ok: false, message: `Unknown tool: ${name}` }
+  const data = host.read()
+  if (!data) return { ok: false, message: 'Prometheus has not loaded its data yet. Open the app first.' }
+  try {
+    return { ok: true, value: tool.run(args, { data, agent: caller, apply: action => host.apply(action, agentAssignee(caller.id)) }) }
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : String(e) }
+  }
+}
+
 // Whether the caller's level allows this tool with these args. Args have no confirm key here.
 function mayCall(caller: Caller, tool: Tool, args: Record<string, unknown>, data: AppData): boolean {
   if (caller.level === 'write' || tool.kind === 'read') return true
@@ -717,6 +734,11 @@ const sameBytes = (a: string, b: string) => {
   return x.length === y.length && timingSafeEqual(x, y)
 }
 
+// The shared token only. Used by the REST API.
+export function tokenMatches(header: string | undefined, token: string) {
+  return !!header?.startsWith('Bearer ') && sameBytes(header.slice(7), token)
+}
+
 export const hashToken = (token: string) => createHash('sha256').update(token).digest('hex')
 
 // Agent tokens carry a prefix so they are easy to spot in an MCP config.
@@ -732,7 +754,7 @@ function resolveCaller(header: string | undefined, sharedToken: string, data: Ap
   return agent ?? null
 }
 
-function readBody(req: http.IncomingMessage): Promise<string> {
+export function readBody(req: http.IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     let size = 0
     const chunks: Buffer[] = []
@@ -750,7 +772,7 @@ function readBody(req: http.IncomingMessage): Promise<string> {
   })
 }
 
-function send(res: http.ServerResponse, status: number, body?: unknown) {
+export function send(res: http.ServerResponse, status: number, body?: unknown) {
   if (body === undefined) {
     res.writeHead(status).end()
     return
@@ -774,6 +796,7 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse, token:
   if (req.headers.origin && !isLocalOrigin(req.headers.origin)) {
     return send(res, 403, fail(null, -32000, 'Forbidden origin'))
   }
+  if (req.url?.startsWith('/api/v1/')) return restRoute(req, res, token, host)
   if (req.url !== '/mcp') return send(res, 404)
   const caller = resolveCaller(req.headers.authorization, token, host.read())
   if (!caller) return send(res, 401, fail(null, -32001, 'Missing or invalid bearer token'))

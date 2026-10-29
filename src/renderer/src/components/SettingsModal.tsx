@@ -34,7 +34,9 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
 
   const claudeCmd = `claude mcp add --transport http --header "Authorization: Bearer ${status.token}" prometheus ${status.url}`
   const codexToml = `[mcp_servers.prometheus]\nurl = "${status.url}"\nhttp_headers = { Authorization = "Bearer ${status.token}" }`
-  const masked = `${status.token.slice(0, 4)}${'•'.repeat(24)}${status.token.slice(-4)}`
+  const apiBase = status.url.replace(/\/mcp$/, '/api/v1')
+  const restCurl = `curl -H "Authorization: Bearer ${status.token}" ${apiBase}/issues?project=<KEY>`
+  const masked =`${status.token.slice(0, 4)}${'•'.repeat(24)}${status.token.slice(-4)}`
 
   return (
     <Modal title="Settings" onClose={onClose}>
@@ -78,6 +80,13 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
       <section className="settings-section">
         <div className="settings-title">Connect Codex</div>
         <CodeBlock text={codexToml} copied={copied === 'codex'} onCopy={() => copy('codex', codexToml)} />
+      </section>
+
+      <section className="settings-section">
+        <div className="settings-title">REST API</div>
+        <div className="muted small">Base URL {apiBase}</div>
+        <p className="muted small">Uses the shared MCP token above (agent tokens are MCP only). Localhost only. See docs/api.md.</p>
+        <CodeBlock text={restCurl} copied={copied === 'rest'} onCopy={() => copy('rest', restCurl)} />
       </section>
 
       <AgentsSection url={status.url} />

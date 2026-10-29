@@ -436,6 +436,20 @@ export interface Notification {
   read: boolean
 }
 
+export type WebhookEvent = 'issue.created' | 'issue.updated' | 'issue.deleted' | 'issue.status_changed' | 'comment.created'
+
+// Config only: the signing secret is per device (see src/main/webhooks.ts) and never part of AppData.
+export interface Webhook {
+  id: string
+  projectId: string
+  url: string
+  events: WebhookEvent[]
+  enabled: boolean
+  allowLocal?: boolean
+  createdAt: string
+  disabledReason?: string
+}
+
 // A Markdown document under a space or project. rev/baseRev/revBy drive conflict detection on sync.
 export interface Doc {
   id: string
@@ -481,6 +495,8 @@ export interface AppData {
   // Optional so files saved before docs existed still load. Read as `?? []`.
   docs?: Doc[]
   agents?: Agent[]
+  // Optional so data saved before webhooks existed still loads. Readers use `?? []`.
+  webhooks?: Webhook[]
   // Display name for the local user. Used for comment authors and notifications.
   me: string
 }

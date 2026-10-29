@@ -23,7 +23,8 @@ import type {
   StatusCategory,
   Team,
   Template,
-  TriageRule
+  TriageRule,
+  Webhook
 } from './types'
 import { enforceLabelGroups } from './labels'
 import { canArchiveTeam, ensureTeams, moveProjectToTeam, nextIssueNumber, patchTeam, teamOf } from './teams'
@@ -32,6 +33,9 @@ import { canArchiveTeam, ensureTeams, moveProjectToTeam, nextIssueNumber, patchT
 
 export type Action =
   | { type: 'load'; data: AppData }
+  | { type: 'addWebhook'; webhook: Webhook }
+  | { type: 'patchWebhook'; id: string; patch: Partial<Webhook> }
+  | { type: 'deleteWebhook'; id: string }
   | { type: 'addSpace'; space: Space }
   | { type: 'patchSpace'; id: string; patch: Partial<Space> }
   | { type: 'deleteSpace'; id: string }
@@ -143,6 +147,12 @@ export function reducer(s: AppData, a: Action): AppData {
       return moveProjectToTeam(s, a.projectId, a.teamId)
     case 'addSpace':
       return { ...s, spaces: [...s.spaces, a.space] }
+    case 'addWebhook':
+      return { ...s, webhooks: [...(s.webhooks ?? []), a.webhook] }
+    case 'patchWebhook':
+      return { ...s, webhooks: (s.webhooks ?? []).map(w => (w.id === a.id ? { ...w, ...a.patch } : w)) }
+    case 'deleteWebhook':
+      return { ...s, webhooks: (s.webhooks ?? []).filter(w => w.id !== a.id) }
     case 'patchSpace':
       return { ...s, spaces: s.spaces.map(sp => (sp.id === a.id ? { ...sp, ...a.patch } : sp)) }
     case 'deleteSpace': {

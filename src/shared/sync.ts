@@ -26,6 +26,7 @@ export type Table =
   | 'notifications'
   | 'docs'
   | 'agents'
+  | 'webhooks'
 
 export const TABLE_KEYS: [Table, keyof AppData][] = [
   ['spaces', 'spaces'],
@@ -40,7 +41,8 @@ export const TABLE_KEYS: [Table, keyof AppData][] = [
   ['dashboards', 'dashboards'],
   ['notifications', 'notifications'],
   ['docs', 'docs'],
-  ['agents', 'agents']
+  ['agents', 'agents'],
+  ['webhooks', 'webhooks']
 ]
 
 export interface Op {
