@@ -37,10 +37,11 @@ async function openStore(): Promise<Store> {
     write: applyRemote,
     keys: {
       // The derived sync key is stored encrypted by the OS keychain (DPAPI / Keychain), never in plain text.
-      seal: key => safeStorage.encryptString(key.toString('base64')).toString('base64'),
-      open: sealed => {
+      seal: async key => (await safeStorage.encryptStringAsync(key.toString('base64'))).toString('base64'),
+      open: async sealed => {
         try {
-          return Buffer.from(safeStorage.decryptString(Buffer.from(sealed, 'base64')), 'base64')
+          const { result } = await safeStorage.decryptStringAsync(Buffer.from(sealed, 'base64'))
+          return Buffer.from(result, 'base64')
         } catch {
           return null
         }

@@ -37,8 +37,8 @@ export interface SyncHooks {
   write(next: AppData): void
   // Keeps the derived key in the OS keychain (Electron safeStorage) rather than in plain config.
   keys: {
-    seal(key: Buffer): string
-    open(sealed: string): Buffer | null
+    seal(key: Buffer): Promise<string>
+    open(sealed: string): Promise<Buffer | null>
   }
 }
 
@@ -91,7 +91,7 @@ export class SyncEngine {
     }
     if (!this.config.deviceId) this.config.deviceId = randomUUID()
     this.clock.setDevice(this.config.deviceId)
-    this.key = this.config.keyEnc ? this.hooks.keys.open(this.config.keyEnc) : null
+    this.key = this.config.keyEnc ? await this.hooks.keys.open(this.config.keyEnc) : null
     await this.saveConfig()
     this.clocks = this.store.clocks()
     for (const hlc of this.clocks.values()) this.clock.observe(hlc)
@@ -163,7 +163,7 @@ export class SyncEngine {
       this.outbox = []
       this.key = key
       this.config.folder = folder
-      this.config.keyEnc = this.hooks.keys.seal(key)
+      this.config.keyEnc = await this.hooks.keys.seal(key)
       await this.saveConfig()
       this.startPolling()
 
@@ -190,7 +190,7 @@ export class SyncEngine {
       const key = await unlockMeta(passphrase, meta)
       if (!key) throw new Error('Wrong passphrase for this sync folder.')
       this.key = key
-      this.config.keyEnc = this.hooks.keys.seal(key)
+      this.config.keyEnc = await this.hooks.keys.seal(key)
       await this.saveConfig()
       this.status.error = null
       this.startPolling()
