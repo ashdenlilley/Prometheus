@@ -307,6 +307,12 @@ export interface GitPull {
   updatedAt: string
 }
 
+// OS-360: restricted = only the listed user ids (plus the owner) can see the project
+export interface ProjectAccess {
+  mode: 'open' | 'restricted'
+  users: string[]
+}
+
 export interface Project {
   id: string
   spaceId: string
@@ -350,6 +356,7 @@ export interface Project {
   repos?: RepoRef[]
   // Status ids to move an issue to when its PR opens (not draft) or merges. Unset = off.
   gitAutomation?: { onOpen?: string; onMerge?: string }
+  access?: ProjectAccess // OS-360: restricted = only listed user ids (plus the owner) can see it
 }
 
 // One field of a local intake form. key: 'title' | 'description' | 'priority' | 'labels' | 'dueDate' | column id

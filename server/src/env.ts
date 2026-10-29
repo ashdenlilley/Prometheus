@@ -16,4 +16,5 @@ export interface Env {
   COMPACT_AT?: string
   COMPACT_KEEP?: string
   LINK_TTL_SECONDS?: string
+  INVITE_TTL_SECONDS?: string
 }

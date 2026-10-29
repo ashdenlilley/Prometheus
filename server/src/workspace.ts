@@ -1,5 +1,6 @@
 import { DurableObject } from 'cloudflare:workers'
 import { parse, TABLE_KEYS, type Op } from '../../src/shared/sync'
+import type { Role } from '../../src/shared/permissions'
 import type { Env } from './env'
 
 // Wire protocol: JSON text frames. See docs/cloud-sync.md.
@@ -29,6 +30,10 @@ const run = (sql: Sql, text: string, ...params: SqlStorageValue[]) => {
 interface Att {
   device: string
   hello: boolean
+  user: string
+  role: Role
+  projects: string[]
+  name: string
 }
 
 // A type alias, not an interface: rows<T> needs an implicit index signature.
@@ -84,15 +89,25 @@ export class Workspace extends DurableObject<Env> {
     })
   }
 
-  // Called by the Worker after it has checked the device is active.
+  // Called by the Worker after it has checked the device and its user are active.
   async fetch(request: Request): Promise<Response> {
     const device = request.headers.get('X-Device-Id')
-    if (!device || request.headers.get('Upgrade') !== 'websocket') return new Response('expected websocket', { status: 426 })
+    const user = request.headers.get('X-User-Id')
+    if (!device || !user || request.headers.get('Upgrade') !== 'websocket') return new Response('expected websocket', { status: 426 })
     const pair = new WebSocketPair()
     const client = pair[0]
     const server = pair[1]
-    this.ctx.acceptWebSocket(server, [device]) // tag = device id, so revocation can find its sockets
-    server.serializeAttachment({ device, hello: false } satisfies Att)
+    // Tags: device id, so revocation can find its sockets, and u:<user>, so removal can.
+    this.ctx.acceptWebSocket(server, [device, `u:${user}`])
+    const att: Att = {
+      device,
+      hello: false,
+      user,
+      role: request.headers.get('X-Role') as Role,
+      projects: JSON.parse(request.headers.get('X-Projects') ?? '[]'),
+      name: decodeURIComponent(request.headers.get('X-User-Name') ?? '')
+    }
+    server.serializeAttachment(att)
     // Only echo the subprotocol when the client offered it (a ?access_token= client offers none).
     const offered = (request.headers.get('Sec-WebSocket-Protocol') ?? '').split(',').some(p => p.trim() === 'prometheus-sync')
     return new Response(null, { status: 101, webSocket: client, headers: offered ? { 'Sec-WebSocket-Protocol': 'prometheus-sync' } : {} })
@@ -100,6 +115,10 @@ export class Workspace extends DurableObject<Env> {
 
   closeDevices(ids: string[]) {
     for (const id of ids) for (const ws of this.ctx.getWebSockets(id)) ws.close(4001, 'device revoked')
+  }
+
+  closeUser(userId: string, code: number, reason: string) {
+    for (const ws of this.ctx.getWebSockets(`u:${userId}`)) ws.close(code, reason)
   }
 
   webSocketMessage(ws: WebSocket, message: string | ArrayBuffer) {
