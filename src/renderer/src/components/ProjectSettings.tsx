@@ -2,7 +2,8 @@ import { useState } from 'react'
 import type { Automation, AutomationAction, AutomationTrigger, Project, ProjectStatus, StatusCategory, StatusDef } from '@shared/types'
 import { useStore } from '../store'
 import { fieldOptions } from './FilterBar'
-import type { Operator, TriageRule } from '@shared/types'
+import type { Initiative, Operator, TriageRule } from '@shared/types'
+import { RECIPES, recipeAutomation, type Blank, type Recipe } from '@shared/recipes'
 import { ICONS } from './icons'
 import { askText, Modal } from './ui'
 import { LABEL_COLORS } from '../columns'
@@ -256,8 +257,18 @@ const TRIGGERS: { value: AutomationTrigger['type']; label: string }[] = [
   { value: 'status_changed', label: 'Status changes to' },
   { value: 'priority_changed', label: 'Priority changes to' },
   { value: 'assignee_changed', label: 'Assignee changes' },
-  { value: 'due_passed', label: 'Due date is set in the past' }
+  { value: 'due_passed', label: 'Due date is set in the past' },
+  { value: 'column_changed', label: 'Column changes' },
+  { value: 'project_status_changed', label: 'Project status changes to' },
+  { value: 'cycle_started', label: 'Cycle starts' },
+  { value: 'cycle_ended', label: 'Cycle ends' },
+  { value: 'initiative_status_changed', label: 'Initiative status changes to' }
 ]
+
+// Object triggers act on a set of issues, so they only offer the actions that make sense for that
+const OBJECT_TRIGGERS: AutomationTrigger['type'][] = ['project_status_changed', 'cycle_started', 'cycle_ended', 'initiative_status_changed']
+const OBJECT_ACTIONS: AutomationAction['type'][] = ['notify', 'set_status', 'set_priority', 'set_assignee', 'add_label']
+const INITIATIVE_STATUSES: Initiative['status'][] = ['planned', 'active', 'done']
 
 const ACTIONS: { value: AutomationAction['type']; label: string }[] = [
   { value: 'set_status', label: 'Set status to' },
@@ -277,6 +288,13 @@ function Automations({ project }: { project: Project }) {
   const [triggerValue, setTriggerValue] = useState(project.statuses[project.statuses.length - 1]?.id ?? '')
   const [action, setAction] = useState<AutomationAction['type']>('set_status')
   const [actionValue, setActionValue] = useState('')
+  const [actionProject, setActionProject] = useState('')
+  const [triggerColumn, setTriggerColumn] = useState(project.columns[0]?.id ?? '')
+  const [triggerColumnValue, setTriggerColumnValue] = useState('')
+  const [triggerProjectStatus, setTriggerProjectStatus] = useState<ProjectStatus | ''>('')
+  const [triggerInitiative, setTriggerInitiative] = useState<Initiative['status'] | ''>('')
+  const [recipe, setRecipe] = useState<Recipe | null>(null)
+  const [answers, setAnswers] = useState<Partial<Record<Blank, string>>>({})
 
   const buildTrigger = (): AutomationTrigger => {
     switch (trigger) {
@@ -288,6 +306,16 @@ function Automations({ project }: { project: Project }) {
         return { type: 'assignee_changed' }
       case 'due_passed':
         return { type: 'due_passed' }
+      case 'column_changed':
+        return { type: 'column_changed', columnId: triggerColumn, to: triggerColumnValue.trim() || undefined }
+      case 'project_status_changed':
+        return { type: 'project_status_changed', to: triggerProjectStatus || undefined }
+      case 'cycle_started':
+        return { type: 'cycle_started' }
+      case 'cycle_ended':
+        return { type: 'cycle_ended' }
+      case 'initiative_status_changed':
+        return { type: 'initiative_status_changed', to: triggerInitiative || undefined }
     }
   }
 
@@ -304,7 +332,7 @@ function Automations({ project }: { project: Project }) {
       case 'move_to_cycle':
         return { type: 'move_to_cycle' }
       case 'create_issue':
-        return { type: 'create_issue', title: actionValue || 'Follow up' }
+        return { type: 'create_issue', title: actionValue || 'Follow up', projectId: actionProject || undefined }
       case 'notify':
         return { type: 'notify', message: actionValue || 'Automation ran' }
     }
@@ -312,9 +340,16 @@ function Automations({ project }: { project: Project }) {
 
   const create = () => {
     if (!name.trim()) return
-    const automation: Automation = { id: uid(), projectId: project.id, name: name.trim(), enabled: true, trigger: buildTrigger(), action: buildAction() }
+    const automation: Automation = { id: uid(), projectId: project.id, name: name.trim(), enabled: true, createdAt: new Date().toISOString(), trigger: buildTrigger(), action: buildAction() }
     dispatch({ type: 'addAutomation', automation })
     setName('')
+  }
+
+  const addRecipe = () => {
+    if (!recipe) return
+    dispatch({ type: 'addAutomation', automation: recipeAutomation(recipe, project, answers, uid()) })
+    setRecipe(null)
+    setAnswers({})
   }
 
 
@@ -332,9 +367,59 @@ function Automations({ project }: { project: Project }) {
       {rules.length === 0 && <div className="muted small">No automations. Rules run on every change in this project.</div>}
 
       <div className="field">
+        <div className="muted small">Recipes</div>
+        {RECIPES.map(r => (
+          <div key={r.id} className="option-row">
+            <span className="grow small">{r.sentence}</span>
+            <button className="btn" aria-label={`Use recipe: ${r.sentence}`} onClick={() => { setRecipe(r); setAnswers({}) }}>Use</button>
+          </div>
+        ))}
+        {recipe && (
+          <div className="field-row">
+            {recipe.blanks.includes('status') && (
+              <select aria-label="Recipe status" className="field-input" value={answers.status ?? ''} onChange={e => setAnswers({ ...answers, status: e.target.value })}>
+                <option value="">Done (default)</option>
+                {project.statuses.map(s => (
+                  <option key={s.id} value={s.id}>{s.label}</option>
+                ))}
+              </select>
+            )}
+            {recipe.blanks.includes('priority') && (
+              <select aria-label="Recipe priority" className="field-input" value={answers.priority ?? ''} onChange={e => setAnswers({ ...answers, priority: e.target.value })}>
+                <option value="">Urgent (default)</option>
+                {['1', '2', '3', '4'].map((p, n) => (
+                  <option key={p} value={p}>{['Urgent', 'High', 'Medium', 'Low'][n]}</option>
+                ))}
+              </select>
+            )}
+            {recipe.blanks.includes('label') && (
+              <input aria-label="Recipe label" className="field-input" placeholder="Label" value={answers.label ?? ''} onChange={e => setAnswers({ ...answers, label: e.target.value })} />
+            )}
+            {recipe.blanks.includes('message') && (
+              <input aria-label="Recipe message" className="field-input" placeholder="Message" value={answers.message ?? ''} onChange={e => setAnswers({ ...answers, message: e.target.value })} />
+            )}
+            {recipe.blanks.includes('project') && (
+              <select aria-label="Recipe project" className="field-input" value={answers.project ?? ''} onChange={e => setAnswers({ ...answers, project: e.target.value })}>
+                <option value="">This project</option>
+                {data.projects.filter(p => p.spaceId === project.spaceId && p.id !== project.id).map(p => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+            )}
+            <button className="btn primary" aria-label="Add recipe automation" onClick={addRecipe}>Add</button>
+          </div>
+        )}
         <input className="field-input" placeholder="Rule name" value={name} onChange={e => setName(e.target.value)} />
         <div className="field-row">
-          <select className="field-input" value={trigger} onChange={e => setTrigger(e.target.value as AutomationTrigger['type'])}>
+          <select
+            className="field-input"
+            value={trigger}
+            onChange={e => {
+              const next = e.target.value as AutomationTrigger['type']
+              setTrigger(next)
+              if (OBJECT_TRIGGERS.includes(next) && !OBJECT_ACTIONS.includes(action)) setAction('notify')
+            }}
+          >
             {TRIGGERS.map(t => (
               <option key={t.value} value={t.value}>{t.label}</option>
             ))}
@@ -353,13 +438,47 @@ function Automations({ project }: { project: Project }) {
               ))}
             </select>
           )}
+          {trigger === 'column_changed' && (
+            <>
+              <select aria-label="Trigger column" className="field-input" value={triggerColumn} onChange={e => setTriggerColumn(e.target.value)}>
+                {project.columns.map(c => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+              <input aria-label="Trigger column value" className="field-input" placeholder="Any value" value={triggerColumnValue} onChange={e => setTriggerColumnValue(e.target.value)} />
+            </>
+          )}
+          {trigger === 'project_status_changed' && (
+            <select aria-label="Trigger project status" className="field-input" value={triggerProjectStatus} onChange={e => setTriggerProjectStatus(e.target.value as ProjectStatus | '')}>
+              <option value="">Any</option>
+              {PROJECT_STATUS.map(s => (
+                <option key={s.value} value={s.value}>{s.label}</option>
+              ))}
+            </select>
+          )}
+          {trigger === 'initiative_status_changed' && (
+            <select aria-label="Trigger initiative status" className="field-input" value={triggerInitiative} onChange={e => setTriggerInitiative(e.target.value as Initiative['status'] | '')}>
+              <option value="">Any</option>
+              {INITIATIVE_STATUSES.map(s => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
+          )}
         </div>
         <div className="field-row">
           <select className="field-input" value={action} onChange={e => setAction(e.target.value as AutomationAction['type'])}>
-            {ACTIONS.map(a => (
+            {(OBJECT_TRIGGERS.includes(trigger) ? ACTIONS.filter(a => OBJECT_ACTIONS.includes(a.value)) : ACTIONS).map(a => (
               <option key={a.value} value={a.value}>{a.label}</option>
             ))}
           </select>
+          {action === 'create_issue' && (
+            <select aria-label="Target project" className="field-input" value={actionProject} onChange={e => setActionProject(e.target.value)}>
+              <option value="">This project</option>
+              {data.projects.filter(p => p.spaceId === project.spaceId && p.id !== project.id).map(p => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
+          )}
           {action === 'set_status' && (
             <select className="field-input" value={actionValue} onChange={e => setActionValue(e.target.value)}>
               <option value="">Choose status</option>
