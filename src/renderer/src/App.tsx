@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import logo from './assets/logo.png'
 import { createIssue, useStore } from './store'
 import { ICONS } from './components/icons'
@@ -37,8 +37,13 @@ function readPinned() {
   }
 }
 
+// Text fields keep their own native undo; app undo/redo only applies outside them.
+const isEditable = (el: Element | null) => !!el?.closest('input, textarea, select, [contenteditable]')
+
 export default function App() {
   const { data, dispatch, undo, redo, canUndo, canRedo } = useStore()
+  // When the last app undo/redo ran from a keydown, so the Edit menu copy of the same press is skipped.
+  const lastKeyUndo = useRef(0)
   const [route, setRoute] = useState<Route>(() => ({
     spaceId: data.spaces[0]?.id ?? null,
     projectId: data.projects.find(p => p.spaceId === data.spaces[0]?.id)?.id ?? null,
@@ -78,13 +83,15 @@ export default function App() {
         return
       }
       const t = e.target as HTMLElement
-      const typing = !!t.closest('input, textarea, select, [contenteditable]')
-      // Undo/redo: Cmd/Ctrl+Z, Shift+Cmd/Ctrl+Z, and Ctrl+Y off macOS. Text fields keep their own undo.
-      const mod = window.api.platform === 'darwin' ? e.metaKey : e.ctrlKey
-      if (mod && !e.altKey && !typing) {
+      const typing = isEditable(t)
+      // Undo/redo: Ctrl+Z, Shift+Ctrl+Z and Ctrl+Y on Windows/Linux. Text fields keep their own undo.
+      // On macOS Cmd+Z and Shift+Cmd+Z come only from the Edit menu accelerators (onEditCommand below), so a
+      // press can't run twice whichever of keydown or the menu sees it first.
+      if (window.api.platform !== 'darwin' && e.ctrlKey && !e.altKey && !typing) {
         const k = e.key.toLowerCase()
-        if (k === 'z' || (k === 'y' && window.api.platform !== 'darwin')) {
+        if (k === 'z' || k === 'y') {
           e.preventDefault()
+          lastKeyUndo.current = Date.now()
           if (k === 'z' && !e.shiftKey) undo()
           else redo()
           return
@@ -101,6 +108,14 @@ export default function App() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [data, dispatch, undo, redo, project, openIssueId, palette])
+
+  // Edit menu Undo/Redo. A keydown on the same press may already have run it, so ignore it when close behind.
+  useEffect(() => window.api.onEditCommand(cmd => {
+    if (Date.now() - lastKeyUndo.current < 300) return
+    if (isEditable(document.activeElement)) document.execCommand(cmd)
+    else if (cmd === 'undo') undo()
+    else redo()
+  }), [undo, redo])
 
   const renderBody = () => {
     if (!space) {

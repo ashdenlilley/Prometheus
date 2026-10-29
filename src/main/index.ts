@@ -10,6 +10,7 @@ import { seed } from '../shared/seed'
 import { McpController } from './mcp'
 import { Store } from './db'
 import { SyncEngine } from './sync'
+import { installMenu } from './menu'
 
 // Live UI testing only: expose Chrome DevTools on localhost when PROMETHEUS_DEBUG_PORT is set.
 if (process.env.PROMETHEUS_DEBUG_PORT) app.commandLine.appendSwitch('remote-debugging-port', process.env.PROMETHEUS_DEBUG_PORT)
@@ -191,6 +192,7 @@ function createWindow() {
 app.whenReady().then(async () => {
   // Packaged builds take the icon from the bundle; dev runs need it set explicitly.
   if (isMac && !app.isPackaged) app.dock?.setIcon(join(__dirname, '../../build/icon.png'))
+  installMenu(isMac)
   createWindow()
   try {
     await mcp.start()
