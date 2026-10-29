@@ -128,8 +128,9 @@ export type HistoryAction = Action | { type: 'undo' } | { type: 'redo' }
 
 export const emptyHistory = (): History => ({ past: [], future: [], lastKey: null, lastAt: 0 })
 
-// Not undoable: loads (startup, MCP or sync replacing the copy), timed automations and the notification feed.
-const NOT_UNDOABLE = new Set<Action['type']>(['load', 'tick', 'notify', 'markNotifications'])
+// Not undoable: loads (startup, MCP or sync replacing the copy), timed automations, the roll-over bookkeeping flag
+// and the notification feed.
+const NOT_UNDOABLE = new Set<Action['type']>(['load', 'tick', 'markRolledOver', 'notify', 'markNotifications'])
 
 export const LIMIT = 100
 // Edits with the same key this close together merge, e.g. one keystroke per patchIssue while typing a title.
