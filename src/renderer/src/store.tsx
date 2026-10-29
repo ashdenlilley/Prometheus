@@ -1,16 +1,29 @@
 import { createContext, useContext, useEffect, useReducer, useRef, useState, type Dispatch, type ReactNode } from 'react'
 import type { AppData } from '@shared/types'
 import { reducer, type Action } from '@shared/model'
+import { emptyHistory, withUndo, type HistoryAction } from '@shared/history'
 import { emptyData } from '@shared/seed'
 import { todayISO } from './util'
 
 export { createIssue, issueKey, withValue, categoryOf, statusLabel, type Action } from '@shared/model'
 
-const StoreContext = createContext<{ data: AppData; dispatch: Dispatch<Action> } | null>(null)
+interface Store {
+  data: AppData
+  dispatch: Dispatch<Action>
+  undo: () => void
+  redo: () => void
+  canUndo: boolean
+  canRedo: boolean
+}
+
+const StoreContext = createContext<Store | null>(null)
+const undoable = withUndo(reducer)
 
 // Data is owned by the main process (SQLite). The renderer keeps a working copy and saves it back.
 export function StoreProvider({ children }: { children: ReactNode }) {
-  const [data, dispatch] = useReducer(reducer, emptyData())
+  const [state, dispatchAll] = useReducer(undoable, undefined, () => ({ data: emptyData(), history: emptyHistory() }))
+  const { data, history } = state
+  const dispatch = dispatchAll as Dispatch<HistoryAction>
   const [ready, setReady] = useState(false)
   const latest = useRef(data)
   latest.current = data
@@ -51,7 +64,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [ready])
 
   if (!ready) return null
-  return <StoreContext.Provider value={{ data, dispatch }}>{children}</StoreContext.Provider>
+  const value: Store = {
+    data,
+    dispatch,
+    undo: () => dispatch({ type: 'undo' }),
+    redo: () => dispatch({ type: 'redo' }),
+    canUndo: history.past.length > 0,
+    canRedo: history.future.length > 0
+  }
+  return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>
 }
 
 export function useStore() {

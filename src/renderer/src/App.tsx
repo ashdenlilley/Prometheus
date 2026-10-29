@@ -38,7 +38,7 @@ function readPinned() {
 }
 
 export default function App() {
-  const { data, dispatch } = useStore()
+  const { data, dispatch, undo, redo, canUndo, canRedo } = useStore()
   const [route, setRoute] = useState<Route>(() => ({
     spaceId: data.spaces[0]?.id ?? null,
     projectId: data.projects.find(p => p.spaceId === data.spaces[0]?.id)?.id ?? null,
@@ -78,7 +78,19 @@ export default function App() {
         return
       }
       const t = e.target as HTMLElement
-      if (e.metaKey || e.ctrlKey || e.altKey || t.closest('input, textarea, select, [contenteditable]')) return
+      const typing = !!t.closest('input, textarea, select, [contenteditable]')
+      // Undo/redo: Cmd/Ctrl+Z, Shift+Cmd/Ctrl+Z, and Ctrl+Y off macOS. Text fields keep their own undo.
+      const mod = window.api.platform === 'darwin' ? e.metaKey : e.ctrlKey
+      if (mod && !e.altKey && !typing) {
+        const k = e.key.toLowerCase()
+        if (k === 'z' || (k === 'y' && window.api.platform !== 'darwin')) {
+          e.preventDefault()
+          if (k === 'z' && !e.shiftKey) undo()
+          else redo()
+          return
+        }
+      }
+      if (e.metaKey || e.ctrlKey || e.altKey || typing) return
       if (e.key === 'c' && project && !openIssueId && !palette) {
         e.preventDefault()
         const issue = createIssue(data, project.id, 'New issue', { status: project.statuses[0].id })
@@ -88,7 +100,7 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [data, dispatch, project, openIssueId, palette])
+  }, [data, dispatch, undo, redo, project, openIssueId, palette])
 
   const renderBody = () => {
     if (!space) {
@@ -202,6 +214,8 @@ export default function App() {
           }
         ]
       : []),
+    ...(canUndo ? [{ id: 'undo', label: 'Undo', group: 'Edit', hint: window.api.platform === 'darwin' ? '⌘Z' : 'Ctrl+Z', run: undo }] : []),
+    ...(canRedo ? [{ id: 'redo', label: 'Redo', group: 'Edit', hint: window.api.platform === 'darwin' ? '⇧⌘Z' : 'Ctrl+Shift+Z', run: redo }] : []),
     { id: 'new-project', label: 'New project', group: 'Create', run: () => space && setProjectIn(space.id) },
     { id: 'new-space', label: 'New space', group: 'Create', run: () => setCreatingSpace(true) },
     { id: 'settings', label: 'App settings and MCP', group: 'Settings', run: () => setSettings(true) },
