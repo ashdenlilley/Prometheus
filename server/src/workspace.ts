@@ -6,6 +6,9 @@ import type { Env } from './env'
 // Wire protocol: JSON text frames. See docs/cloud-sync.md.
 const MAX_FRAME = 1_000_000
 const MAX_OPS = 1000
+const MAX_ID = 128
+const MAX_FIELDS = 200
+const MAX_VALUE = 65_536
 const BATCH = 500
 const MAX_SKEW_MS = 5 * 60_000
 const PUSH_TTL_MS = 24 * 3_600_000
@@ -78,10 +81,17 @@ const touches = (op: Op, field: string): boolean => field in (op.set ?? {}) || (
 function opError(o: unknown): string | null {
   if (!isObj(o)) return 'op is not an object'
   if (typeof o.table !== 'string' || !TABLES.has(o.table)) return 'unknown table'
-  if (typeof o.id !== 'string' || o.id === '' || o.id.includes('\u0000')) return 'bad id'
+  if (typeof o.id !== 'string' || o.id === '' || o.id.length > MAX_ID || o.id.includes('\u0000')) return 'bad id'
   if (typeof o.hlc !== 'string' || !HLC_RE.test(o.hlc)) return 'bad hlc'
   if (o.create && o.del) return 'op is both create and del'
   if (o.table === 'projects' && isObj(o.set) && 'access' in o.set && !isProjectAccess(o.set.access)) return 'bad access'
+  // Size caps apply only to well-typed fields; the type checks below reject the rest.
+  if (isObj(o.set) || Array.isArray(o.unset)) {
+    const setKeys = isObj(o.set) ? Object.keys(o.set) : []
+    const unset = Array.isArray(o.unset) ? o.unset : []
+    if (setKeys.length + unset.length > MAX_FIELDS) return 'too many fields'
+    if (isObj(o.set) && Object.values(o.set).some(v => (JSON.stringify(v) ?? '').length > MAX_VALUE)) return 'field value too large'
+  }
   if (o.del) return null
   if (o.create) return isObj(o.set) && Object.keys(o.set).every(isField) ? null : 'bad create fields'
   if (o.set === undefined && o.unset === undefined) return 'op has no fields'
@@ -106,11 +116,25 @@ function entriesOf(op: Op): Entry[] {
 export class Workspace extends DurableObject<Env> {
   private compactAt: number
   private compactKeep: number
+  private pushWindow: number
+  private pushMax: number
+  private opsWindow: number
+  private opsMax: number
+  // Above this database size, non-owners cannot push (WORKSPACE_FULL_BYTES overrides it for tests).
+  private fullBytes: number
+  private fullLogged = false
+  // In memory, resets when the DO is evicted.
+  private quotas = new Map<string, { pushes: number[]; ops: { at: number; n: number }[]; overruns: number }>()
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env)
     this.compactAt = Number(env.COMPACT_AT ?? 10_000)
     this.compactKeep = Number(env.COMPACT_KEEP ?? 2_000)
+    this.pushWindow = Number(env.PUSH_WINDOW_MS ?? 10_000)
+    this.pushMax = Number(env.PUSH_MAX ?? 20)
+    this.opsWindow = Number(env.OPS_WINDOW_MS ?? 60_000)
+    this.opsMax = Number(env.OPS_MAX ?? 5_000)
+    this.fullBytes = Number(env.WORKSPACE_FULL_BYTES ?? 1_000_000_000)
     ctx.blockConcurrencyWhile(async () => {
       for (const s of SCHEMA) run(ctx.storage.sql, s)
       // Indexes are rebuilt from the logs once per index version ('2' adds the field index).
@@ -209,8 +233,9 @@ export class Workspace extends DurableObject<Env> {
   }
 
   // Compacted state as ops. Row existence sorts first so field ops always find their row.
-  private snapshotOps(): Op[] {
-    return rows<Entry>(this.ctx.storage.sql, "SELECT tbl, id, field, hlc, body FROM snap ORDER BY tbl, id, field <> '$', field").map(
+  // With a limit, one page of it, so hello never holds the whole snapshot in memory.
+  private snapshotOps(limit = -1, offset = 0): Op[] {
+    return rows<Entry>(this.ctx.storage.sql, "SELECT tbl, id, field, hlc, body FROM snap ORDER BY tbl, id, field <> '$', field LIMIT ? OFFSET ?", limit, offset).map(
       e => ({ hlc: e.hlc, table: e.tbl, id: e.id, ...JSON.parse(e.body) }) as Op
     )
   }
@@ -348,18 +373,51 @@ export class Workspace extends DurableObject<Env> {
     const p = principal(att)
     const can = this.readable(p)
     const red = this.redactor(p)
+    // Paged from SQL, BATCH rows at a time, so memory stays bounded however long the log is.
+    // The handler is synchronous, so no push lands between pages.
     if (since < floor) {
-      const snap = this.snapshotOps().filter(can).map(red)
-      for (let i = 0; i < snap.length; i += BATCH) this.reply(ws, { type: 'snapshot', ops: snap.slice(i, i + BATCH), head })
+      for (let offset = 0; ; offset += BATCH) {
+        const page = this.snapshotOps(BATCH, offset)
+        const snap = page.filter(can).map(red)
+        if (snap.length > 0) this.reply(ws, { type: 'snapshot', ops: snap, head })
+        if (page.length < BATCH) break
+      }
     }
-    const list = rows<{ seq: number; body: string }>(sql, 'SELECT seq, body FROM ops WHERE seq > ? ORDER BY seq', Math.max(since, floor))
-      .map(r => ({ seq: r.seq, op: JSON.parse(r.body) as Op }))
-      .filter(e => can(e.op))
-      .map(e => ({ seq: e.seq, op: red(e.op) }))
-    this.sendOps(ws, list, head)
+    for (let cursor = Math.max(since, floor); ; ) {
+      const page = rows<{ seq: number; body: string }>(sql, 'SELECT seq, body FROM ops WHERE seq > ? ORDER BY seq LIMIT ?', cursor, BATCH)
+      const list = page
+        .map(r => ({ seq: r.seq, op: JSON.parse(r.body) as Op }))
+        .filter(e => can(e.op))
+        .map(e => ({ seq: e.seq, op: red(e.op) }))
+      if (list.length > 0) this.reply(ws, { type: 'ops', ops: list, head })
+      if (page.length < BATCH) break
+      cursor = page[page.length - 1].seq
+    }
     this.reply(ws, { type: 'ready', head, userId: att.user, role: att.role, projects: att.projects })
     ws.serializeAttachment({ ...att, hello: true } satisfies Att)
     this.broadcastPresence()
+  }
+
+  // Whether the database is over the size threshold. Logs once each time it becomes full.
+  private full(): boolean {
+    const size = this.ctx.storage.sql.databaseSize
+    const over = size > this.fullBytes
+    if (over && !this.fullLogged) console.log(`workspace full: ${size} bytes > ${this.fullBytes}; refusing non-owner pushes`)
+    this.fullLogged = over
+    return over
+  }
+
+  // Whether the user may push n ops now, recording the push if so. Prunes entries older than their window.
+  private quota(user: string, n: number, now: number): boolean {
+    let q = this.quotas.get(user)
+    if (!q) this.quotas.set(user, (q = { pushes: [], ops: [], overruns: 0 }))
+    q.pushes = q.pushes.filter(t => now - t < this.pushWindow)
+    q.ops = q.ops.filter(o => now - o.at < this.opsWindow)
+    const used = q.ops.reduce((sum, o) => sum + o.n, 0)
+    if (q.pushes.length >= this.pushMax || used + n > this.opsMax) return false
+    q.pushes.push(now)
+    q.ops.push({ at: now, n })
+    return true
   }
 
   private push(ws: WebSocket, att: Att, msg: Record<string, unknown>) {
@@ -367,10 +425,23 @@ export class Workspace extends DurableObject<Env> {
     if (typeof id !== 'string' || id === '' || id.length > 128 || !Array.isArray(ops) || ops.length === 0 || ops.length > MAX_OPS) {
       return this.reply(ws, { type: 'error', id, code: 'bad_request' })
     }
+    // Per-user quota: after 3 overruns in a row the socket closes with 4008.
+    const allowed = this.quota(att.user, ops.length, Date.now())
+    const q = this.quotas.get(att.user)!
+    if (!allowed) {
+      q.overruns++
+      this.reply(ws, { type: 'error', id, code: 'rate_limited' })
+      if (q.overruns >= 3) ws.close(4008, 'rate limited')
+      return
+    }
+    q.overruns = 0
     const sql = this.ctx.storage.sql
     // A retry after reconnect: same ack, nothing appended and nothing broadcast again.
     const prior = rows<{ seqs: string }>(sql, 'SELECT seqs FROM pushes WHERE device = ? AND id = ?', att.device, id)[0]
     if (prior) return this.reply(ws, { type: 'ack', id, seqs: JSON.parse(prior.seqs), head: this.head() })
+
+    // Storage guard: keep the DO well below its 10 GB limit. The owner can still write, for example to clean up.
+    if (att.role !== 'owner' && this.full()) return this.reply(ws, { type: 'error', id, code: 'workspace_full' })
 
     for (let i = 0; i < ops.length; i++) {
       const err = opError(ops[i])
@@ -420,7 +491,8 @@ export class Workspace extends DurableObject<Env> {
       const bad = typed[e.index]
       run(sql, 'INSERT INTO denials (at, user, tbl, "row", reason) VALUES (?, ?, ?, ?, ?)', now, att.user, bad.table, bad.id, e.message)
       run(sql, 'DELETE FROM denials WHERE rowid NOT IN (SELECT rowid FROM denials ORDER BY rowid DESC LIMIT 1000)')
-      console.log(`refused ${bad.table}/${bad.id} for ${att.user}: ${e.message}`)
+      // Logs once per push: the transaction aborts at the first refusal, so exactly one op is refused.
+      console.log(`refused push ${id} for ${att.user}: 1 op(s) refused, first ${bad.table}/${bad.id}: ${e.message}`)
       return this.reply(ws, { type: 'error', id, code: 'forbidden', index: e.index, message: e.message })
     }
 

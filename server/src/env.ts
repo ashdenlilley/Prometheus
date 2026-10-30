@@ -24,4 +24,11 @@ export interface Env {
   // Caps on emails actually sent per hour and per day (defaults in auth.ts).
   EMAIL_CAP_HOUR?: string
   EMAIL_CAP_DAY?: string
+  // Push quota per user: pushes and ops per window (defaults in workspace.ts; tests override).
+  PUSH_WINDOW_MS?: string
+  PUSH_MAX?: string
+  OPS_WINDOW_MS?: string
+  OPS_MAX?: string
+  // Database size in bytes above which non-owners cannot push (default 1 GB in workspace.ts).
+  WORKSPACE_FULL_BYTES?: string
 }
