@@ -1,6 +1,6 @@
 import { sendInvite, sendMagicLink } from './email'
 import { sha256Hex, verifyAccess } from './crypto'
-import type { Env } from './env'
+import { type Env, issuer } from './env'
 import type { Member } from './auth'
 import { ipKey, throttled } from './limits'
 import { confirmPage, invalidInvitePage, invalidLinkPage, inviteAcceptedPage, inviteConfirmPage, signedInPage } from './pages'
@@ -64,8 +64,10 @@ const auth = (env: Env) => env.AUTH.getByName('auth')
 
 // Access token checked for a signature, expiry, an active device and an active user.
 async function memberOf(token: string, env: Env): Promise<{ dev: string; member: Member } | null> {
-  const claims = await verifyAccess(env.JWT_SECRET ?? '', token)
+  const claims = await verifyAccess([env.JWT_SECRET ?? '', env.JWT_SECRET_PREVIOUS ?? ''], issuer(env), token)
   const member = claims ? await auth(env).authorize(claims.dev) : null
+  // Current tokens name the user; it must still be the device's user.
+  if (claims?.sub !== undefined && member?.userId !== claims.sub) return null
   return claims && member ? { dev: claims.dev, member } : null
 }
 
@@ -94,7 +96,7 @@ async function startSignIn(req: Request, env: Env, ctx: ExecutionContext): Promi
   // Sent after the reply, so the response time does not reveal whether the email belongs to a member.
   if (res.token) {
     const link = `${env.PUBLIC_URL!.replace(/\/$/, '')}/auth/verify?t=${res.token}`
-    ctx.waitUntil(sendMagicLink(env, email, link, { deviceName, country, city }).catch(e => console.error('magic link email failed:', e instanceof Error ? e.message : 'unknown')))
+    ctx.waitUntil(sendMagicLink(env, email, link, { deviceName, country, city, ttlMinutes: Math.round(Number(env.LINK_TTL_SECONDS ?? 900) / 60) }).catch(e => console.error('magic link email failed:', e instanceof Error ? e.message : 'unknown')))
   }
   return json({ requestId: res.requestId, pollSecret: res.pollSecret, expiresAt: res.expiresAt, code: res.code })
 }
@@ -178,13 +180,11 @@ async function manage(req: Request, env: Env, ctx: ExecutionContext, m: string, 
 }
 
 // Serves the sync WebSocket. Auth is a single-use ticket from POST /sync/ticket, sent as Sec-WebSocket-Protocol: ticket.<t>.
-// bearer.<token> is deprecated (its header is logged in clear text). Remove it after one release.
 async function sync(req: Request, env: Env): Promise<Response> {
   if (req.headers.get('Upgrade') !== 'websocket') return json({ error: 'upgrade_required' }, 426)
   const protocols = (req.headers.get('Sec-WebSocket-Protocol') ?? '').split(',').map(p => p.trim())
   const ticket = protocols.find(p => p.startsWith('ticket.'))?.slice('ticket.'.length) ?? ''
-  const legacy = protocols.find(p => p.startsWith('bearer.'))?.slice('bearer.'.length) ?? ''
-  const me = ticket && ticket.length <= 200 ? await auth(env).redeemTicket(await sha256Hex(ticket)) : legacy ? await memberOf(legacy, env) : null
+  const me = ticket && ticket.length <= 200 ? await auth(env).redeemTicket(await sha256Hex(ticket)) : null
   if (!me) return unauthorized()
   const headers = new Headers(req.headers)
   headers.set('X-Device-Id', me.dev)
@@ -277,6 +277,7 @@ function placeholder(env: Env): string | undefined {
   const left = vars.find(k => /REPLACE_WITH|^replace-with-/i.test(env[k] ?? '') || env[k] === 'you@example.com')
   if (left) return `${left} (still the placeholder value)`
   if ((env.JWT_SECRET ?? '').length < 32) return 'JWT_SECRET (at least 32 characters)'
+  if (env.JWT_SECRET_PREVIOUS !== undefined && env.JWT_SECRET_PREVIOUS.length < 32) return 'JWT_SECRET_PREVIOUS (at least 32 characters, or unset)'
   return undefined
 }
 

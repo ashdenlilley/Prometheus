@@ -1,4 +1,4 @@
-import { test, describe, after } from 'node:test'
+import { test, describe, after, mock } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtempSync, readdirSync, readFileSync } from 'fs'
 import { tmpdir } from 'os'
@@ -471,11 +471,115 @@ describe('CloudSync', () => {
     h.cloud.stop()
   })
 
-  test('a server without tickets (404) gets the deprecated bearer. protocol', async () => {
+  test('a 404 on /sync/ticket is an error: no bearer. fallback, and the client retries later', async () => {
     const h = harness({ ...signInHandlers(), 'POST /sync/ticket': () => json({ error: 'not_found' }, 404) })
-    const s = await signedIn(h)
-    assert.deepEqual(s.protocols, ['prometheus-sync', 'bearer.access-1'])
+    await h.cloud.startSignIn(SERVER, 'owner@example.test', 'Laptop')
+    await until(() => h.calls.filter(c => c === 'POST /sync/ticket').length >= 2)
+    assert.equal(FakeSocket.all.length, 0)
     h.cloud.stop()
+  })
+
+  test('a 12,000-op upload is paced under the push quota, in batches of at most 500', async () => {
+    const h = harness(signInHandlers())
+    await signedIn(h, 0)
+    const s = await socketAt(1)
+    s.open()
+    s.frame(readyFrame(0))
+    mock.timers.enable({ apis: ['setTimeout', 'Date'], now: Date.now() })
+    try {
+      const sends: { at: number; n: number }[] = []
+      const send = s.send.bind(s)
+      s.send = (data: string) => {
+        const f = JSON.parse(data)
+        if (f.type === 'push') sends.push({ at: Date.now(), n: f.ops.length })
+        send(data)
+      }
+      h.cloud.record(Array.from({ length: 12_000 }, (_, i) => issueOp(1000 + i, `i${i}`, 'bulk')))
+      const acked = new Set<string>()
+      for (let i = 0; i < 2000 && h.cloud.getStatus().pending > 0; i++) {
+        const last = s.pushes().at(-1)
+        if (last && !acked.has(last.id)) {
+          acked.add(last.id)
+          s.frame({ type: 'ack', id: last.id, seqs: [], head: acked.size })
+        } else mock.timers.tick(500)
+      }
+      assert.equal(h.cloud.getStatus().pending, 0)
+      assert.equal(sends.reduce((sum, e) => sum + e.n, 0), 12_000)
+      assert.ok(sends.every(e => e.n <= 500))
+      for (const e of sends) {
+        const pushes = sends.filter(o => o.at <= e.at && e.at - o.at < 10_000).length
+        const ops = sends.filter(o => o.at <= e.at && e.at - o.at < 60_000).reduce((sum, o) => sum + o.n, 0)
+        assert.ok(pushes <= 18, `${pushes} pushes in 10 s`)
+        assert.ok(ops <= 4_500, `${ops} ops in a minute`)
+      }
+      assert.ok(sends.at(-1)!.at - sends[0].at >= 120_000, 'spread over more than two minutes')
+    } finally {
+      mock.timers.reset()
+      h.cloud.stop()
+    }
+  })
+
+  test('a rate_limited reply keeps the batch, backs off, then resends it with the same id', async () => {
+    const h = harness(signInHandlers())
+    await signedIn(h, 0)
+    const s = await socketAt(1)
+    s.open()
+    s.frame(readyFrame(0))
+    mock.timers.enable({ apis: ['setTimeout', 'Date'], now: Date.now() })
+    try {
+      h.cloud.record([issueOp(1000, 'i1', 'busy')])
+      const first = s.pushes()[0]
+      s.frame({ type: 'error', id: first.id, code: 'rate_limited' })
+      assert.equal(h.cloud.getStatus().pending, 1)
+      mock.timers.tick(9_999)
+      assert.equal(s.pushes().length, 1, 'no resend before the backoff')
+      mock.timers.tick(1)
+      assert.equal(s.pushes().length, 2)
+      assert.equal(s.pushes()[1].id, first.id)
+      assert.deepEqual(s.pushes()[1].ops, first.ops)
+      s.frame({ type: 'ack', id: first.id, seqs: [1], head: 1 })
+      assert.equal(h.cloud.getStatus().pending, 0)
+    } finally {
+      mock.timers.reset()
+      h.cloud.stop()
+    }
+  })
+
+  test('close 4008 leads to one delayed reconnect that resumes the unacked batch, not a loop', async () => {
+    const h = harness(signInHandlers())
+    await signedIn(h, 0)
+    const s = await socketAt(1)
+    s.open()
+    s.frame(readyFrame(0))
+    const flush = async () => {
+      for (let i = 0; i < 20; i++) await new Promise(r => setImmediate(r))
+    }
+    mock.timers.enable({ apis: ['setTimeout', 'Date'], now: Date.now() })
+    try {
+      h.cloud.record([issueOp(1000, 'i1', 'one'), issueOp(1001, 'i2', 'two')])
+      const first = s.pushes()[0]
+      s.drop(4008)
+      mock.timers.tick(9_999)
+      await flush()
+      assert.equal(FakeSocket.all.length, 2, 'no reconnect before the backoff')
+      mock.timers.tick(1)
+      await flush()
+      assert.equal(FakeSocket.all.length, 3)
+      const again = FakeSocket.all[2]
+      again.open()
+      again.frame(readyFrame(0))
+      assert.equal(again.pushes().length, 1)
+      assert.equal(again.pushes()[0].id, first.id)
+      assert.deepEqual(again.pushes()[0].ops, first.ops)
+      again.frame({ type: 'ack', id: first.id, seqs: [1, 2], head: 2 })
+      assert.equal(h.cloud.getStatus().pending, 0)
+      mock.timers.tick(300_000)
+      await flush()
+      assert.equal(FakeSocket.all.length, 3, 'no further reconnects')
+    } finally {
+      mock.timers.reset()
+      h.cloud.stop()
+    }
   })
 
   test('invite posts JSON with the bearer token, and a 409 becomes a friendly message', async () => {

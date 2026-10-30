@@ -24,6 +24,8 @@ invocation_logs = true
 # The sender domain in EMAIL_FROM must be onboarded to Email Sending first.
 [[send_email]]
 name = "EMAIL"
+# Only this sender (must match EMAIL_FROM), so a code bug cannot send from another olympusstudios.org address.
+allowed_sender_addresses = ["prometheus@olympusstudios.org"]
 
 # Edge rate limits, checked before the Auth object is called. Period must be 10 or 60 seconds.
 [[ratelimits]]
@@ -61,6 +63,8 @@ EMAIL_PROVIDER = "cloudflare"
 EMAIL_FROM = "prometheus@olympusstudios.org"
 # Optional tuning (defaults shown in src/*.ts):
 # LINK_TTL_SECONDS = "900"
+# Days a device may go without refreshing before it must sign in again.
+# REFRESH_IDLE_DAYS = "60"
 # COMPACT_AT = "10000"
 # COMPACT_KEEP = "2000"
 # Caps on sign-in and invite emails actually sent (defaults: 100 per hour, 300 per day).
@@ -68,5 +72,6 @@ EMAIL_FROM = "prometheus@olympusstudios.org"
 # EMAIL_CAP_DAY = "300"
 
 # Secrets, set with `wrangler secret put` (not in this file):
-#   JWT_SECRET      64 random hex characters, signs access tokens
+#   JWT_SECRET           64 random hex characters, signs access tokens
+#   JWT_SECRET_PREVIOUS  optional, verify-only: the old JWT_SECRET while rotating (delete it 15 minutes after the switch)
 #   EMAIL_API_KEY   API key of the email provider

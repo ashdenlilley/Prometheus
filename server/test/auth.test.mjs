@@ -317,3 +317,97 @@ test('the confirm page escapes the device name and asks for the 6-digit code', (
     assert.match(html, /pattern="\[0-9\]\{6\}"/)
     assert.match(html, /didn't just try to sign in, close this page/)
   }))
+
+// Signs an HS256 token with the given header and claims, the way a forger who knew the secret would.
+const forge = (secret, header, claims) => {
+  const head = b64url(JSON.stringify(header))
+  const body = b64url(JSON.stringify(claims))
+  return `${head}.${body}.${createHmac('sha256', secret).update(`${head}.${body}`).digest('base64url')}`
+}
+const asBearer = t => ({ headers: { authorization: `Bearer ${t}` } })
+const nowS = () => Math.floor(Date.now() / 1000)
+
+test('access tokens carry iss, aud, sub and kid', () =>
+  withWorker({}, async w => {
+    const s = await signIn(w)
+    const [h, p] = s.accessToken.split('.')
+    assert.deepEqual(JSON.parse(Buffer.from(h, 'base64url').toString()), { alg: 'HS256', typ: 'JWT', kid: '1' })
+    const c = JSON.parse(Buffer.from(p, 'base64url').toString())
+    assert.equal(c.iss, new URL(BASE).origin)
+    assert.equal(c.aud, 'prometheus-sync')
+    assert.equal(c.sub, 'owner')
+    assert.equal(c.dev, s.deviceId)
+    assert.equal(c.exp - c.iat, 900)
+  }))
+
+test('a token with the wrong aud, iss, kid or sub is rejected', () =>
+  withWorker({}, async w => {
+    const s = await signIn(w)
+    const claims = JSON.parse(Buffer.from(s.accessToken.split('.')[1], 'base64url').toString())
+    const head = { alg: 'HS256', typ: 'JWT', kid: '1' }
+    assert.equal((await call(w, '/devices', asBearer(forge(JWT_SECRET, head, claims)))).status, 200)
+    assert.equal((await call(w, '/devices', asBearer(forge(JWT_SECRET, head, { ...claims, aud: 'other-app' })))).status, 401)
+    assert.equal((await call(w, '/devices', asBearer(forge(JWT_SECRET, head, { ...claims, iss: 'https://other.example' })))).status, 401)
+    assert.equal((await call(w, '/devices', asBearer(forge(JWT_SECRET, { ...head, kid: '2' }, claims)))).status, 401)
+    assert.equal((await call(w, '/devices', asBearer(forge(JWT_SECRET, head, { ...claims, sub: 'someone-else' })))).status, 401)
+  }))
+
+test('the old token shape is accepted only while its exp is within one access-token lifetime', () =>
+  withWorker({}, async w => {
+    const s = await signIn(w)
+    const head = { alg: 'HS256', typ: 'JWT' }
+    const legacy = exp => forge(JWT_SECRET, head, { sub: 'owner', dev: s.deviceId, iat: nowS(), exp })
+    assert.equal((await call(w, '/devices', asBearer(legacy(nowS() + 600)))).status, 200)
+    assert.equal((await call(w, '/devices', asBearer(legacy(nowS() + 3600)))).status, 401)
+    assert.equal((await call(w, '/devices', asBearer(legacy(nowS() - 10)))).status, 401)
+    // The old shape with an aud from another app is not "legacy".
+    const other = forge(JWT_SECRET, head, { sub: 'owner', aud: 'other-app', dev: s.deviceId, iat: nowS(), exp: nowS() + 600 })
+    assert.equal((await call(w, '/devices', asBearer(other))).status, 401)
+  }))
+
+test('JWT_SECRET_PREVIOUS verifies tokens during a rotation; new tokens use JWT_SECRET', () => {
+  const NEXT = 'next-test-jwt-secret-not-a-real-key-0123456789'
+  return withWorker({ bindings: { JWT_SECRET: NEXT, JWT_SECRET_PREVIOUS: JWT_SECRET } }, async w => {
+    const s = await signIn(w)
+    const [h, p, sig] = s.accessToken.split('.')
+    assert.equal(sig, createHmac('sha256', NEXT).update(`${h}.${p}`).digest('base64url'))
+    const claims = JSON.parse(Buffer.from(p, 'base64url').toString())
+    const head = { alg: 'HS256', typ: 'JWT', kid: '1' }
+    assert.equal((await call(w, '/devices', asBearer(forge(JWT_SECRET, head, claims)))).status, 200)
+    assert.equal((await call(w, '/devices', asBearer(forge('some-other-secret-0123456789abcdef0123', head, claims)))).status, 401)
+  })
+})
+
+test('a short JWT_SECRET_PREVIOUS refuses to run', () =>
+  withWorker({ bindings: { JWT_SECRET_PREVIOUS: 'short' } }, async w => {
+    const res = await call(w, '/devices')
+    assert.equal(res.status, 500)
+    assert.match((await res.json()).message, /JWT_SECRET_PREVIOUS/)
+  }))
+
+test('a refresh token idle for more than 60 days is refused and its device revoked', () =>
+  withWorker({}, async w => {
+    const idle = await signIn(w, 'Old laptop')
+    const other = await signIn(w, 'Desktop')
+    await authSql(w, 'UPDATE devices SET last_seen_at = ? WHERE id = ?', Date.now() - 61 * 86_400_000, idle.deviceId)
+    assert.equal((await call(w, '/auth/refresh', { method: 'POST', body: { refreshToken: idle.refreshToken } })).status, 401)
+    const list = await (await call(w, '/devices', asBearer(other.accessToken))).json()
+    assert.deepEqual(list.map(d => d.name), ['Desktop'])
+    assert.equal((await call(w, '/devices', asBearer(idle.accessToken))).status, 401)
+    // A device seen recently still refreshes.
+    assert.equal((await call(w, '/auth/refresh', { method: 'POST', body: { refreshToken: other.refreshToken } })).status, 200)
+  }))
+
+test('REFRESH_IDLE_DAYS changes the idle limit', () =>
+  withWorker({ bindings: { REFRESH_IDLE_DAYS: '90' } }, async w => {
+    const s = await signIn(w)
+    await authSql(w, 'UPDATE devices SET last_seen_at = ? WHERE id = ?', Date.now() - 61 * 86_400_000, s.deviceId)
+    assert.equal((await call(w, '/auth/refresh', { method: 'POST', body: { refreshToken: s.refreshToken } })).status, 200)
+  }))
+
+test('the sign-in email states LINK_TTL_SECONDS in minutes', () =>
+  withWorker({ bindings: { LINK_TTL_SECONDS: '600' } }, async w => {
+    await call(w, '/auth/start', startBody(OWNER))
+    await waitFor(() => w.emails.length > 0)
+    assert.match(w.emails[0].body.text, /expires in 10 minutes/)
+  }))

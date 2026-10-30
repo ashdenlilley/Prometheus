@@ -123,7 +123,7 @@ export async function ticket(w, access) {
 }
 
 // Opens a sync socket. By default the access token is traded for a ticket (ticket.<t>). { bearer: true } sends the
-// deprecated bearer.<access>, and { protocol } sends that exact header. A null access sends no protocol. Returns { status } if refused.
+// removed bearer.<access> (refused since OS-466), and { protocol } sends that exact header. A null access sends no protocol. Returns { status } if refused.
 export async function openSocket(w, access, query = '', { bearer = false, protocol } = {}) {
   let proto = protocol
   if (proto === undefined && access !== null) proto = bearer ? `prometheus-sync, bearer.${access}` : `prometheus-sync, ticket.${await ticket(w, access)}`
