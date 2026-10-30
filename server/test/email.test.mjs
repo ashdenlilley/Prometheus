@@ -92,3 +92,12 @@ test('log prints the link to the console on a local PUBLIC_URL and sends nothing
   }
   assert.deepEqual(lines, [`sign-in link for owner@prometheus.test: ${LINK}`, `sign-in link for owner@prometheus.test: ${LINK}`])
 })
+
+test('the sign-in email states the link lifetime it is given', async () => {
+  const sent = []
+  const env = { EMAIL_PROVIDER: 'cloudflare', EMAIL_FROM: 'Prometheus <signin@example.com>', EMAIL: { send: async m => (sent.push(m), { messageId: 'm1' }) } }
+  await sendMagicLink(env, 'owner@prometheus.test', LINK, { ...WHO, ttlMinutes: 10 })
+  assert.match(sent[0].text, /expires in 10 minutes/)
+  assert.match(sent[0].html, /expires in 10 minutes/)
+  assert.doesNotMatch(sent[0].text, /15 minutes/)
+})

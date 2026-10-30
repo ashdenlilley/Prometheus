@@ -15,9 +15,16 @@ export const SIGNED_OUT = 'This device was signed out. Sign in again.'
 const REFRESH_KEY = 'cloud.refreshToken'
 const SIGN_IN_MS = 15 * 60_000
 const REFRESH_MARGIN_MS = 60_000
-const MAX_BATCH = 1000
+// Push pacing, kept under the server's per-user quota (20 pushes per 10 s, 5,000 ops per minute) with some margin.
+const MAX_BATCH = 500
+const PUSH_LIMIT = { pushes: 18, pushWindowMs: 10_000, ops: 4_500, opsWindowMs: 60_000 }
+// After a rate_limited reply or a 4008 close: wait this long, doubling per strike in a row, up to the max.
+const RATE_BACKOFF_MS = 10_000
+const RATE_BACKOFF_MAX_MS = 120_000
 const CONFIG_FILE = 'cloud-sync.json'
 const OUTBOX_FILE = 'cloud-outbox.json'
+
+type TimerName = 'poll' | 'retry' | 'refresh' | 'push'
 
 export type CloudState = 'off' | 'signing-in' | 'connecting' | 'connected' | 'offline' | 'error'
 
@@ -195,7 +202,13 @@ export class CloudSync {
   private stopped = false
   private refreshing: Promise<void> | null = null
   private chain: Promise<void> = Promise.resolve()
-  private timers: Partial<Record<'poll' | 'retry' | 'refresh', ReturnType<typeof setTimeout>>> = {}
+  private timers: Partial<Record<TimerName, ReturnType<typeof setTimeout>>> = {}
+  // Pushes sent in the last ops window (send time, op count), for client-side pacing. Kept across reconnects.
+  private sentLog: { at: number; n: number }[] = []
+  // No push before this time (set by a rate_limited reply or a 4008 close).
+  private pushNotBefore = 0
+  // rate_limited replies and 4008 closes in a row, reset by an ack.
+  private rateStrikes = 0
   private pingTimer: ReturnType<typeof setInterval> | null = null
   // Set by resync: the next 'ready' re-applies the outbox before pumping.
   private replay = false
@@ -396,12 +409,12 @@ export class CloudSync {
     return this.chain
   }
 
-  private later(name: 'poll' | 'retry' | 'refresh', ms: number, fn: () => void) {
+  private later(name: TimerName, ms: number, fn: () => void) {
     this.clearTimer(name)
     this.timers[name] = setTimeout(fn, ms)
   }
 
-  private clearTimer(name: 'poll' | 'retry' | 'refresh') {
+  private clearTimer(name: TimerName) {
     clearTimeout(this.timers[name])
     delete this.timers[name]
   }
@@ -416,6 +429,7 @@ export class CloudSync {
     this.clearTimer('poll')
     this.clearTimer('retry')
     this.clearTimer('refresh')
+    this.clearTimer('push')
     if (this.pingTimer) clearInterval(this.pingTimer)
     this.pingTimer = null
     ws?.close()
@@ -428,6 +442,7 @@ export class CloudSync {
     this.ready = false
     this.awaiting = false
     this.presence = []
+    this.clearTimer('push')
     if (this.pingTimer) clearInterval(this.pingTimer)
     this.pingTimer = null
     ws?.close()
@@ -566,8 +581,6 @@ export class CloudSync {
         throw new Error(SIGNED_OUT)
       }
     }
-    // A server from before tickets has no /sync/ticket and takes the deprecated bearer.<token>. Remove with the server's bearer support.
-    if (res.status === 404) return `bearer.${token}`
     if (!res.ok) throw new Error(`Socket ticket failed (HTTP ${res.status}).`)
     return `ticket.${((await res.json()) as { ticket: string }).ticket}`
   }
@@ -596,8 +609,9 @@ export class CloudSync {
     ws.onclose = ev => this.onClose(ws, ev.code)
   }
 
-  private retry() {
-    const delay = Math.min(this.maxRetryMs, this.minRetryMs * 2 ** this.attempt)
+  // minMs: a floor for this delay (a 4008 close waits out the server's push window).
+  private retry(minMs = 0) {
+    const delay = Math.max(minMs, Math.min(this.maxRetryMs, this.minRetryMs * 2 ** this.attempt))
     this.attempt++
     this.later('retry', delay, () => void this.connect())
   }
@@ -608,11 +622,25 @@ export class CloudSync {
     this.ready = false
     this.awaiting = false
     this.presence = []
+    this.clearTimer('push')
     if (this.pingTimer) clearInterval(this.pingTimer)
     this.pingTimer = null
     if (code === 4001) return void this.forget(SIGNED_OUT) // the server revoked this device
     if (code === 4003) return void this.resync(null) // role or visibility changed: the server copy is authoritative
+    if (code === 4008) {
+      // Too many pushes: one delayed reconnect, then the unacked batch is resent with the same id. Nothing is dropped.
+      const wait = this.rateBackoff()
+      this.pushNotBefore = this.now() + wait
+      if (this.config.enabled && !this.stopped) this.retry(wait)
+      return
+    }
     if (this.config.enabled && !this.stopped) this.retry()
+  }
+
+  // Backoff for the current strike: 10 s, 20 s, 40 s ... up to 2 min.
+  private rateBackoff(): number {
+    this.rateStrikes++
+    return Math.min(RATE_BACKOFF_MAX_MS, RATE_BACKOFF_MS * 2 ** (this.rateStrikes - 1))
   }
 
   // Errors from applying a frame must not escape into the socket callback (an uncaught exception in Electron main).
@@ -682,6 +710,7 @@ export class CloudSync {
         this.outbox.ops.splice(0, inflight.count)
         this.outbox.inflight = null
         this.awaiting = false
+        this.rateStrikes = 0
         this.lastSync = this.now()
         this.error = null
         void this.save()
@@ -698,6 +727,12 @@ export class CloudSync {
           const minutes = Math.max(1, Math.round((msg.skewMs ?? 0) / 60_000))
           this.error = `This device's clock is about ${minutes} min ahead of the server. Fix the clock to resume cloud sync.`
           return
+        }
+        if (msg.code === 'rate_limited') {
+          // Over the server's push quota (e.g. other devices of this user pushed too). Keep the batch, wait, resend it.
+          this.awaiting = false
+          this.pushNotBefore = this.now() + this.rateBackoff()
+          return this.pump()
         }
         if (msg.code === 'forbidden') {
           // The server no longer lets this user make that change. Drop the batch, then reload what they may see.
@@ -733,6 +768,7 @@ export class CloudSync {
   }
 
   // Sends the next batch if one is not already out. The batch id is persisted, so a retry reuses it.
+  // Paced to stay under the server's push quota: if sending now would go over, it waits and tries again.
   private pump() {
     if (!this.socket || !this.ready || !this.config.joined || this.awaiting || this.outbox.ops.length === 0) return
     if (!this.outbox.inflight) {
@@ -740,8 +776,29 @@ export class CloudSync {
       void this.save()
     }
     const { id, count } = this.outbox.inflight
+    const now = this.now()
+    const wait = Math.max(this.pushNotBefore - now, this.quotaWait(count, now))
+    if (wait > 0) return this.later('push', wait, () => this.pump())
+    this.clearTimer('push')
+    this.sentLog.push({ at: now, n: count })
     this.awaiting = true
     this.socket.send(JSON.stringify({ type: 'push', id, ops: this.outbox.ops.slice(0, count) }))
+  }
+
+  // Milliseconds until a push of n ops fits both pacing windows (0 if it fits now). Prunes old entries.
+  private quotaWait(n: number, now: number): number {
+    const { pushes, pushWindowMs, ops, opsWindowMs } = PUSH_LIMIT
+    this.sentLog = this.sentLog.filter(e => now - e.at < opsWindowMs)
+    let wait = 0
+    const recent = this.sentLog.filter(e => now - e.at < pushWindowMs)
+    if (recent.length >= pushes) wait = recent[recent.length - pushes].at + pushWindowMs - now
+    let used = this.sentLog.reduce((sum, e) => sum + e.n, 0)
+    for (const e of this.sentLog) {
+      if (used + n <= ops) break
+      used -= e.n
+      wait = Math.max(wait, e.at + opsWindowMs - now)
+    }
+    return wait
   }
 
   // Remote ops in server order. Each applies only where its hlc beats the field's clock, as in folder sync.

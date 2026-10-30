@@ -1,7 +1,7 @@
 import { DurableObject } from 'cloudflare:workers'
 import type { Role } from '../../src/shared/permissions'
 import { hmacB64url, randomCode, randomId, sha256Hex, signAccess, timingEqual } from './crypto'
-import type { Env } from './env'
+import { type Env, issuer, refreshIdleDays } from './env'
 import { ipLimit } from './limits'
 
 const WINDOW_MS = 15 * 60_000
@@ -247,7 +247,7 @@ export class Auth extends DurableObject<Env> {
       now,
       r.user_id
     )
-    const access = await signAccess(this.env.JWT_SECRET ?? '', deviceId) // the Worker checks JWT_SECRET is set
+    const access = await signAccess(this.env.JWT_SECRET ?? '', { iss: issuer(this.env), userId: r.user_id, deviceId }) // the Worker checks JWT_SECRET is set
     return { status: 'ok', refreshToken, deviceId, ...access }
   }
 
@@ -257,15 +257,24 @@ export class Auth extends DurableObject<Env> {
     const next = randomId(32)
     const nextHash = await sha256Hex(next)
     const now = Date.now()
-    const d = rows<{ id: string }>(this.sql, 'SELECT id FROM devices WHERE refresh_hash = ? AND revoked_at IS NULL', hash)[0]
+    const d = rows<{ id: string; user_id: string; last_seen_at: number }>(
+      this.sql,
+      "SELECT id, COALESCE(user_id, 'owner') AS user_id, last_seen_at FROM devices WHERE refresh_hash = ? AND revoked_at IS NULL",
+      hash
+    )[0]
     if (!d) {
       const old = rows<{ device_id: string }>(this.sql, 'SELECT device_id FROM retired_refresh WHERE hash = ?', hash)[0]
       if (old) await this.revoke([old.device_id])
       return null
     }
+    // A device idle for longer than REFRESH_IDLE_DAYS (default 60) must sign in again.
+    if (d.last_seen_at < now - refreshIdleDays(this.env) * DAY) {
+      await this.revoke([d.id])
+      return null
+    }
     run(this.sql, 'UPDATE devices SET refresh_hash = ?, last_seen_at = ? WHERE id = ?', nextHash, now, d.id)
     run(this.sql, 'INSERT INTO retired_refresh (hash, device_id, at) VALUES (?, ?, ?)', hash, d.id, now)
-    const access = await signAccess(this.env.JWT_SECRET ?? '', d.id)
+    const access = await signAccess(this.env.JWT_SECRET ?? '', { iss: issuer(this.env), userId: d.user_id, deviceId: d.id })
     return { refreshToken: next, deviceId: d.id, ...access }
   }
 

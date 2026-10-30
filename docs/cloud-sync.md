@@ -28,8 +28,8 @@ Deployed at `https://prometheus-sync.ashden-lilley.workers.dev` (Worker `prometh
 
 ### Tokens
 
-- Access token: HS256 JWT signed with `JWT_SECRET`. Claims: `sub` = `owner`, `dev` = device id, `iat`, `exp` (15 minutes). Verified with WebCrypto `subtle.verify` (constant time). `alg` other than `HS256` is rejected, including `none`.
-- Refresh token: opaque, 32 random bytes. `POST /auth/refresh {refreshToken}` rotates it and returns a new access token. The old token stops working at once.
+- Access token: HS256 JWT signed with `JWT_SECRET`, header `kid` = `1`. Claims: `iss` = the `PUBLIC_URL` origin, `aud` = `prometheus-sync`, `sub` = user id (must still be the device's user), `dev` = device id, `iat`, `exp` (15 minutes). Verified with WebCrypto `subtle.verify` (constant time). `alg` other than `HS256` is rejected, including `none`, and so is a wrong `iss`, `aud` or `kid`. `JWT_SECRET_PREVIOUS`, if set, is also accepted for verification (rotation); new tokens are always signed with `JWT_SECRET`. Tokens in the old shape (no `kid`, `sub` = `owner`, no `iss`/`aud`) are accepted only while their `exp` is at most 15 minutes away, so tokens issued before OS-466 keep working until they expire; remove this in a later release.
+- Refresh token: opaque, 32 random bytes. `POST /auth/refresh {refreshToken}` rotates it and returns a new access token. The old token stops working at once. A device that has not refreshed for `REFRESH_IDLE_DAYS` (default 60) is refused (`401`) and revoked, so it must sign in again.
 - Reuse: presenting a retired refresh token revokes that device, since the token was probably stolen. Its sockets are closed, and the device loses access immediately.
 - Every bearer request also checks that the device is not revoked. Revocation therefore takes effect on the next request, not at token expiry.
 
@@ -47,7 +47,7 @@ Endpoint: `GET /sync` with a WebSocket upgrade. Authenticate with a single-use t
 2. Open the socket with `Sec-WebSocket-Protocol: prometheus-sync, ticket.<ticket>`. A ticket opens one socket; a second use is `401`.
 
 The server replies with the subprotocol `prometheus-sync`. The ticket is never echoed back.
-`bearer.<token>` still works for one release so older clients can connect. It is deprecated, because the header is logged in clear text. `?access_token=` is no longer accepted.
+`bearer.<token>` was removed in OS-466 (its header is logged in clear text) and gets `401`. `?access_token=` is not accepted either.
 
 All frames are JSON text.
 
@@ -101,8 +101,10 @@ Settings come from `wrangler.toml` `[vars]` and from secrets. A request that fin
 | `EMAIL_FROM` | var | Sender on a verified domain. |
 | `EMAIL` | binding | `send_email` binding, only for `EMAIL_PROVIDER = "cloudflare"`. No key. |
 | `JWT_SECRET` | secret | Signs access tokens. 64 random hex characters (at least 32). The Worker refuses to run (500, `config_missing`) while any setting still holds its placeholder value or `JWT_SECRET` is shorter than 32 characters. |
+| `JWT_SECRET_PREVIOUS` | optional secret | Verify-only, for rotation: put the old secret here and the new one in `JWT_SECRET`, then delete it 15 minutes later. At least 32 characters if set. |
 | `EMAIL_API_KEY` | secret | Resend API key. Only for `EMAIL_PROVIDER = "resend"`. |
-| `LINK_TTL_SECONDS`, `COMPACT_AT`, `COMPACT_KEEP` | optional var | Defaults 900, 10000, 2000. |
+| `LINK_TTL_SECONDS`, `COMPACT_AT`, `COMPACT_KEEP` | optional var | Defaults 900, 10000, 2000. The sign-in email states the link lifetime in minutes from `LINK_TTL_SECONDS`. |
+| `REFRESH_IDLE_DAYS` | optional var | Default 60. A device idle longer than this must sign in again. |
 
 Secrets never go in `wrangler.toml` or in the repo.
 
@@ -125,7 +127,7 @@ A failed send still returns `200` to the client, so the reply stays uniform. The
 - The verify page uses a strict CSP, `no-referrer`, and escapes every value.
 - Errors are logged by message only.
 - Workers Logs keep request logs. Query strings are redacted (`observability.redact_query_string`), and the `Authorization` header is masked. The `Sec-WebSocket-Protocol` header is not masked, so the sync socket's credential appears there in clear text. A ticket is single use and expires after 60 s, so a logged ticket is useless once it has been used.
-- `bearer.<token>` is deprecated. Its access token is logged in clear text (see above) until the protocol is removed.
+- `bearer.<token>` is removed, so no access token reaches the logs through the socket header.
 - `?access_token=` is gone. It was logged in the URL.
 - Tests need no backdoor. The email API is stubbed at the outbound fetch level (Miniflare `outboundService`).
 
@@ -223,9 +225,9 @@ npm run typecheck
 ```
 
 - `test/auth.test.mjs`: health, missing config, emails, verify and poll, expiry, reuse, rate limits, JWT rejection, refresh rotation, devices, signout-all.
-- `test/sync.test.mjs`: upgrade auth (tickets, single use, expiry, revoked device, deprecated bearer), catch-up, push ack and broadcast, skew, invalid ops, idempotent pushes, ordering, compaction and snapshot catch-up, socket close on revoke, and a load check (3 sockets, 1,000 ops).
+- `test/sync.test.mjs`: upgrade auth (tickets, single use, expiry, revoked device, bearer. refused), catch-up, push ack and broadcast, skew, invalid ops, idempotent pushes, ordering, compaction and snapshot catch-up, socket close on revoke, and a load check (3 sockets, 1,000 ops).
 - `test/client.test.mjs`: two real `CloudSync` clients (bundled from `src/main/cloud.ts` with esbuild) against Miniflare on `127.0.0.1` with a random port. Device A merges, B adopts, live edits flow both ways, A goes offline, edits twice and reconnects, and B receives both in order. A then revokes B, and B is signed out.
-- `tests/main/cloud.test.ts` (run by `npm run test:unit` from the repo root): URL rules, sign-in polling and its errors, the refresh token living only in credentials, the outbox surviving a restart, push-id reuse on retry, skew and invalid handling, `4001` sign-out, and merge versus adopt. It uses a fake fetch and a fake WebSocket.
+- `tests/main/cloud.test.ts` (run by `npm run test:unit` from the repo root): URL rules, sign-in polling and its errors, the refresh token living only in credentials, the outbox surviving a restart, push-id reuse on retry, push pacing under the server quota (batches of at most 500, at most 18 pushes per 10 s and 4,500 ops per minute), `rate_limited` backoff and resend, one delayed reconnect after `4008`, skew and invalid handling, `4001` sign-out, and merge versus adopt. It uses a fake fetch and a fake WebSocket.
 
 CI runs the same tests in the `server` job of `.github/workflows/ci.yml`. CI never deploys.
 

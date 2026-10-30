@@ -61,8 +61,9 @@ function logSender(env: Env): EmailSender {
 
 // Sends the sign-in link. Throws on a non-2xx reply; the message never includes the link or the reply body.
 // The link stays the first URL in the text (the log sender and tests read it from there).
-export async function sendMagicLink(env: Env, to: string, link: string, i: { deviceName: string; country: string | null; city: string | null }): Promise<void> {
-  const note = 'This link works once and expires in 15 minutes. If you did not ask for it, ignore this email.'
+export async function sendMagicLink(env: Env, to: string, link: string, i: { deviceName: string; country: string | null; city: string | null; ttlMinutes: number }): Promise<void> {
+  const mins = Number.isFinite(i.ttlMinutes) ? Math.max(1, i.ttlMinutes) : 15
+  const note = `This link works once and expires in ${mins} minute${mins === 1 ? '' : 's'}. If you did not ask for it, ignore this email.`
   const who = `${i.deviceName} (${placeOf(i.city, i.country)})`
   const text = `Sign in to Prometheus sync:\n\n${link}\n\nThe sign-in was started from ${who}. Enter the 6-digit code shown there to finish.\n\n${note}`
   const html =

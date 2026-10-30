@@ -46,10 +46,10 @@ test('a ticket for a revoked device is refused', () =>
     assert.equal((await openSocket(w, null, '', { protocol })).status, 401)
   }))
 
-test('the deprecated bearer. protocol still opens a socket', () =>
+test('the removed bearer. protocol no longer opens a socket, even with a valid access token', () =>
   withWorker({}, async w => {
     const s = await signIn(w)
-    assert.equal((await openSocket(w, s.accessToken, '', { bearer: true })).status, 101)
+    assert.equal((await openSocket(w, s.accessToken, '', { bearer: true })).status, 401)
     assert.equal((await openSocket(w, 'garbage', '', { bearer: true })).status, 401)
   }))
 

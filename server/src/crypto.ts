@@ -50,27 +50,54 @@ export async function hmacB64url(secret: string, text: string): Promise<string> 
   return b64url(new Uint8Array(await crypto.subtle.sign('HMAC', await hmacKey(secret, 'sign'), enc.encode(text))))
 }
 
-export async function signAccess(secret: string, deviceId: string): Promise<{ accessToken: string; accessExpiresAt: number }> {
+// Access-token claims: iss is the PUBLIC_URL origin, aud is fixed, sub is the user id. Header kid '1' marks this shape.
+export const JWT_AUD = 'prometheus-sync'
+const JWT_KID = '1'
+
+export async function signAccess(
+  secret: string,
+  i: { iss: string; userId: string; deviceId: string }
+): Promise<{ accessToken: string; accessExpiresAt: number }> {
   const now = Math.floor(Date.now() / 1000)
-  const head = b64url(enc.encode(JSON.stringify({ alg: 'HS256', typ: 'JWT' })))
-  const body = b64url(enc.encode(JSON.stringify({ sub: 'owner', dev: deviceId, iat: now, exp: now + ACCESS_TTL_S })))
+  const head = b64url(enc.encode(JSON.stringify({ alg: 'HS256', typ: 'JWT', kid: JWT_KID })))
+  const body = b64url(enc.encode(JSON.stringify({ iss: i.iss, aud: JWT_AUD, sub: i.userId, dev: i.deviceId, iat: now, exp: now + ACCESS_TTL_S })))
   const sig = await crypto.subtle.sign('HMAC', await hmacKey(secret, 'sign'), enc.encode(`${head}.${body}`))
   return { accessToken: `${head}.${body}.${b64url(new Uint8Array(sig))}`, accessExpiresAt: (now + ACCESS_TTL_S) * 1000 }
 }
 
-// Returns the device id when the token is a valid, unexpired HS256 token for the owner.
+// Returns the device id (and, for current tokens, the user id) when the token is a valid, unexpired HS256 token.
+// secrets: the current JWT_SECRET first, then JWT_SECRET_PREVIOUS if set (verify-only, for rotation).
+// Current tokens need kid '1', iss = expectedIss and aud = 'prometheus-sync'.
+// Legacy tokens (no kid, sub 'owner', no iss/aud) from before this change are accepted only while their exp is at most
+// one access-token lifetime (15 min) away, so they age out on their own. Remove that branch in a later release.
 // crypto.subtle.verify compares signatures in constant time.
-export async function verifyAccess(secret: string, token: string): Promise<{ dev: string } | null> {
+export async function verifyAccess(secrets: string[], expectedIss: string, token: string): Promise<{ dev: string; sub?: string } | null> {
   const parts = token.split('.')
   if (parts.length !== 3) return null
   try {
     const header = JSON.parse(dec.decode(unb64url(parts[0])))
     if (header.alg !== 'HS256') return null
-    const ok = await crypto.subtle.verify('HMAC', await hmacKey(secret, 'verify'), unb64url(parts[2]), enc.encode(`${parts[0]}.${parts[1]}`))
+    const signed = enc.encode(`${parts[0]}.${parts[1]}`)
+    const sig = unb64url(parts[2])
+    let ok = false
+    for (const secret of secrets) {
+      if (!secret) continue
+      if (await crypto.subtle.verify('HMAC', await hmacKey(secret, 'verify'), sig, signed)) {
+        ok = true
+        break
+      }
+    }
     if (!ok) return null
     const claims = JSON.parse(dec.decode(unb64url(parts[1])))
-    if (claims.sub !== 'owner' || typeof claims.dev !== 'string' || !(claims.exp * 1000 > Date.now())) return null
-    return { dev: claims.dev }
+    const nowMs = Date.now()
+    if (typeof claims.dev !== 'string' || typeof claims.exp !== 'number' || !(claims.exp * 1000 > nowMs)) return null
+    if (header.kid === JWT_KID) {
+      if (claims.iss !== expectedIss || claims.aud !== JWT_AUD || typeof claims.sub !== 'string') return null
+      return { dev: claims.dev, sub: claims.sub }
+    }
+    const legacy = header.kid === undefined && claims.sub === 'owner' && claims.iss === undefined && claims.aud === undefined
+    if (legacy && claims.exp * 1000 - nowMs <= ACCESS_TTL_S * 1000) return { dev: claims.dev }
+    return null
   } catch {
     return null
   }

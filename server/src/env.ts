@@ -13,6 +13,10 @@ export interface Env {
   EMAIL_API_KEY?: string
   EMAIL?: { send(m: { to: string; from: string; subject: string; text: string; html: string }): Promise<{ messageId: string }> }
   JWT_SECRET?: string
+  // Verify-only: the previous JWT_SECRET during a rotation. Tokens are always signed with JWT_SECRET.
+  JWT_SECRET_PREVIOUS?: string
+  // Days a device may go without refreshing before its refresh token stops working (default 60).
+  REFRESH_IDLE_DAYS?: string
   COMPACT_AT?: string
   COMPACT_KEEP?: string
   LINK_TTL_SECONDS?: string
@@ -31,4 +35,18 @@ export interface Env {
   OPS_MAX?: string
   // Database size in bytes above which non-owners cannot push (default 1 GB in workspace.ts).
   WORKSPACE_FULL_BYTES?: string
+}
+
+// Access-token issuer: the origin of PUBLIC_URL ('' if it is not a URL; the Worker refuses to run without a valid one).
+export function issuer(env: Env): string {
+  try {
+    return new URL(env.PUBLIC_URL ?? '').origin
+  } catch {
+    return ''
+  }
+}
+
+export function refreshIdleDays(env: Env): number {
+  const n = Number(env.REFRESH_IDLE_DAYS ?? 60)
+  return Number.isFinite(n) && n > 0 ? n : 60
 }
