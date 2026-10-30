@@ -1,6 +1,6 @@
 {
   "name": "prometheus",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Local-first project management: Linear-style issues and cycles, Monday-style boards and timelines",
   "author": "Olympus Studios",
   "private": true,
