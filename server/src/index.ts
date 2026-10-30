@@ -70,8 +70,10 @@ async function startSignIn(req: Request, env: Env, ctx: ExecutionContext): Promi
   const deviceName = typeof body?.deviceName === 'string' && body.deviceName.trim() ? body.deviceName.trim().slice(0, 100) : 'Device'
   const ip = ipKey(req.headers.get('CF-Connecting-IP'))
 
-  const country = req.cf?.country ?? null
-  const city = req.cf?.city ?? null
+  // req.cf is typed loosely ({} per field) in workers-types; the geo fields are strings when present.
+  const geo = (v: unknown) => (typeof v === 'string' ? v : null)
+  const country = geo(req.cf?.country)
+  const city = geo(req.cf?.city)
   const res = await auth(env).startSignIn({ emailKey: await sha256Hex(email), email, ip, deviceName, country, city })
   if ('limited' in res) return json({ error: 'rate_limited' }, 429, { 'Retry-After': String(res.limited) })
 
