@@ -1,6 +1,6 @@
 import { DurableObject } from 'cloudflare:workers'
 import type { Role } from '../../src/shared/permissions'
-import { randomCode, randomId, sha256Hex, signAccess, timingEqual } from './crypto'
+import { hmacB64url, randomCode, randomId, sha256Hex, signAccess, timingEqual } from './crypto'
 import type { Env } from './env'
 import { ipLimit } from './limits'
 
@@ -138,7 +138,8 @@ export class Auth extends DurableObject<Env> {
     return retry
   }
 
-  // Requests for a non-member are stored too, so the reply and poll look the same. They are never emailed.
+  // Non-members get no row. Their requestId and pollSecret are HMACs of the start time (see unknownPoll), so the reply
+  // and the poll look the same as a member's. Non-members are never emailed, and the same hashes and random values are computed for both.
   // A member whose email would pass the global caps gets a token. Over a cap, they get the same reply with no email.
   async startSignIn(i: { emailKey: string; email: string; ip: string; deviceName: string; country: string | null; city: string | null }) {
     const retry = this.hit([
@@ -152,26 +153,44 @@ export class Auth extends DurableObject<Env> {
     const user = rows<{ id: string }>(this.sql, 'SELECT id FROM users WHERE email = ? AND removed_at IS NULL', i.email)[0]
     const sent = user !== undefined && this.emailRetry() === 0
     const expiresAt = now + Number(this.env.LINK_TTL_SECONDS ?? 900) * 1000
-    const requestId = randomId(16)
-    const pollSecret = randomId(32)
+    const secret = this.env.JWT_SECRET ?? ''
+    const rand = randomId(16)
+    const requestId = `${rand}.${now}.${await hmacB64url(secret, `req:${rand}.${now}`)}`
+    const pollSecret = await hmacB64url(secret, `poll:${requestId}`)
     const token = randomId(32)
     const code = randomCode()
-    run(
-      this.sql,
-      'INSERT INTO requests (id, token_hash, secret_hash, device_name, owner, created_at, expires_at, user_id, code_hash, ip_country, ip_city) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      requestId,
-      await sha256Hex(token),
-      await sha256Hex(pollSecret),
-      i.deviceName,
-      user ? 1 : 0,
-      now,
-      expiresAt,
-      user?.id ?? null,
-      await sha256Hex(code),
-      i.country,
-      i.city
-    )
+    if (user) {
+      run(
+        this.sql,
+        'INSERT INTO requests (id, token_hash, secret_hash, device_name, owner, created_at, expires_at, user_id, code_hash, ip_country, ip_city) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        requestId,
+        await sha256Hex(token),
+        await sha256Hex(pollSecret),
+        i.deviceName,
+        1,
+        now,
+        expiresAt,
+        user.id,
+        await sha256Hex(code),
+        i.country,
+        i.city
+      )
+    } else {
+      await Promise.all([sha256Hex(token), sha256Hex(pollSecret), sha256Hex(code)])
+    }
     return { requestId, pollSecret, expiresAt, code, token: sent ? token : null }
+  }
+
+  // A request id with no row is a non-member's, or an expired member's row that prune() removed. Its id is
+  // `<rand>.<startedMs>.<hmac>` and its pollSecret is an HMAC of the id, so it can be checked without storage.
+  private async unknownPoll(requestId: string, secretHash: string): Promise<PollResult> {
+    const parts = requestId.split('.')
+    if (parts.length !== 3 || !/^\d+$/.test(parts[1])) return { status: 'notfound' }
+    const [rand, ms, sig] = parts
+    const secret = this.env.JWT_SECRET ?? ''
+    if (!timingEqual(sig, await hmacB64url(secret, `req:${rand}.${ms}`))) return { status: 'notfound' }
+    if (!timingEqual(await sha256Hex(await hmacB64url(secret, `poll:${requestId}`)), secretHash)) return { status: 'notfound' }
+    return Date.now() < Number(ms) + Number(this.env.LINK_TTL_SECONDS ?? 900) * 1000 ? { status: 'pending' } : { status: 'gone' }
   }
 
   // The request behind an emailed link, for the confirm page. Does not consume it.
@@ -208,7 +227,8 @@ export class Auth extends DurableObject<Env> {
       "SELECT secret_hash, device_name, verified, consumed, expires_at, COALESCE(user_id, 'owner') AS user_id FROM requests WHERE id = ?",
       requestId
     )[0]
-    if (!r || !timingEqual(r.secret_hash, secretHash)) return { status: 'notfound' }
+    if (!r) return this.unknownPoll(requestId, secretHash)
+    if (!timingEqual(r.secret_hash, secretHash)) return { status: 'notfound' }
     if (r.consumed) return { status: 'gone' }
     if (!r.verified) return r.expires_at > Date.now() ? { status: 'pending' } : { status: 'gone' }
 
@@ -414,12 +434,18 @@ export class Auth extends DurableObject<Env> {
 
   // Cleans expired sign-in requests and sync tickets, old rate-limit rows, retired refresh tokens and long-expired invites.
   async alarm() {
+    this.prune()
+    await this.ctx.storage.setAlarm(Date.now() + HOUR)
+  }
+
+  // Hourly cleanup, run by alarm(). Public so tests can run it (alarm() is reserved and not callable over RPC).
+  prune() {
     const now = Date.now()
     run(this.sql, 'DELETE FROM requests WHERE expires_at < ?', now - DAY)
+    run(this.sql, 'DELETE FROM requests WHERE verified = 0 AND expires_at < ?', now)
     run(this.sql, 'DELETE FROM tickets WHERE expires_at <= ?', now)
     run(this.sql, 'DELETE FROM starts WHERE at + window_ms < ?', now)
     run(this.sql, 'DELETE FROM retired_refresh WHERE at < ?', now - 90 * DAY)
     run(this.sql, 'DELETE FROM invites WHERE expires_at < ?', now - 30 * DAY)
-    await this.ctx.storage.setAlarm(now + HOUR)
   }
 }

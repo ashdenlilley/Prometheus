@@ -42,5 +42,8 @@ jobs:
       - run: npm ci
         working-directory: server
 
+      - run: npm run typecheck
+        working-directory: server
+
       - run: npm test
         working-directory: server

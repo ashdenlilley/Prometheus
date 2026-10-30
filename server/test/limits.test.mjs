@@ -41,5 +41,11 @@ test('Cloudflare WARP (2a09:bac0::/29) shares one bucket', () => {
   assert.equal(ipKey('2A09:BAC3:1:2::3'), 'warp')
   assert.notEqual(ipKey('2a09:bac8::1'), 'warp')
   assert.notEqual(ipKey('2a09:babf::1'), 'warp')
-  assert.equal(ipLimit(ipKey('2a09:bac0::1')), 20)
+  assert.equal(ipLimit(ipKey('2a09:bac0::1')), 200)
+})
+
+test('normal IPv6 /48 and IPv4 addresses keep the 20 per 15 min limit', () => {
+  assert.equal(ipLimit(ipKey('2001:db8::1')), 20)
+  assert.equal(ipLimit(ipKey('2a09:babf::1')), 20)
+  assert.equal(ipLimit(ipKey('203.0.113.1')), 20)
 })
