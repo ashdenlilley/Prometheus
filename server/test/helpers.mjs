@@ -29,6 +29,7 @@ export async function createWorker({ bindings = {}, omit = [] } = {}) {
       WORKSPACE: { className: 'Workspace', useSQLite: true }
     },
     bindings: all,
+    unsafeInspectDurableObjects: true,
     // Records every outbound call (the email API) instead of sending it.
     outboundService: async req => {
       emails.push({ url: req.url, authorization: req.headers.get('authorization'), body: await req.json() })
@@ -47,10 +48,13 @@ export async function withWorker(opts, fn) {
   }
 }
 
-export function call(w, path, { method = 'GET', body, form, headers = {}, ip } = {}) {
+// raw: a body sent as is, with the content-type taken from headers (for refusals such as text/plain).
+export function call(w, path, { method = 'GET', body, form, raw, headers = {}, ip } = {}) {
   const h = { ...headers }
   let payload
-  if (form) {
+  if (raw !== undefined) {
+    payload = raw
+  } else if (form) {
     h['content-type'] = 'application/x-www-form-urlencoded'
     payload = new URLSearchParams(form).toString()
   } else if (body !== undefined) {
@@ -59,6 +63,12 @@ export function call(w, path, { method = 'GET', body, form, headers = {}, ip } =
   }
   if (ip) h['cf-connecting-ip'] = ip
   return w.mf.dispatchFetch(BASE + path, { method, headers: h, body: payload })
+}
+
+// Test-only SQL on the Auth object's storage. Seeds rate-limit rows and members without waiting in real time.
+export async function authSql(w, text, ...params) {
+  const storage = await w.mf.unsafeGetDurableObjectStorage('', 'Auth', { name: 'auth' })
+  return storage.exec(text, ...params)
 }
 
 export async function waitFor(pred, ms = 3000) {

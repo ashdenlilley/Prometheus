@@ -17,4 +17,10 @@ export interface Env {
   COMPACT_KEEP?: string
   LINK_TTL_SECONDS?: string
   INVITE_TTL_SECONDS?: string
+  // Edge limits (wrangler.toml [[ratelimits]]). Optional so local tests, which lack them, skip the check.
+  AUTH_RL?: RateLimit
+  AUTH_POLL_RL?: RateLimit
+  // Caps on emails actually sent per hour and per day (defaults in auth.ts).
+  EMAIL_CAP_HOUR?: string
+  EMAIL_CAP_DAY?: string
 }

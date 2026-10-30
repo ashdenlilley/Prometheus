@@ -16,6 +16,18 @@ compatibility_date = "2026-08-01"
 [[send_email]]
 name = "EMAIL"
 
+# Edge rate limits, checked before the Auth object is called. Period must be 10 or 60 seconds.
+[[ratelimits]]
+name = "AUTH_RL"
+namespace_id = "1001"
+simple = { limit = 10, period = 60 }
+
+# Polling is about one request every 2 seconds for up to 15 minutes, so it gets its own, higher, limit.
+[[ratelimits]]
+name = "AUTH_POLL_RL"
+namespace_id = "1002"
+simple = { limit = 120, period = 60 }
+
 [[durable_objects.bindings]]
 name = "AUTH"
 class_name = "Auth"
@@ -42,6 +54,9 @@ EMAIL_FROM = "prometheus@olympusstudios.org"
 # LINK_TTL_SECONDS = "900"
 # COMPACT_AT = "10000"
 # COMPACT_KEEP = "2000"
+# Caps on sign-in and invite emails actually sent (defaults: 100 per hour, 300 per day).
+# EMAIL_CAP_HOUR = "100"
+# EMAIL_CAP_DAY = "300"
 
 # Secrets, set with `wrangler secret put` (not in this file):
 #   JWT_SECRET      64 random hex characters, signs access tokens
