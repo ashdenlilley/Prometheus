@@ -41,9 +41,13 @@ Deployed at `https://prometheus-sync.ashden-lilley.workers.dev` (Worker `prometh
 
 ## Sync protocol
 
-Endpoint: `GET /sync` with a WebSocket upgrade. Send the access token in
-`Sec-WebSocket-Protocol: prometheus-sync, bearer.<token>` (preferred), or as `?access_token=` as a fallback.
-The server replies with the subprotocol `prometheus-sync`. The token is never echoed back.
+Endpoint: `GET /sync` with a WebSocket upgrade. Authenticate with a single-use ticket:
+
+1. `POST /sync/ticket` (bearer): returns `{ticket}`. The ticket is 32 random bytes, stored only as a hash, and expires after `SYNC_TICKET_TTL_SECONDS` (default 60 s).
+2. Open the socket with `Sec-WebSocket-Protocol: prometheus-sync, ticket.<ticket>`. A ticket opens one socket; a second use is `401`.
+
+The server replies with the subprotocol `prometheus-sync`. The ticket is never echoed back.
+`bearer.<token>` still works for one release so older clients can connect. It is deprecated, because the header is logged in clear text. `?access_token=` is no longer accepted.
 
 All frames are JSON text.
 
@@ -119,8 +123,10 @@ A failed send still returns `200` to the client, so the reply stays uniform. The
 - Only hashes of tokens and poll secrets are stored. Refresh tokens are stored as hashes too.
 - The owner's data is readable by the server. This is the trade-off accepted in [`design/OS-359-multi-user-sync.md`](./design/OS-359-multi-user-sync.md). Folder sync stays ciphertext-only.
 - The verify page uses a strict CSP, `no-referrer`, and escapes every value.
-- Errors are logged by message only. No tokens, links or secrets reach logs.
-- The `?access_token=` fallback can end up in access logs. Clients should prefer the protocol header.
+- Errors are logged by message only.
+- Workers Logs keep request logs. Query strings are redacted (`observability.redact_query_string`), and the `Authorization` header is masked. The `Sec-WebSocket-Protocol` header is not masked, so the sync socket's credential appears there in clear text. A ticket is single use and expires after 60 s, so a logged ticket is useless once it has been used.
+- `bearer.<token>` is deprecated. Its access token is logged in clear text (see above) until the protocol is removed.
+- `?access_token=` is gone. It was logged in the URL.
 - Tests need no backdoor. The email API is stubbed at the outbound fetch level (Miniflare `outboundService`).
 
 ## Local development
@@ -217,7 +223,7 @@ npm run typecheck
 ```
 
 - `test/auth.test.mjs`: health, missing config, emails, verify and poll, expiry, reuse, rate limits, JWT rejection, refresh rotation, devices, signout-all.
-- `test/sync.test.mjs`: upgrade auth, catch-up, push ack and broadcast, skew, invalid ops, idempotent pushes, ordering, compaction and snapshot catch-up, socket close on revoke, and a load check (3 sockets, 1,000 ops).
+- `test/sync.test.mjs`: upgrade auth (tickets, single use, expiry, revoked device, deprecated bearer), catch-up, push ack and broadcast, skew, invalid ops, idempotent pushes, ordering, compaction and snapshot catch-up, socket close on revoke, and a load check (3 sockets, 1,000 ops).
 - `test/client.test.mjs`: two real `CloudSync` clients (bundled from `src/main/cloud.ts` with esbuild) against Miniflare on `127.0.0.1` with a random port. Device A merges, B adopts, live edits flow both ways, A goes offline, edits twice and reconnects, and B receives both in order. A then revokes B, and B is signed out.
 - `tests/main/cloud.test.ts` (run by `npm run test:unit` from the repo root): URL rules, sign-in polling and its errors, the refresh token living only in credentials, the outbox surviving a restart, push-id reuse on retry, skew and invalid handling, `4001` sign-out, and merge versus adopt. It uses a fake fetch and a fake WebSocket.
 

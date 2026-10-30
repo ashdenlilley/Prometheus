@@ -30,8 +30,8 @@ function formOriginOk(req: Request, env: Env): boolean {
   return origin === null || origin === new URL(env.PUBLIC_URL!).origin
 }
 
-// Paths behind the edge limit. Polling has its own binding (see wrangler.toml).
-const EDGE_PATHS = ['/auth/start', '/auth/poll', '/auth/verify', '/auth/refresh', '/invite', '/invites']
+// Paths behind the edge limit. Polling and sync tickets (sent on every reconnect) share the poll binding (see wrangler.toml).
+const EDGE_PATHS = ['/auth/start', '/auth/poll', '/auth/verify', '/auth/refresh', '/invite', '/invites', '/sync/ticket']
 
 // Display name from request input: trimmed and at most 100 characters. '' when absent.
 const nameOf = (v: unknown) => (typeof v === 'string' ? v.trim().slice(0, 100) : '')
@@ -48,13 +48,17 @@ async function readJson(req: Request): Promise<Record<string, unknown> | null> {
 // The Auth stub is one instance; every call goes through this getter.
 const auth = (env: Env) => env.AUTH.getByName('auth')
 
-// Access token from `Authorization: Bearer`, checked for a signature, expiry, an active device and an active user.
+// Access token checked for a signature, expiry, an active device and an active user.
+async function memberOf(token: string, env: Env): Promise<{ dev: string; member: Member } | null> {
+  const claims = await verifyAccess(env.JWT_SECRET ?? '', token)
+  const member = claims ? await auth(env).authorize(claims.dev) : null
+  return claims && member ? { dev: claims.dev, member } : null
+}
+
+// Access token from `Authorization: Bearer`.
 async function bearer(req: Request, env: Env): Promise<{ dev: string; member: Member } | null> {
   const m = /^Bearer (.+)$/.exec(req.headers.get('Authorization') ?? '')
-  const claims = m ? await verifyAccess(env.JWT_SECRET ?? '', m[1]) : null
-  if (!claims) return null
-  const member = await auth(env).authorize(claims.dev)
-  return member ? { dev: claims.dev, member } : null
+  return m ? memberOf(m[1], env) : null
 }
 
 async function startSignIn(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -157,22 +161,21 @@ async function manage(req: Request, env: Env, ctx: ExecutionContext, m: string, 
   return json({ error: 'not_found' }, 404)
 }
 
-// Serves the sync WebSocket. The token comes from the Sec-WebSocket-Protocol header, or ?access_token= as fallback.
+// Serves the sync WebSocket. Auth is a single-use ticket from POST /sync/ticket, sent as Sec-WebSocket-Protocol: ticket.<t>.
+// bearer.<token> is deprecated (its header is logged in clear text). Remove it after one release.
 async function sync(req: Request, env: Env): Promise<Response> {
   if (req.headers.get('Upgrade') !== 'websocket') return json({ error: 'upgrade_required' }, 426)
   const protocols = (req.headers.get('Sec-WebSocket-Protocol') ?? '').split(',').map(p => p.trim())
-  const fromHeader = protocols.find(p => p.startsWith('bearer.'))?.slice('bearer.'.length)
-  const token = fromHeader ?? new URL(req.url).searchParams.get('access_token') ?? ''
-  const claims = token ? await verifyAccess(env.JWT_SECRET ?? '', token) : null
-  if (!claims) return unauthorized()
-  const member = await auth(env).authorize(claims.dev)
-  if (!member) return unauthorized()
+  const ticket = protocols.find(p => p.startsWith('ticket.'))?.slice('ticket.'.length) ?? ''
+  const legacy = protocols.find(p => p.startsWith('bearer.'))?.slice('bearer.'.length) ?? ''
+  const me = ticket && ticket.length <= 200 ? await auth(env).redeemTicket(await sha256Hex(ticket)) : legacy ? await memberOf(legacy, env) : null
+  if (!me) return unauthorized()
   const headers = new Headers(req.headers)
-  headers.set('X-Device-Id', claims.dev)
-  headers.set('X-User-Id', member.userId)
-  headers.set('X-Role', member.role)
-  headers.set('X-Projects', JSON.stringify(member.projects))
-  headers.set('X-User-Name', encodeURIComponent(member.name))
+  headers.set('X-Device-Id', me.dev)
+  headers.set('X-User-Id', me.member.userId)
+  headers.set('X-Role', me.member.role)
+  headers.set('X-Projects', JSON.stringify(me.member.projects))
+  headers.set('X-User-Name', encodeURIComponent(me.member.name))
   return env.WORKSPACE.getByName('default').fetch(new Request(req, { headers }))
 }
 
@@ -182,7 +185,7 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
   const m = req.method
 
   // Checked before any Durable Object call, so a flood never reaches the single Auth object.
-  const edge = !EDGE_PATHS.includes(p) ? undefined : p === '/auth/poll' ? env.AUTH_POLL_RL : env.AUTH_RL
+  const edge = !EDGE_PATHS.includes(p) ? undefined : ['/auth/poll', '/sync/ticket'].includes(p) ? env.AUTH_POLL_RL : env.AUTH_RL
   if (await throttled(edge, `${p}:${ipKey(req.headers.get('CF-Connecting-IP'))}`)) return json({ error: 'rate_limited' }, 429, { 'Retry-After': '60' })
 
   if (m === 'POST' && p === '/auth/start') return startSignIn(req, env, ctx)
@@ -243,6 +246,10 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
     const me = await bearer(req, env)
     if (!me) return unauthorized()
     return me.member.role === 'owner' ? json(await env.WORKSPACE.getByName('default').denials()) : json({ error: 'forbidden' }, 403)
+  }
+  if (m === 'POST' && p === '/sync/ticket') {
+    const me = await bearer(req, env)
+    return me ? json({ ticket: await auth(env).createTicket(me.dev) }) : unauthorized()
   }
   if (m === 'GET' && p === '/sync') return sync(req, env)
   return json({ error: 'not_found' }, 404)

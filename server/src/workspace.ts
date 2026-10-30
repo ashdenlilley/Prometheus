@@ -137,7 +137,7 @@ export class Workspace extends DurableObject<Env> {
       name: decodeURIComponent(request.headers.get('X-User-Name') ?? '')
     }
     server.serializeAttachment(att)
-    // Only echo the subprotocol when the client offered it (a ?access_token= client offers none).
+    // Only echo the subprotocol when the client offered it.
     const offered = (request.headers.get('Sec-WebSocket-Protocol') ?? '').split(',').some(p => p.trim() === 'prometheus-sync')
     return new Response(null, { status: 101, webSocket: client, headers: offered ? { 'Sec-WebSocket-Protocol': 'prometheus-sync' } : {} })
   }

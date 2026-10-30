@@ -114,11 +114,19 @@ export async function join(w, email, role, projects) {
   return signIn(w, 'Laptop', email)
 }
 
-// Opens a sync socket with a bearer token. Returns { status } if the upgrade is refused.
-export async function openSocket(w, access, query = '') {
-  const res = await w.mf.dispatchFetch(BASE + '/sync' + query, {
-    headers: access === null ? { Upgrade: 'websocket' } : { Upgrade: 'websocket', 'Sec-WebSocket-Protocol': `prometheus-sync, bearer.${access}` }
-  })
+// A single-use sync ticket for the device behind an access token.
+export async function ticket(w, access) {
+  return (await (await call(w, '/sync/ticket', { method: 'POST', headers: { authorization: `Bearer ${access}` } })).json()).ticket
+}
+
+// Opens a sync socket. By default the access token is traded for a ticket (ticket.<t>). { bearer: true } sends the
+// deprecated bearer.<access>, and { protocol } sends that exact header. A null access sends no protocol. Returns { status } if refused.
+export async function openSocket(w, access, query = '', { bearer = false, protocol } = {}) {
+  let proto = protocol
+  if (proto === undefined && access !== null) proto = bearer ? `prometheus-sync, bearer.${access}` : `prometheus-sync, ticket.${await ticket(w, access)}`
+  const headers = { Upgrade: 'websocket' }
+  if (proto !== undefined) headers['Sec-WebSocket-Protocol'] = proto
+  const res = await w.mf.dispatchFetch(BASE + '/sync' + query, { headers })
   if (res.status !== 101) return { status: res.status }
   const ws = res.webSocket
   ws.accept()

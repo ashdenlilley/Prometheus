@@ -1,20 +1,56 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { ackFor, call, hello, hlc, openSocket, signIn, waitFor, withWorker } from './helpers.mjs'
+import { ackFor, call, hello, hlc, openSocket, signIn, ticket, waitFor, withWorker } from './helpers.mjs'
 
 const create = (ms, id, title) => ({ hlc: hlc(ms, 0, 'dev'), table: 'issues', id, create: true, set: { title } })
 const setTitle = (ms, id, title) => ({ hlc: hlc(ms, 0, 'dev'), table: 'issues', id, set: { title } })
 const push = (sock, id, ops) => sock.send({ type: 'push', id, ops })
 
-test('upgrade needs a valid, active device; the token can also come from ?access_token=', () =>
+test('upgrade needs a ticket: no protocol, ?access_token= and garbage are refused', () =>
   withWorker({}, async w => {
     const s = await signIn(w)
     assert.equal((await openSocket(w, null)).status, 401)
-    assert.equal((await openSocket(w, 'garbage')).status, 401)
-    const q = await openSocket(w, null, `?access_token=${s.accessToken}`)
-    assert.equal(q.status, 101)
-    assert.equal((await hello(q, 0)).head, 0)
-    assert.equal((await openSocket(w, s.accessToken)).status, 101)
+    assert.equal((await openSocket(w, null, `?access_token=${s.accessToken}`)).status, 401)
+    assert.equal((await openSocket(w, null, '', { protocol: 'prometheus-sync, ticket.garbage' })).status, 401)
+    const ok = await openSocket(w, s.accessToken)
+    assert.equal(ok.status, 101)
+    assert.equal((await hello(ok, 0)).head, 0)
+  }))
+
+test('a ticket opens a socket once; a second use is refused', () =>
+  withWorker({}, async w => {
+    const s = await signIn(w)
+    const protocol = `prometheus-sync, ticket.${await ticket(w, s.accessToken)}`
+    assert.equal((await openSocket(w, null, '', { protocol })).status, 101)
+    assert.equal((await openSocket(w, null, '', { protocol })).status, 401)
+  }))
+
+test('an expired ticket is refused', () =>
+  withWorker({ bindings: { SYNC_TICKET_TTL_SECONDS: '0' } }, async w => {
+    const s = await signIn(w)
+    assert.equal((await openSocket(w, s.accessToken)).status, 401)
+  }))
+
+test('/sync/ticket needs a bearer token', () =>
+  withWorker({}, async w => {
+    assert.equal((await call(w, '/sync/ticket', { method: 'POST' })).status, 401)
+  }))
+
+test('a ticket for a revoked device is refused', () =>
+  withWorker({}, async w => {
+    const a = await signIn(w, 'Laptop')
+    const b = await signIn(w, 'Phone')
+    const protocol = `prometheus-sync, ticket.${await ticket(w, b.accessToken)}`
+    const del = await call(w, `/devices/${b.deviceId}`, { method: 'DELETE', headers: { authorization: `Bearer ${a.accessToken}` } })
+    assert.equal(del.status, 200)
+    assert.equal((await openSocket(w, null, '', { protocol })).status, 401)
+  }))
+
+test('the deprecated bearer. protocol still opens a socket', () =>
+  withWorker({}, async w => {
+    const s = await signIn(w)
+    assert.equal((await openSocket(w, s.accessToken, '', { bearer: true })).status, 101)
+    assert.equal((await openSocket(w, 'garbage', '', { bearer: true })).status, 401)
   }))
 
 test('hello on an empty log is ready at head 0; ping gets pong', () =>
