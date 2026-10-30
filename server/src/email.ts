@@ -1,5 +1,5 @@
 import type { Env } from './env'
-import { escapeHtml } from './pages'
+import { escapeHtml, placeOf } from './pages'
 
 export interface EmailSender {
   send(msg: { to: string; from: string; subject: string; text: string; html: string; kind?: 'sign-in' | 'invite' }): Promise<void>
@@ -60,9 +60,14 @@ function logSender(env: Env): EmailSender {
 }
 
 // Sends the sign-in link. Throws on a non-2xx reply; the message never includes the link or the reply body.
-export async function sendMagicLink(env: Env, to: string, link: string): Promise<void> {
-  const text = `Sign in to Prometheus sync:\n\n${link}\n\nThis link works once and expires in 15 minutes. If you did not ask for it, ignore this email.`
-  const html = `<p>Sign in to Prometheus sync:</p><p><a href="${escapeHtml(link)}">Sign in</a></p><p>This link works once and expires in 15 minutes. If you did not ask for it, ignore this email.</p>`
+// The link stays the first URL in the text (the log sender and tests read it from there).
+export async function sendMagicLink(env: Env, to: string, link: string, i: { deviceName: string; country: string | null; city: string | null }): Promise<void> {
+  const note = 'This link works once and expires in 15 minutes. If you did not ask for it, ignore this email.'
+  const who = `${i.deviceName} (${placeOf(i.city, i.country)})`
+  const text = `Sign in to Prometheus sync:\n\n${link}\n\nThe sign-in was started from ${who}. Enter the 6-digit code shown there to finish.\n\n${note}`
+  const html =
+    `<p>Sign in to Prometheus sync:</p><p><a href="${escapeHtml(link)}">Sign in</a></p>` +
+    `<p>The sign-in was started from ${escapeHtml(who)}. Enter the 6-digit code shown there to finish.</p><p>${note}</p>`
   await emailSender(env).send({ from: env.EMAIL_FROM!, to, subject: 'Sign in to Prometheus', text, html })
 }
 

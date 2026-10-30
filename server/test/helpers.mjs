@@ -90,7 +90,7 @@ export async function signIn(w, deviceName = 'Laptop', email = OWNER) {
   const before = w.emails.length
   const start = await (await call(w, '/auth/start', { method: 'POST', body: { email, deviceName } })).json()
   await waitFor(() => w.emails.length > before)
-  await call(w, '/auth/verify', { method: 'POST', form: { t: lastToken(w) } })
+  await call(w, '/auth/verify', { method: 'POST', form: { t: lastToken(w), code: start.code } })
   const res = await call(w, '/auth/poll', { method: 'POST', body: { requestId: start.requestId, pollSecret: start.pollSecret } })
   return res.json()
 }

@@ -135,7 +135,7 @@ function harness(handlers: Record<string, Handler>, initialData: AppData = empty
 function signInHandlers(extra: Record<string, Handler> = {}): Record<string, Handler> {
   let polls = 0
   return {
-    '/auth/start': () => json({ requestId: 'req-1', pollSecret: 'secret-1', expiresAt: Date.now() + 900_000 }),
+    '/auth/start': () => json({ requestId: 'req-1', pollSecret: 'secret-1', expiresAt: Date.now() + 900_000, code: '123456' }),
     '/auth/poll': () => (++polls === 1 ? json({ status: 'pending' }, 202) : json(tokens())),
     ...extra
   }
@@ -185,6 +185,7 @@ describe('CloudSync', () => {
     await h.cloud.startSignIn(SERVER, 'owner@example.test', 'Laptop')
     assert.equal(h.cloud.getStatus().state, 'signing-in')
     assert.equal(h.cloud.getStatus().signIn?.email, 'owner@example.test')
+    assert.equal(h.cloud.getStatus().signIn?.code, '123456')
     await until(() => h.cloud.getStatus().enabled)
     await until(() => fileText(h.dir, 'cloud-sync.json').includes('"enabled": true'))
     assert.equal(h.creds.get('cloud.refreshToken'), 'refresh-1')
@@ -196,14 +197,14 @@ describe('CloudSync', () => {
   })
 
   test('sign-in reports an expired link (410) and an unknown request (404)', async () => {
-    const gone = harness({ '/auth/start': () => json({ requestId: 'r', pollSecret: 's', expiresAt: Date.now() + 9e5 }), '/auth/poll': () => json({ error: 'gone' }, 410) })
+    const gone = harness({ '/auth/start': () => json({ requestId: 'r', pollSecret: 's', expiresAt: Date.now() + 9e5, code: '123456' }), '/auth/poll': () => json({ error: 'gone' }, 410) })
     await gone.cloud.startSignIn(SERVER, 'owner@example.test', 'Laptop')
     await until(() => gone.cloud.getStatus().error !== null)
     assert.match(gone.cloud.getStatus().error!, /expired/)
     assert.equal(gone.cloud.getStatus().state, 'off')
     gone.cloud.stop()
 
-    const missing = harness({ '/auth/start': () => json({ requestId: 'r', pollSecret: 's', expiresAt: Date.now() + 9e5 }), '/auth/poll': () => json({ error: 'not_found' }, 404) })
+    const missing = harness({ '/auth/start': () => json({ requestId: 'r', pollSecret: 's', expiresAt: Date.now() + 9e5, code: '123456' }), '/auth/poll': () => json({ error: 'not_found' }, 404) })
     await missing.cloud.startSignIn(SERVER, 'owner@example.test', 'Laptop')
     await until(() => missing.cloud.getStatus().error !== null)
     assert.match(missing.cloud.getStatus().error!, /not found/)

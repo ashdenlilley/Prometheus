@@ -1,6 +1,6 @@
 import { DurableObject } from 'cloudflare:workers'
 import type { Role } from '../../src/shared/permissions'
-import { randomId, sha256Hex, signAccess, timingEqual } from './crypto'
+import { randomCode, randomId, sha256Hex, signAccess, timingEqual } from './crypto'
 import type { Env } from './env'
 import { ipLimit } from './limits'
 
@@ -82,6 +82,11 @@ export class Auth extends DurableObject<Env> {
           run(ctx.storage.sql, `ALTER TABLE ${t} ADD COLUMN user_id TEXT`)
         }
       }
+      // Requests written before the confirmation code existed get the new columns; old ones have no code and cannot verify.
+      const requestCols = rows<{ name: string }>(ctx.storage.sql, 'PRAGMA table_info(requests)').map(c => c.name)
+      for (const [name, type] of [['code_hash', 'TEXT'], ['attempts', 'INTEGER NOT NULL DEFAULT 0'], ['ip_country', 'TEXT'], ['ip_city', 'TEXT']] as const) {
+        if (!requestCols.includes(name)) run(ctx.storage.sql, `ALTER TABLE requests ADD COLUMN ${name} ${type}`)
+      }
       // Rate-limit rows written before per-rule windows were stored were all 15-minute rows.
       if (!rows<{ name: string }>(ctx.storage.sql, 'PRAGMA table_info(starts)').some(c => c.name === 'window_ms')) {
         run(ctx.storage.sql, 'ALTER TABLE starts ADD COLUMN window_ms INTEGER NOT NULL DEFAULT 900000')
@@ -133,7 +138,7 @@ export class Auth extends DurableObject<Env> {
 
   // Requests for a non-member are stored too, so the reply and poll look the same. They are never emailed.
   // A member whose email would pass the global caps gets a token. Over a cap, they get the same reply with no email.
-  async startSignIn(i: { emailKey: string; email: string; ip: string; deviceName: string }) {
+  async startSignIn(i: { emailKey: string; email: string; ip: string; deviceName: string; country: string | null; city: string | null }) {
     const retry = this.hit([
       { key: `email:${i.emailKey}`, limit: LIMIT_EMAIL, windowMs: WINDOW_MS },
       { key: `email-day:${i.emailKey}`, limit: LIMIT_EMAIL_DAY, windowMs: DAY },
@@ -148,9 +153,10 @@ export class Auth extends DurableObject<Env> {
     const requestId = randomId(16)
     const pollSecret = randomId(32)
     const token = randomId(32)
+    const code = randomCode()
     run(
       this.sql,
-      'INSERT INTO requests (id, token_hash, secret_hash, device_name, owner, created_at, expires_at, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO requests (id, token_hash, secret_hash, device_name, owner, created_at, expires_at, user_id, code_hash, ip_country, ip_city) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
       requestId,
       await sha256Hex(token),
       await sha256Hex(pollSecret),
@@ -158,16 +164,40 @@ export class Auth extends DurableObject<Env> {
       user ? 1 : 0,
       now,
       expiresAt,
-      user?.id ?? null
+      user?.id ?? null,
+      await sha256Hex(code),
+      i.country,
+      i.city
     )
-    return { requestId, pollSecret, expiresAt, token: sent ? token : null }
+    return { requestId, pollSecret, expiresAt, code, token: sent ? token : null }
   }
 
-  async verifyLink(tokenHash: string): Promise<boolean> {
-    const hit = rows<{ id: string }>(this.sql, 'SELECT id FROM requests WHERE token_hash = ? AND owner = 1 AND verified = 0 AND expires_at > ?', tokenHash, Date.now())[0]
+  // The request behind an emailed link, for the confirm page. Does not consume it.
+  async linkInfo(tokenHash: string) {
+    const r = rows<{ device_name: string; ip_country: string | null; ip_city: string | null; created_at: number }>(
+      this.sql,
+      'SELECT device_name, ip_country, ip_city, created_at FROM requests WHERE token_hash = ? AND owner = 1 AND verified = 0 AND expires_at > ?',
+      tokenHash,
+      Date.now()
+    )[0]
+    return r ? { deviceName: r.device_name, country: r.ip_country, city: r.ip_city, startedAt: r.created_at } : null
+  }
+
+  // Verifies only when the code matches. A miss counts as an attempt; the fifth miss burns the request.
+  async verifyLink(tokenHash: string, codeHash: string): Promise<boolean> {
+    const hit = rows<{ id: string; code_hash: string }>(
+      this.sql,
+      "SELECT id, COALESCE(code_hash, '') AS code_hash FROM requests WHERE token_hash = ? AND owner = 1 AND verified = 0 AND expires_at > ?",
+      tokenHash,
+      Date.now()
+    )[0]
     if (!hit) return false
-    run(this.sql, 'UPDATE requests SET verified = 1 WHERE id = ?', hit.id)
-    return true
+    if (timingEqual(hit.code_hash, codeHash)) {
+      run(this.sql, 'UPDATE requests SET verified = 1 WHERE id = ?', hit.id)
+      return true
+    }
+    run(this.sql, 'UPDATE requests SET attempts = attempts + 1, expires_at = CASE WHEN attempts + 1 >= 5 THEN 0 ELSE expires_at END WHERE id = ?', hit.id)
+    return false
   }
 
   async poll(requestId: string, secretHash: string): Promise<PollResult> {

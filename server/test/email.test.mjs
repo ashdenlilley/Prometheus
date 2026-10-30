@@ -13,6 +13,7 @@ const outfile = join(dir, 'email.mjs')
 await esbuild.build({ entryPoints: [src], bundle: true, format: 'esm', platform: 'neutral', target: 'es2022', outfile, logLevel: 'silent' })
 const { emailSender, sendMagicLink } = await import(pathToFileURL(outfile).href)
 const LINK = 'https://sync.example/auth/verify?t=abc123'
+const WHO = { deviceName: 'Laptop', country: 'AU', city: 'Sydney' }
 
 test.after(() => rmSync(dir, { recursive: true, force: true }))
 
@@ -24,7 +25,7 @@ test('cloudflare sends through the send_email binding with no REST call', async 
   }
   try {
     const env = { EMAIL_PROVIDER: 'cloudflare', EMAIL_FROM: 'Prometheus <signin@example.com>', EMAIL: { send: async m => (sent.push(m), { messageId: 'm1' }) } }
-    await sendMagicLink(env, 'owner@prometheus.test', LINK)
+    await sendMagicLink(env, 'owner@prometheus.test', LINK, WHO)
   } finally {
     globalThis.fetch = realFetch
   }
@@ -34,6 +35,17 @@ test('cloudflare sends through the send_email binding with no REST call', async 
   assert.equal(sent[0].subject, 'Sign in to Prometheus')
   assert.ok(sent[0].text.includes(LINK))
   assert.ok(sent[0].html.includes('Sign in'))
+  assert.ok(sent[0].text.includes('Laptop (Sydney, AU)'))
+  assert.ok(sent[0].html.includes('Laptop (Sydney, AU)'))
+})
+
+test('the device name in the email is HTML-escaped', async () => {
+  const sent = []
+  const env = { EMAIL_PROVIDER: 'cloudflare', EMAIL_FROM: 'Prometheus <signin@example.com>', EMAIL: { send: async m => (sent.push(m), { messageId: 'm1' }) } }
+  await sendMagicLink(env, 'owner@prometheus.test', LINK, { deviceName: '<b>x</b>', country: null, city: null })
+  assert.equal(sent[0].html.includes('<b>x</b>'), false)
+  assert.ok(sent[0].html.includes('&#60;b&#62;x&#60;/b&#62;'))
+  assert.ok(sent[0].text.includes('<b>x</b> (an unknown location)'))
 })
 
 test('cloudflare errors carry the code only, never the link', async () => {
@@ -45,7 +57,7 @@ test('cloudflare errors carry the code only, never the link', async () => {
       }
     }
   }
-  await assert.rejects(sendMagicLink(env, 'owner@prometheus.test', LINK), err => {
+  await assert.rejects(sendMagicLink(env, 'owner@prometheus.test', LINK, WHO), err => {
     assert.equal(err.message, 'email send failed: E_SENDER_NOT_VERIFIED')
     assert.equal(err.message.includes(LINK), false)
     return true
@@ -55,7 +67,7 @@ test('cloudflare errors carry the code only, never the link', async () => {
 test('unknown provider and missing binding throw', () => {
   assert.throws(() => emailSender({ EMAIL_PROVIDER: 'smtp' }), /EMAIL_PROVIDER/)
   assert.throws(() => emailSender({}), /EMAIL_PROVIDER/)
-  return sendMagicLink({ EMAIL_PROVIDER: 'cloudflare' }, 'owner@prometheus.test', LINK).then(
+  return sendMagicLink({ EMAIL_PROVIDER: 'cloudflare' }, 'owner@prometheus.test', LINK, WHO).then(
     () => assert.fail('expected a rejection'),
     err => assert.match(err.message, /EMAIL/)
   )
@@ -73,7 +85,7 @@ test('log prints the link to the console on a local PUBLIC_URL and sends nothing
   console.log = (...a) => lines.push(a.join(' '))
   try {
     for (const PUBLIC_URL of ['http://127.0.0.1:8787', 'http://localhost:8787']) {
-      await sendMagicLink({ EMAIL_PROVIDER: 'log', PUBLIC_URL, EMAIL_FROM: 'Prometheus <signin@example.com>' }, 'owner@prometheus.test', LINK)
+      await sendMagicLink({ EMAIL_PROVIDER: 'log', PUBLIC_URL, EMAIL_FROM: 'Prometheus <signin@example.com>' }, 'owner@prometheus.test', LINK, WHO)
     }
   } finally {
     console.log = realLog

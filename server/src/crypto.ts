@@ -19,6 +19,16 @@ export function randomId(bytes: number): string {
   return b64url(crypto.getRandomValues(new Uint8Array(bytes)))
 }
 
+// Uniform 000000-999999. Draws at or above the largest multiple of 10^6 below 2^32 are rejected, so no digit is favoured.
+export function randomCode(): string {
+  const limit = Math.floor(0x100000000 / 1_000_000) * 1_000_000
+  const n = new Uint32Array(1)
+  do {
+    crypto.getRandomValues(n)
+  } while (n[0] >= limit)
+  return String(n[0] % 1_000_000).padStart(6, '0')
+}
+
 export async function sha256Hex(text: string): Promise<string> {
   const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', enc.encode(text)))
   return [...digest].map(b => b.toString(16).padStart(2, '0')).join('')

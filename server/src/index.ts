@@ -66,22 +66,25 @@ async function startSignIn(req: Request, env: Env, ctx: ExecutionContext): Promi
   const deviceName = typeof body?.deviceName === 'string' && body.deviceName.trim() ? body.deviceName.trim().slice(0, 100) : 'Device'
   const ip = ipKey(req.headers.get('CF-Connecting-IP'))
 
-  const res = await auth(env).startSignIn({ emailKey: await sha256Hex(email), email, ip, deviceName })
+  const country = req.cf?.country ?? null
+  const city = req.cf?.city ?? null
+  const res = await auth(env).startSignIn({ emailKey: await sha256Hex(email), email, ip, deviceName, country, city })
   if ('limited' in res) return json({ error: 'rate_limited' }, 429, { 'Retry-After': String(res.limited) })
 
   // Sent after the reply, so the response time does not reveal whether the email belongs to a member.
   if (res.token) {
     const link = `${env.PUBLIC_URL!.replace(/\/$/, '')}/auth/verify?t=${res.token}`
-    ctx.waitUntil(sendMagicLink(env, email, link).catch(e => console.error('magic link email failed:', e instanceof Error ? e.message : 'unknown')))
+    ctx.waitUntil(sendMagicLink(env, email, link, { deviceName, country, city }).catch(e => console.error('magic link email failed:', e instanceof Error ? e.message : 'unknown')))
   }
-  return json({ requestId: res.requestId, pollSecret: res.pollSecret, expiresAt: res.expiresAt })
+  return json({ requestId: res.requestId, pollSecret: res.pollSecret, expiresAt: res.expiresAt, code: res.code })
 }
 
 async function verifyLink(req: Request, env: Env): Promise<Response> {
   if (!formOriginOk(req, env)) return badOrigin()
   // Form body, so the token never lands in a URL the browser or proxies log again.
-  const t = new URLSearchParams(await req.text()).get('t') ?? ''
-  const ok = t !== '' && t.length <= 200 && (await auth(env).verifyLink(await sha256Hex(t)))
+  const form = new URLSearchParams(await req.text())
+  const t = form.get('t') ?? ''
+  const ok = t !== '' && t.length <= 200 && (await auth(env).verifyLink(await sha256Hex(t), await sha256Hex(form.get('code') ?? '')))
   return ok ? signedInPage() : invalidLinkPage()
 }
 
@@ -184,8 +187,9 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
 
   if (m === 'POST' && p === '/auth/start') return startSignIn(req, env, ctx)
   if (m === 'GET' && p === '/auth/verify') {
-    const t = url.searchParams.get('t')
-    return t ? confirmPage(t) : invalidLinkPage()
+    const t = url.searchParams.get('t') ?? ''
+    const info = t !== '' && t.length <= 200 ? await auth(env).linkInfo(await sha256Hex(t)) : null
+    return info ? confirmPage(t, info) : invalidLinkPage()
   }
   if (m === 'POST' && p === '/auth/verify') return verifyLink(req, env)
   if (m === 'POST' && p === '/auth/poll') return poll(req, env)
