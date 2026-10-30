@@ -48,6 +48,8 @@ test('start emails the owner once through the email API; others get the same sha
     assert.equal(other.status, 200)
     const stranger = await other.json()
     assert.deepEqual(Object.keys(stranger).sort(), Object.keys(owner).sort())
+    assert.match(owner.code, /^\d{6}$/)
+    assert.match(stranger.code, /^\d{6}$/)
     await new Promise(r => setTimeout(r, 200))
     assert.equal(w.emails.length, 1)
   }))
@@ -64,7 +66,7 @@ test('GET verify only shows a confirm page; POST verifies; poll gives tokens onc
     assert.match(page.headers.get('content-security-policy'), /default-src 'none'/)
     assert.equal((await call(w, '/auth/poll', pollBody(s))).status, 202)
 
-    const done = await call(w, '/auth/verify', { method: 'POST', form: { t } })
+    const done = await call(w, '/auth/verify', { method: 'POST', form: { t, code: s.code } })
     assert.equal(done.status, 200)
     assert.match(await done.text(), /Signed in\. You can close this tab and return to Prometheus\./)
 
@@ -79,18 +81,18 @@ test('a wrong poll secret is 404 and does not reveal state', () =>
   withWorker({}, async w => {
     const s = await (await call(w, '/auth/start', startBody(OWNER))).json()
     await waitFor(() => w.emails.length === 1)
-    await call(w, '/auth/verify', { method: 'POST', form: { t: lastToken(w) } })
+    await call(w, '/auth/verify', { method: 'POST', form: { t: lastToken(w), code: s.code } })
     const bad = await call(w, '/auth/poll', { method: 'POST', body: { requestId: s.requestId, pollSecret: 'wrong' } })
     assert.equal(bad.status, 404)
   }))
 
 test('a used link is rejected, and an unknown token is rejected', () =>
   withWorker({}, async w => {
-    await call(w, '/auth/start', startBody(OWNER))
+    const s = await (await call(w, '/auth/start', startBody(OWNER))).json()
     await waitFor(() => w.emails.length === 1)
     const t = lastToken(w)
-    assert.equal((await call(w, '/auth/verify', { method: 'POST', form: { t } })).status, 200)
-    const again = await call(w, '/auth/verify', { method: 'POST', form: { t } })
+    assert.equal((await call(w, '/auth/verify', { method: 'POST', form: { t, code: s.code } })).status, 200)
+    const again = await call(w, '/auth/verify', { method: 'POST', form: { t, code: s.code } })
     assert.equal(again.status, 400)
     assert.match(await again.text(), /invalid or has expired/)
     assert.equal((await call(w, '/auth/verify', { method: 'POST', form: { t: 'not-a-token' } })).status, 400)
@@ -101,7 +103,7 @@ test('an expired link is rejected and its request is gone', () =>
     const s = await (await call(w, '/auth/start', startBody(OWNER))).json()
     await waitFor(() => w.emails.length === 1)
     await new Promise(r => setTimeout(r, 1100))
-    assert.equal((await call(w, '/auth/verify', { method: 'POST', form: { t: lastToken(w) } })).status, 400)
+    assert.equal((await call(w, '/auth/verify', { method: 'POST', form: { t: lastToken(w), code: s.code } })).status, 400)
     assert.equal((await call(w, '/auth/poll', pollBody(s))).status, 410)
   }))
 
@@ -211,11 +213,11 @@ test('a request with an Origin is refused with 403 and sends no email', () =>
 
 test('the sign-in form accepts its own origin or none, and refuses another origin', () =>
   withWorker({}, async w => {
-    await call(w, '/auth/start', startBody(OWNER))
+    const s = await (await call(w, '/auth/start', startBody(OWNER))).json()
     await waitFor(() => w.emails.length === 1)
     const t = lastToken(w)
-    assert.equal((await call(w, '/auth/verify', { method: 'POST', form: { t }, headers: { origin: 'https://evil.example' } })).status, 403)
-    assert.equal((await call(w, '/auth/verify', { method: 'POST', form: { t }, headers: { origin: BASE } })).status, 200)
+    assert.equal((await call(w, '/auth/verify', { method: 'POST', form: { t, code: s.code }, headers: { origin: 'https://evil.example' } })).status, 403)
+    assert.equal((await call(w, '/auth/verify', { method: 'POST', form: { t, code: s.code }, headers: { origin: BASE } })).status, 200)
   }))
 
 test('the invite form refuses another origin', () =>
@@ -268,14 +270,50 @@ test('global daily cap: a capped member gets the same reply as a non-member, and
     assert.equal(w.emails.length, 2)
     assert.deepEqual(w.emails.map(e => e.body.to[0]), members.slice(0, 2))
     const shape = Object.keys(replies[0]).sort()
-    assert.deepEqual(shape, ['expiresAt', 'pollSecret', 'requestId'])
+    assert.deepEqual(shape, ['code', 'expiresAt', 'pollSecret', 'requestId'])
     for (const r of replies) assert.deepEqual(Object.keys(r).sort(), shape)
   }))
 
-test('IPv6 is bucketed per /64: 21 addresses in one /64 share the limit', () =>
+test('IPv6 is bucketed per /48: 21 addresses in different /64s of one /48 share the limit', () =>
   withWorker({}, async w => {
     for (let i = 1; i <= 20; i++) {
-      assert.equal((await call(w, '/auth/start', { ...startBody(`v${i}@example.com`), ip: `2001:db8::${i.toString(16)}` })).status, 200)
+      assert.equal((await call(w, '/auth/start', { ...startBody(`v${i}@example.com`), ip: `2001:db8:0:${i.toString(16)}::1` })).status, 200)
     }
-    assert.equal((await call(w, '/auth/start', { ...startBody('v21@example.com'), ip: '2001:db8::15' })).status, 429)
+    assert.equal((await call(w, '/auth/start', { ...startBody('v21@example.com'), ip: '2001:db8:0:ffff::1' })).status, 429)
+    assert.equal((await call(w, '/auth/start', { ...startBody('v22@example.com'), ip: '2001:db8:1::1' })).status, 200)
+  }))
+
+test('no code or a wrong code does not verify, the poll stays pending, and the right code verifies', () =>
+  withWorker({}, async w => {
+    const s = await (await call(w, '/auth/start', startBody(OWNER))).json()
+    await waitFor(() => w.emails.length === 1)
+    const t = lastToken(w)
+    const wrong = s.code === '000000' ? '111111' : '000000'
+    assert.equal((await call(w, '/auth/verify', { method: 'POST', form: { t } })).status, 400)
+    assert.equal((await call(w, '/auth/verify', { method: 'POST', form: { t, code: wrong } })).status, 400)
+    assert.equal((await call(w, '/auth/poll', pollBody(s))).status, 202)
+    assert.equal((await call(w, '/auth/verify', { method: 'POST', form: { t, code: s.code } })).status, 200)
+    assert.equal((await call(w, '/auth/poll', pollBody(s))).status, 200)
+  }))
+
+test('five wrong codes burn the request, so the right code no longer works', () =>
+  withWorker({}, async w => {
+    const s = await (await call(w, '/auth/start', startBody(OWNER))).json()
+    await waitFor(() => w.emails.length === 1)
+    const t = lastToken(w)
+    const wrong = s.code === '000000' ? '111111' : '000000'
+    for (let i = 0; i < 5; i++) assert.equal((await call(w, '/auth/verify', { method: 'POST', form: { t, code: wrong } })).status, 400)
+    assert.equal((await call(w, '/auth/verify', { method: 'POST', form: { t, code: s.code } })).status, 400)
+    assert.equal((await call(w, '/auth/poll', pollBody(s))).status, 410)
+  }))
+
+test('the confirm page escapes the device name and asks for the 6-digit code', () =>
+  withWorker({}, async w => {
+    await call(w, '/auth/start', startBody(OWNER, '<b>x</b>'))
+    await waitFor(() => w.emails.length === 1)
+    const html = await (await call(w, `/auth/verify?t=${lastToken(w)}`)).text()
+    assert.ok(html.includes('&#60;b&#62;x&#60;/b&#62;'))
+    assert.equal(html.includes('<b>x</b>'), false)
+    assert.match(html, /pattern="\[0-9\]\{6\}"/)
+    assert.match(html, /didn't just try to sign in, close this page/)
   }))

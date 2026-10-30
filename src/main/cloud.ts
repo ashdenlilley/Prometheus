@@ -31,7 +31,7 @@ export interface CloudStatus {
   pending: number
   lastSync: number | null
   error: string | null
-  signIn: { email: string; expiresAt: number } | null
+  signIn: { email: string; expiresAt: number; code: string } | null
   // Signed in, and the server already has data: the user must pick merge or adopt.
   needsJoin: boolean
   userId: string | null
@@ -127,6 +127,8 @@ interface Pending {
   requestId: string
   pollSecret: string
   expiresAt: number
+  // Shown on this device; the person confirming the link in their email must type it.
+  code: string
 }
 
 type Frame =
@@ -253,7 +255,7 @@ export class CloudSync {
       pending: this.outbox.ops.length,
       lastSync: this.lastSync,
       error: this.error,
-      signIn: this.pending ? { email: this.pending.email, expiresAt: this.pending.expiresAt } : null,
+      signIn: this.pending ? { email: this.pending.email, expiresAt: this.pending.expiresAt, code: this.pending.code } : null,
       needsJoin: c.enabled && !c.joined && (this.probeHead ?? 0) > 0,
       userId: c.userId || null,
       role: c.role || null,
@@ -291,8 +293,8 @@ export class CloudSync {
     const started = this.now()
     const res = await this.fetch(`${base}/auth/start`, post({ email, deviceName }))
     if (!res.ok) throw new Error(res.status === 429 ? 'Too many sign-in links requested. Try again in a few minutes.' : `Could not send the sign-in link (HTTP ${res.status}).`)
-    const { requestId, pollSecret, expiresAt } = (await res.json()) as { requestId: string; pollSecret: string; expiresAt: number }
-    this.pending = { serverUrl: base, email: email.trim(), deviceName, requestId, pollSecret, expiresAt: Math.min(expiresAt, started + SIGN_IN_MS) }
+    const { requestId, pollSecret, expiresAt, code } = (await res.json()) as { requestId: string; pollSecret: string; expiresAt: number; code: string }
+    this.pending = { serverUrl: base, email: email.trim(), deviceName, requestId, pollSecret, expiresAt: Math.min(expiresAt, started + SIGN_IN_MS), code: typeof code === 'string' ? code : '' }
     this.error = null
     this.schedulePoll(this.pollMs)
   }

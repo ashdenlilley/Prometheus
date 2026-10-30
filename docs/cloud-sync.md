@@ -16,9 +16,9 @@ Deployed at `https://prometheus-sync.ashden-lilley.workers.dev` (Worker `prometh
 
 ## Auth flow
 
-1. `POST /auth/start {email, deviceName}` returns `{requestId, pollSecret, expiresAt}`. The reply is the same for the owner and for anyone else, so it reveals nothing about the account. Only when the email equals `OWNER_EMAIL` is a link emailed.
-2. The link is `${PUBLIC_URL}/auth/verify?t=<token>`. The token is 32 random bytes. Only SHA-256 hashes of the token and of `pollSecret` are stored.
-3. `GET /auth/verify` shows a confirm page. It does not verify anything, so email link scanners that pre-fetch URLs cannot use up a link. The "Confirm sign-in" button `POST`s the token to `/auth/verify`, and only that POST verifies.
+1. `POST /auth/start {email, deviceName}` returns `{requestId, pollSecret, expiresAt, code}`. The reply is the same for the owner and for anyone else, so it reveals nothing about the account. Only when the email equals `OWNER_EMAIL` is a link emailed. `code` is a 6-digit confirmation code shown on the device.
+2. The link is `${PUBLIC_URL}/auth/verify?t=<token>`. The token is 32 random bytes. Only SHA-256 hashes of the token, the code and `pollSecret` are stored.
+3. `GET /auth/verify` shows a confirm page with the device name, approximate location and start time. It does not verify anything, so email link scanners that pre-fetch URLs cannot use up a link. The page needs the 6-digit code shown on the device. Its "Confirm sign-in" button `POST`s the token and code to `/auth/verify`, and only a matching code verifies. Five wrong codes burn the request.
 4. The device polls `POST /auth/poll {requestId, pollSecret}`:
    - `202 {status:'pending'}` until verified.
    - `200 {refreshToken, accessToken, accessExpiresAt, deviceId}` exactly once. This creates the device session.

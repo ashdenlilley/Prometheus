@@ -94,6 +94,13 @@ export function CloudSyncSettings() {
           <p className="muted small">
             Check {cloud.signIn.email} for a sign-in link. It works once and expires in 15 minutes.
           </p>
+          {cloud.signIn.code && (
+            <p>
+              Your code: <strong>{cloud.signIn.code.slice(0, 3)} {cloud.signIn.code.slice(3)}</strong>
+              <br />
+              <span className="muted small">Enter it on the page the email link opens.</span>
+            </p>
+          )}
           <div className="token-row">
             <button className="btn ghost" aria-label="Cancel sign-in" disabled={busy} onClick={cancel}>Cancel</button>
           </div>

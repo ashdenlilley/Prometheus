@@ -128,11 +128,11 @@ async function signIn(server, dev) {
   const before = server.emails.length
   await dev.cloud.startSignIn(server.url, OWNER, dev.name)
   await until(() => server.emails.length > before)
-  // The confirm button's POST, with the token from the emailed link.
+  // The confirm button's POST, with the token from the emailed link and the code shown on this device.
   const res = await fetch(`${server.url}/auth/verify`, {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ t: lastToken(server) })
+    body: new URLSearchParams({ t: lastToken(server), code: dev.cloud.getStatus().signIn.code })
   })
   assert.equal(res.status, 200)
   await until(() => dev.cloud.getStatus().enabled)

@@ -18,11 +18,19 @@ function page(body: string, status = 200): Response {
   })
 }
 
-export const confirmPage = (token: string) =>
+// Approximate place from Cloudflare's geo fields. Either may be missing.
+export const placeOf = (city: string | null | undefined, country: string | null | undefined) =>
+  [city, country].filter(Boolean).join(', ') || 'an unknown location'
+
+export const confirmPage = (token: string, i: { deviceName: string; country: string | null; city: string | null; startedAt: number }) =>
   page(
-    `<h1>Confirm sign-in</h1><p>Confirm to sign this device in to Prometheus.</p>` +
+    `<h1>Confirm sign-in</h1>` +
+      `<p>Sign in to Prometheus on ${escapeHtml(i.deviceName)} from ${escapeHtml(placeOf(i.city, i.country))}, started ${new Date(i.startedAt).toUTCString()}.</p>` +
       `<form method="post" action="/auth/verify"><input type="hidden" name="t" value="${escapeHtml(token)}">` +
-      `<button type="submit">Confirm sign-in</button></form>`
+      `<label>Enter the code shown in Prometheus on the device you're signing in<br>` +
+      `<input name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" required></label> ` +
+      `<button type="submit">Confirm sign-in</button></form>` +
+      `<p>If you didn't just try to sign in, close this page.</p>`
   )
 
 export const signedInPage = () =>

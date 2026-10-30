@@ -142,7 +142,7 @@ export interface CloudStatus {
   pending: number
   lastSync: number | null
   error: string | null
-  signIn: { email: string; expiresAt: number } | null
+  signIn: { email: string; expiresAt: number; code: string } | null
   needsJoin: boolean
   userId: string | null
   role: Role | null
