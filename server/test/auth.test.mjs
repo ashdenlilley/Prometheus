@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { createHmac } from 'node:crypto'
-import { BASE, JWT_SECRET, OWNER, b64url, call, lastToken, signIn, waitFor, withWorker } from './helpers.mjs'
+import { createHash, createHmac } from 'node:crypto'
+import { BASE, JWT_SECRET, OWNER, authSql, b64url, call, invite, lastToken, signIn, waitFor, withWorker } from './helpers.mjs'
 
 const startBody = (email, deviceName = 'Laptop') => ({ method: 'POST', body: { email, deviceName } })
 const pollBody = s => ({ method: 'POST', body: { requestId: s.requestId, pollSecret: s.pollSecret } })
@@ -186,4 +186,96 @@ test('signout-all revokes every device', () =>
     assert.equal((await call(w, '/auth/refresh', { method: 'POST', body: { refreshToken: a.refreshToken } })).status, 401)
     assert.equal((await call(w, '/auth/refresh', { method: 'POST', body: { refreshToken: b.refreshToken } })).status, 401)
     assert.equal((await call(w, '/auth/signout-all', { method: 'POST' })).status, 401)
+  }))
+
+const sha256 = s => createHash('sha256').update(s).digest('hex')
+const settle = () => new Promise(r => setTimeout(r, 200))
+
+test('sign-in refuses a non-JSON body with 415 and sends no email', () =>
+  withWorker({}, async w => {
+    const res = await call(w, '/auth/start', { method: 'POST', raw: JSON.stringify({ email: OWNER }), headers: { 'content-type': 'text/plain' } })
+    assert.equal(res.status, 415)
+    assert.equal((await res.json()).error, 'unsupported_media_type')
+    await settle()
+    assert.equal(w.emails.length, 0)
+  }))
+
+test('a request with an Origin is refused with 403 and sends no email', () =>
+  withWorker({}, async w => {
+    const res = await call(w, '/auth/start', { ...startBody(OWNER), headers: { origin: 'https://evil.example' } })
+    assert.equal(res.status, 403)
+    assert.equal((await res.json()).error, 'bad_origin')
+    await settle()
+    assert.equal(w.emails.length, 0)
+  }))
+
+test('the sign-in form accepts its own origin or none, and refuses another origin', () =>
+  withWorker({}, async w => {
+    await call(w, '/auth/start', startBody(OWNER))
+    await waitFor(() => w.emails.length === 1)
+    const t = lastToken(w)
+    assert.equal((await call(w, '/auth/verify', { method: 'POST', form: { t }, headers: { origin: 'https://evil.example' } })).status, 403)
+    assert.equal((await call(w, '/auth/verify', { method: 'POST', form: { t }, headers: { origin: BASE } })).status, 200)
+  }))
+
+test('the invite form refuses another origin', () =>
+  withWorker({}, async w => {
+    const owner = await signIn(w)
+    const { token } = await invite(w, owner.accessToken, { email: 'guest@example.com', role: 'viewer' })
+    assert.equal((await call(w, '/invite', { method: 'POST', form: { t: token }, headers: { origin: 'https://evil.example' } })).status, 403)
+    assert.equal((await call(w, '/invite', { method: 'POST', form: { t: token }, headers: { origin: BASE } })).status, 200)
+  }))
+
+test('per-address daily cap: the 21st start in 24 h gets 429, for a member and for a non-member', () =>
+  withWorker({}, async w => {
+    await call(w, '/auth/start', startBody('warm@example.com')) // creates the Auth object's tables
+    const now = Date.now()
+    for (const email of [OWNER, 'stranger@example.com']) {
+      for (let i = 0; i < 20; i++) {
+        await authSql(w, 'INSERT INTO starts (key, at, window_ms) VALUES (?, ?, ?)', `email-day:${sha256(email)}`, now - 3_600_000, 86_400_000)
+      }
+      const limited = await call(w, '/auth/start', { ...startBody(email), ip: '203.0.113.50' })
+      assert.equal(limited.status, 429)
+      assert.ok(Number(limited.headers.get('retry-after')) > 0)
+    }
+  }))
+
+test('a day-long rate-limit row survives another request\'s cleanup', () =>
+  withWorker({}, async w => {
+    await call(w, '/auth/start', startBody('warm@example.com'))
+    for (let i = 0; i < 20; i++) {
+      await authSql(w, 'INSERT INTO starts (key, at, window_ms) VALUES (?, ?, ?)', `email-day:${sha256(OWNER)}`, Date.now() - 3_600_000, 86_400_000)
+    }
+    assert.equal((await call(w, '/auth/start', { ...startBody('other@example.com'), ip: '203.0.113.51' })).status, 200)
+    assert.equal((await call(w, '/auth/start', { ...startBody(OWNER), ip: '203.0.113.51' })).status, 429)
+  }))
+
+test('global daily cap: a capped member gets the same reply as a non-member, and no email', () =>
+  withWorker({ bindings: { EMAIL_CAP_DAY: '2' } }, async w => {
+    await call(w, '/auth/start', startBody('warm@example.com')) // creates the tables; a non-member gets no email
+    const members = ['a@example.com', 'b@example.com', 'c@example.com']
+    for (const [i, email] of members.entries()) {
+      await authSql(w, "INSERT INTO users (id, email, name, role, projects, created_at) VALUES (?, ?, ?, 'member', '[]', ?)", `m${i}`, email, email.split('@')[0], Date.now())
+    }
+    const replies = []
+    for (const email of members) {
+      const res = await call(w, '/auth/start', { ...startBody(email), ip: '203.0.113.60' })
+      assert.equal(res.status, 200)
+      replies.push(await res.json())
+    }
+    await waitFor(() => w.emails.length === 2)
+    await settle()
+    assert.equal(w.emails.length, 2)
+    assert.deepEqual(w.emails.map(e => e.body.to[0]), members.slice(0, 2))
+    const shape = Object.keys(replies[0]).sort()
+    assert.deepEqual(shape, ['expiresAt', 'pollSecret', 'requestId'])
+    for (const r of replies) assert.deepEqual(Object.keys(r).sort(), shape)
+  }))
+
+test('IPv6 is bucketed per /64: 21 addresses in one /64 share the limit', () =>
+  withWorker({}, async w => {
+    for (let i = 1; i <= 20; i++) {
+      assert.equal((await call(w, '/auth/start', { ...startBody(`v${i}@example.com`), ip: `2001:db8::${i.toString(16)}` })).status, 200)
+    }
+    assert.equal((await call(w, '/auth/start', { ...startBody('v21@example.com'), ip: '2001:db8::15' })).status, 429)
   }))

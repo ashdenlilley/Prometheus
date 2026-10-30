@@ -2,6 +2,7 @@ import { sendInvite, sendMagicLink } from './email'
 import { sha256Hex, verifyAccess } from './crypto'
 import type { Env } from './env'
 import type { Member } from './auth'
+import { ipKey, throttled } from './limits'
 import { confirmPage, invalidInvitePage, invalidLinkPage, inviteAcceptedPage, inviteConfirmPage, signedInPage } from './pages'
 
 export { Auth } from './auth'
@@ -14,6 +15,23 @@ const json = (body: unknown, status = 200, headers: Record<string, string> = {})
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', ...headers } })
 
 const unauthorized = () => json({ error: 'unauthorized' }, 401)
+const badOrigin = () => json({ error: 'bad_origin' }, 403)
+
+// JSON API bodies only. A cross-site form cannot send application/json without a preflight, and the app sends no Origin.
+function requireJson(req: Request): Response | null {
+  if (!(req.headers.get('content-type') ?? '').toLowerCase().startsWith('application/json')) return json({ error: 'unsupported_media_type' }, 415)
+  if (req.headers.has('origin')) return badOrigin()
+  return null
+}
+
+// The HTML forms are posted by a browser on this site. A missing Origin (no browser) is allowed; any other origin is not.
+function formOriginOk(req: Request, env: Env): boolean {
+  const origin = req.headers.get('origin')
+  return origin === null || origin === new URL(env.PUBLIC_URL!).origin
+}
+
+// Paths behind the edge limit. Polling has its own binding (see wrangler.toml).
+const EDGE_PATHS = ['/auth/start', '/auth/poll', '/auth/verify', '/auth/refresh', '/invite', '/invites']
 
 // Display name from request input: trimmed and at most 100 characters. '' when absent.
 const nameOf = (v: unknown) => (typeof v === 'string' ? v.trim().slice(0, 100) : '')
@@ -40,11 +58,13 @@ async function bearer(req: Request, env: Env): Promise<{ dev: string; member: Me
 }
 
 async function startSignIn(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  const refused = requireJson(req)
+  if (refused) return refused
   const body = await readJson(req)
   const email = typeof body?.email === 'string' ? body.email.trim().toLowerCase() : ''
   if (!EMAIL_RE.test(email) || email.length > 254) return json({ error: 'invalid_email' }, 400)
   const deviceName = typeof body?.deviceName === 'string' && body.deviceName.trim() ? body.deviceName.trim().slice(0, 100) : 'Device'
-  const ip = req.headers.get('CF-Connecting-IP') ?? 'unknown'
+  const ip = ipKey(req.headers.get('CF-Connecting-IP'))
 
   const res = await auth(env).startSignIn({ emailKey: await sha256Hex(email), email, ip, deviceName })
   if ('limited' in res) return json({ error: 'rate_limited' }, 429, { 'Retry-After': String(res.limited) })
@@ -58,6 +78,7 @@ async function startSignIn(req: Request, env: Env, ctx: ExecutionContext): Promi
 }
 
 async function verifyLink(req: Request, env: Env): Promise<Response> {
+  if (!formOriginOk(req, env)) return badOrigin()
   // Form body, so the token never lands in a URL the browser or proxies log again.
   const t = new URLSearchParams(await req.text()).get('t') ?? ''
   const ok = t !== '' && t.length <= 200 && (await auth(env).verifyLink(await sha256Hex(t)))
@@ -65,6 +86,8 @@ async function verifyLink(req: Request, env: Env): Promise<Response> {
 }
 
 async function poll(req: Request, env: Env): Promise<Response> {
+  const refused = requireJson(req)
+  if (refused) return refused
   const body = await readJson(req)
   if (typeof body?.requestId !== 'string' || typeof body?.pollSecret !== 'string') return json({ error: 'bad_request' }, 400)
   const res = await auth(env).poll(body.requestId, await sha256Hex(body.pollSecret))
@@ -81,6 +104,8 @@ async function poll(req: Request, env: Env): Promise<Response> {
 }
 
 async function refresh(req: Request, env: Env): Promise<Response> {
+  const refused = requireJson(req)
+  if (refused) return refused
   const body = await readJson(req)
   if (typeof body?.refreshToken !== 'string') return json({ error: 'bad_request' }, 400)
   const res = await auth(env).refresh(body.refreshToken)
@@ -89,10 +114,12 @@ async function refresh(req: Request, env: Env): Promise<Response> {
 
 // Owner only. Email and role are checked here and in the Auth object (which also enforces the rate limits).
 async function createInviteRoute(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  const refused = requireJson(req)
+  if (refused) return refused
   const body = await readJson(req)
   const email = typeof body?.email === 'string' ? body.email.trim().toLowerCase() : ''
   if (!EMAIL_RE.test(email) || email.length > 254) return json({ error: 'invalid_email' }, 400)
-  const ip = req.headers.get('CF-Connecting-IP') ?? 'unknown'
+  const ip = ipKey(req.headers.get('CF-Connecting-IP'))
   const res = await auth(env).createInvite({
     emailKey: await sha256Hex(email),
     email,
@@ -116,6 +143,8 @@ async function manage(req: Request, env: Env, ctx: ExecutionContext, m: string, 
   if (m === 'DELETE' && invite) return (await auth(env).revokeInvite(invite[1])) ? json({ ok: true }) : json({ error: 'not_found' }, 404)
   const member = /^\/members\/([\w-]{1,64})$/.exec(p)
   if (m === 'PATCH' && member) {
+    const refused = requireJson(req)
+    if (refused) return refused
     const body = await readJson(req)
     const res = await auth(env).updateMember(member[1], { role: body?.role, projects: body?.projects, name: nameOf(body?.name) || undefined })
     if (res === false) return json({ error: 'not_found' }, 404)
@@ -148,6 +177,10 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
   const url = new URL(req.url)
   const { pathname: p } = url
   const m = req.method
+
+  // Checked before any Durable Object call, so a flood never reaches the single Auth object.
+  const edge = !EDGE_PATHS.includes(p) ? undefined : p === '/auth/poll' ? env.AUTH_POLL_RL : env.AUTH_RL
+  if (await throttled(edge, `${p}:${ipKey(req.headers.get('CF-Connecting-IP'))}`)) return json({ error: 'rate_limited' }, 429, { 'Retry-After': '60' })
 
   if (m === 'POST' && p === '/auth/start') return startSignIn(req, env, ctx)
   if (m === 'GET' && p === '/auth/verify') {
@@ -192,6 +225,7 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
     return info ? inviteConfirmPage(t, info) : invalidInvitePage()
   }
   if (m === 'POST' && p === '/invite') {
+    if (!formOriginOk(req, env)) return badOrigin()
     const t = new URLSearchParams(await req.text()).get('t') ?? ''
     const res = t !== '' && t.length <= 200 ? await auth(env).acceptInvite(await sha256Hex(t)) : null
     return res ? inviteAcceptedPage(res.email, env.PUBLIC_URL!) : invalidInvitePage()

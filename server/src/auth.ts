@@ -2,18 +2,31 @@ import { DurableObject } from 'cloudflare:workers'
 import type { Role } from '../../src/shared/permissions'
 import { randomId, sha256Hex, signAccess, timingEqual } from './crypto'
 import type { Env } from './env'
+import { ipLimit } from './limits'
 
 const WINDOW_MS = 15 * 60_000
-const LIMIT_EMAIL = 5
-const LIMIT_IP = 20
 const HOUR = 3_600_000
 const DAY = 86_400_000
+const LIMIT_EMAIL = 5 // per address per 15 min
+const LIMIT_EMAIL_DAY = 20 // per address per 24 h
+const LIMIT_GLOBAL_HOUR = 100 // emails actually sent, all addresses together
+const LIMIT_GLOBAL_DAY = 300
+
+interface Rule {
+  key: string
+  limit: number
+  windowMs: number
+}
+
+// Env override for a global cap. A missing or invalid value keeps the default, so a typo cannot switch the cap off.
+const cap = (v: string | undefined, d: number) => (v && Number(v) >= 0 ? Number(v) : d)
 
 const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS requests (id TEXT PRIMARY KEY, token_hash TEXT NOT NULL UNIQUE, secret_hash TEXT NOT NULL,
      device_name TEXT NOT NULL, owner INTEGER NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL,
      verified INTEGER NOT NULL DEFAULT 0, consumed INTEGER NOT NULL DEFAULT 0)`,
-  `CREATE TABLE IF NOT EXISTS starts (key TEXT NOT NULL, at INTEGER NOT NULL)`,
+  // One row per counted hit; window_ms is the rule's window, so cleanup keeps each row as long as its rule needs.
+  `CREATE TABLE IF NOT EXISTS starts (key TEXT NOT NULL, at INTEGER NOT NULL, window_ms INTEGER NOT NULL DEFAULT 900000)`,
   `CREATE INDEX IF NOT EXISTS starts_key ON starts (key, at)`,
   `CREATE TABLE IF NOT EXISTS devices (id TEXT PRIMARY KEY, name TEXT NOT NULL, refresh_hash TEXT UNIQUE,
      created_at INTEGER NOT NULL, last_seen_at INTEGER NOT NULL, revoked_at INTEGER)`,
@@ -57,6 +70,8 @@ export function grant(role: unknown, projects: unknown): { role: Role; projects:
 // One instance named 'auth'. Storage calls are synchronous, so a check and the write after it
 // cannot interleave with another request (the awaits only hash or sign).
 export class Auth extends DurableObject<Env> {
+  private capWarnedAt = 0
+
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env)
     ctx.blockConcurrencyWhile(async () => {
@@ -66,6 +81,10 @@ export class Auth extends DurableObject<Env> {
         if (!rows<{ name: string }>(ctx.storage.sql, `PRAGMA table_info(${t})`).some(c => c.name === 'user_id')) {
           run(ctx.storage.sql, `ALTER TABLE ${t} ADD COLUMN user_id TEXT`)
         }
+      }
+      // Rate-limit rows written before per-rule windows were stored were all 15-minute rows.
+      if (!rows<{ name: string }>(ctx.storage.sql, 'PRAGMA table_info(starts)').some(c => c.name === 'window_ms')) {
+        run(ctx.storage.sql, 'ALTER TABLE starts ADD COLUMN window_ms INTEGER NOT NULL DEFAULT 900000')
       }
       // The owner row follows OWNER_EMAIL. Its id is fixed, so there is never a second owner.
       const email = (env.OWNER_EMAIL ?? '').trim().toLowerCase()
@@ -84,28 +103,47 @@ export class Auth extends DurableObject<Env> {
     return this.ctx.storage.sql
   }
 
-  // Records one hit per key and returns seconds until retry, or 0 when every key is under its limit.
-  // Counts run before any await, so concurrent calls cannot slip past the limit.
-  private hit(keys: string[], limits: number[]): number {
+  // Counts one hit on every rule and returns seconds until retry, or 0 when every rule is under its limit
+  // (then nothing is recorded for the rules that were checked). Counts run before any await, so concurrent calls cannot slip past a limit.
+  private hit(rules: Rule[]): number {
     const now = Date.now()
     let retry = 0
-    for (let n = 0; n < keys.length; n++) {
-      const hits = rows<{ n: number; first: number | null }>(this.sql, 'SELECT COUNT(*) AS n, MIN(at) AS first FROM starts WHERE key = ? AND at > ?', keys[n], now - WINDOW_MS)[0]
-      if (hits.n >= limits[n]) retry = Math.max(retry, Math.ceil(((hits.first ?? now) + WINDOW_MS - now) / 1000))
+    for (const r of rules) {
+      const hits = rows<{ n: number; first: number | null }>(this.sql, 'SELECT COUNT(*) AS n, MIN(at) AS first FROM starts WHERE key = ? AND at > ?', r.key, now - r.windowMs)[0]
+      if (hits.n >= r.limit) retry = Math.max(retry, Math.ceil(((hits.first ?? now) + r.windowMs - now) / 1000))
     }
     if (retry) return retry
-    for (const key of keys) run(this.sql, 'INSERT INTO starts (key, at) VALUES (?, ?)', key, now)
-    run(this.sql, 'DELETE FROM starts WHERE at < ?', now - WINDOW_MS)
+    for (const r of rules) run(this.sql, 'INSERT INTO starts (key, at, window_ms) VALUES (?, ?, ?)', r.key, now, r.windowMs)
+    run(this.sql, 'DELETE FROM starts WHERE at + window_ms < ?', now)
     return 0
   }
 
+  // Counts one email about to be sent against the global caps. Returns seconds until retry, or 0 when sending is allowed.
+  private emailRetry(): number {
+    const retry = this.hit([
+      { key: 'sent:hour', limit: cap(this.env.EMAIL_CAP_HOUR, LIMIT_GLOBAL_HOUR), windowMs: HOUR },
+      { key: 'sent:day', limit: cap(this.env.EMAIL_CAP_DAY, LIMIT_GLOBAL_DAY), windowMs: DAY }
+    ])
+    if (retry && Date.now() - this.capWarnedAt > HOUR) {
+      this.capWarnedAt = Date.now()
+      console.warn('email cap reached')
+    }
+    return retry
+  }
+
   // Requests for a non-member are stored too, so the reply and poll look the same. They are never emailed.
+  // A member whose email would pass the global caps gets a token. Over a cap, they get the same reply with no email.
   async startSignIn(i: { emailKey: string; email: string; ip: string; deviceName: string }) {
-    const retry = this.hit([`email:${i.emailKey}`, `ip:${i.ip}`], [LIMIT_EMAIL, LIMIT_IP])
+    const retry = this.hit([
+      { key: `email:${i.emailKey}`, limit: LIMIT_EMAIL, windowMs: WINDOW_MS },
+      { key: `email-day:${i.emailKey}`, limit: LIMIT_EMAIL_DAY, windowMs: DAY },
+      { key: `ip:${i.ip}`, limit: ipLimit(i.ip), windowMs: WINDOW_MS }
+    ])
     if (retry) return { limited: retry }
 
     const now = Date.now()
     const user = rows<{ id: string }>(this.sql, 'SELECT id FROM users WHERE email = ? AND removed_at IS NULL', i.email)[0]
+    const sent = user !== undefined && this.emailRetry() === 0
     const expiresAt = now + Number(this.env.LINK_TTL_SECONDS ?? 900) * 1000
     const requestId = randomId(16)
     const pollSecret = randomId(32)
@@ -122,7 +160,7 @@ export class Auth extends DurableObject<Env> {
       expiresAt,
       user?.id ?? null
     )
-    return { requestId, pollSecret, expiresAt, token: user ? token : null }
+    return { requestId, pollSecret, expiresAt, token: sent ? token : null }
   }
 
   async verifyLink(tokenHash: string): Promise<boolean> {
@@ -228,9 +266,15 @@ export class Auth extends DurableObject<Env> {
     // The token is hashed before the synchronous block, so the checks and writes below cannot interleave.
     const token = randomId(32)
     const tokenHash = await sha256Hex(token)
-    const retry = this.hit([`invite:${i.emailKey}`, `invite-ip:${i.ip}`], [LIMIT_EMAIL, LIMIT_IP])
+    const retry = this.hit([
+      { key: `invite:${i.emailKey}`, limit: LIMIT_EMAIL, windowMs: WINDOW_MS },
+      { key: `invite-ip:${i.ip}`, limit: ipLimit(i.ip), windowMs: WINDOW_MS }
+    ])
     if (retry) return { limited: retry }
     if (rows<{ id: string }>(this.sql, 'SELECT id FROM users WHERE email = ? AND removed_at IS NULL', i.email)[0]) return { error: 'already_member' }
+    // The invite email is an email too. Over a global cap, no invite is stored.
+    const capped = this.emailRetry()
+    if (capped) return { limited: capped }
 
     const now = Date.now()
     // Only the newest invite for an address works.
@@ -325,7 +369,7 @@ export class Auth extends DurableObject<Env> {
   async alarm() {
     const now = Date.now()
     run(this.sql, 'DELETE FROM requests WHERE expires_at < ?', now - DAY)
-    run(this.sql, 'DELETE FROM starts WHERE at < ?', now - WINDOW_MS)
+    run(this.sql, 'DELETE FROM starts WHERE at + window_ms < ?', now)
     run(this.sql, 'DELETE FROM retired_refresh WHERE at < ?', now - 90 * DAY)
     run(this.sql, 'DELETE FROM invites WHERE expires_at < ?', now - 30 * DAY)
     await this.ctx.storage.setAlarm(now + HOUR)
