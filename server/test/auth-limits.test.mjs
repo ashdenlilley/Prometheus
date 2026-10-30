@@ -59,3 +59,59 @@ test('alarm deletes an expired, unverified sign-in request', () =>
     const left = (await authSql(w, "SELECT id FROM requests WHERE id = 'stale'"))
     assert.equal(left.length, 0)
   }))
+
+const other = { email: 'nobody@example.com', deviceName: 'Laptop' }
+
+test('a non-member start stores no request row', () =>
+  withWorker({}, async w => {
+    // The member start creates the Auth object's tables.
+    await call(w, '/auth/start', { method: 'POST', body: start })
+    const before = (await authSql(w, 'SELECT COUNT(*) AS n FROM requests'))[0].n
+    const res = await call(w, '/auth/start', { method: 'POST', body: other })
+    assert.equal(res.status, 200)
+    assert.equal((await authSql(w, 'SELECT COUNT(*) AS n FROM requests'))[0].n, before)
+  }))
+
+test('a non-member and a member get the same start reply shape, and poll the same way while pending', () =>
+  withWorker({}, async w => {
+    const member = await (await call(w, '/auth/start', { method: 'POST', body: start })).json()
+    const stranger = await (await call(w, '/auth/start', { method: 'POST', body: other })).json()
+    assert.deepEqual(Object.keys(stranger).sort(), Object.keys(member).sort())
+    assert.match(stranger.code, /^\d{6}$/)
+    assert.match(member.code, /^\d{6}$/)
+    for (const s of [member, stranger]) {
+      const res = await call(w, '/auth/poll', { method: 'POST', body: { requestId: s.requestId, pollSecret: s.pollSecret } })
+      assert.equal(res.status, 202)
+      assert.deepEqual(await res.json(), { status: 'pending' })
+    }
+  }))
+
+test('after the link TTL, a non-member and a member poll both get 410 gone', () =>
+  withWorker({ bindings: { LINK_TTL_SECONDS: '1' } }, async w => {
+    const member = await (await call(w, '/auth/start', { method: 'POST', body: start })).json()
+    const stranger = await (await call(w, '/auth/start', { method: 'POST', body: other })).json()
+    await new Promise(r => setTimeout(r, 1200))
+    for (const s of [member, stranger]) {
+      const res = await call(w, '/auth/poll', { method: 'POST', body: { requestId: s.requestId, pollSecret: s.pollSecret } })
+      assert.equal(res.status, 410)
+      assert.deepEqual(await res.json(), { error: 'gone' })
+    }
+  }))
+
+test('a wrong pollSecret is 404 for a non-member and a member alike, and a tampered requestId is 404', () =>
+  withWorker({}, async w => {
+    const member = await (await call(w, '/auth/start', { method: 'POST', body: start })).json()
+    const stranger = await (await call(w, '/auth/start', { method: 'POST', body: other })).json()
+    for (const s of [member, stranger]) {
+      const res = await call(w, '/auth/poll', { method: 'POST', body: { requestId: s.requestId, pollSecret: 'not-the-secret' } })
+      assert.equal(res.status, 404)
+      assert.deepEqual(await res.json(), { error: 'not_found' })
+    }
+
+    // Changing the last character of the signature breaks it.
+    const id = stranger.requestId
+    const tampered = id.slice(0, -1) + (id.endsWith('A') ? 'B' : 'A')
+    const res = await call(w, '/auth/poll', { method: 'POST', body: { requestId: tampered, pollSecret: stranger.pollSecret } })
+    assert.equal(res.status, 404)
+    assert.deepEqual(await res.json(), { error: 'not_found' })
+  }))

@@ -45,6 +45,11 @@ export function timingEqual(a: string, b: string): boolean {
 const hmacKey = (secret: string, usage: 'sign' | 'verify') =>
   crypto.subtle.importKey('raw', enc.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, [usage])
 
+// HMAC-SHA256 of text under secret, base64url. Deterministic, so it can be recomputed later instead of stored.
+export async function hmacB64url(secret: string, text: string): Promise<string> {
+  return b64url(new Uint8Array(await crypto.subtle.sign('HMAC', await hmacKey(secret, 'sign'), enc.encode(text))))
+}
+
 export async function signAccess(secret: string, deviceId: string): Promise<{ accessToken: string; accessExpiresAt: number }> {
   const now = Math.floor(Date.now() / 1000)
   const head = b64url(enc.encode(JSON.stringify({ alg: 'HS256', typ: 'JWT' })))
