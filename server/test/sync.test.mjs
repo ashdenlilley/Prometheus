@@ -257,3 +257,70 @@ test('load sanity: 3 sockets, 1,000 ops; every socket ends at the same head with
     assert.ok(frames.every(f => f.ops.length <= 500))
     assert.deepEqual(frames.flatMap(f => f.ops.map(o => o.seq)), Array.from({ length: 1000 }, (_, i) => i + 1))
   }))
+
+// OS-466 (security fix 5): op limits, push quotas, paged hello.
+const now = () => Date.now() - 1000
+
+test('opError: an id over 128 chars, a field value over 64 KiB, or more than 200 fields is rejected', () =>
+  withWorker({}, async w => {
+    const sock = await openSocket(w, (await signIn(w)).accessToken)
+    await hello(sock)
+    push(sock, 'id129', [setTitle(now(), 'x'.repeat(129), 't')])
+    assert.deepEqual([(await ackFor(sock, 'id129')).code, (await ackFor(sock, 'id129')).message], ['invalid', 'bad id'])
+    push(sock, 'id128', [setTitle(now(), 'x'.repeat(128), 't')])
+    assert.equal((await ackFor(sock, 'id128')).type, 'ack')
+    push(sock, 'big', [setTitle(now(), 'big', 'x'.repeat(70 * 1024))])
+    assert.deepEqual([(await ackFor(sock, 'big')).code, (await ackFor(sock, 'big')).message], ['invalid', 'field value too large'])
+    const set = Object.fromEntries(Array.from({ length: 201 }, (_, i) => [`f${i}`, i]))
+    push(sock, 'wide', [{ hlc: hlc(now(), 0, 'dev'), table: 'issues', id: 'wide', set }])
+    assert.deepEqual([(await ackFor(sock, 'wide')).code, (await ackFor(sock, 'wide')).message], ['invalid', 'too many fields'])
+  }))
+
+test('push quota: the 21st push within 10 s is rate_limited; 3 overruns in a row close the socket with 4008', () =>
+  withWorker({}, async w => {
+    const sock = await openSocket(w, (await signIn(w)).accessToken)
+    await hello(sock)
+    for (let i = 0; i < 20; i++) {
+      push(sock, `q${i}`, [setTitle(now(), `r${i}`, 't')])
+      assert.equal((await ackFor(sock, `q${i}`)).type, 'ack')
+    }
+    for (let i = 20; i < 23; i++) {
+      push(sock, `q${i}`, [setTitle(now(), `r${i}`, 't')])
+      const err = await ackFor(sock, `q${i}`)
+      assert.deepEqual([err.type, err.code], ['error', 'rate_limited'])
+    }
+    await waitFor(() => sock.closeCode === 4008)
+    assert.equal(sock.closeCode, 4008)
+  }))
+
+test('push quota: ops per window are capped (OPS_MAX override); the window frees up again (OPS_WINDOW_MS override)', () =>
+  withWorker({ bindings: { OPS_MAX: '10', OPS_WINDOW_MS: '300' } }, async w => {
+    const sock = await openSocket(w, (await signIn(w)).accessToken)
+    await hello(sock)
+    const ops = n => Array.from({ length: n }, (_, i) => setTitle(now(), `o${i}`, 't'))
+    push(sock, 'a', ops(8))
+    assert.equal((await ackFor(sock, 'a')).type, 'ack')
+    push(sock, 'b', ops(3))
+    assert.equal((await ackFor(sock, 'b')).code, 'rate_limited')
+    await new Promise(r => setTimeout(r, 350))
+    push(sock, 'c', ops(3))
+    assert.equal((await ackFor(sock, 'c')).type, 'ack')
+  }))
+
+test('hello with 3,000 ops delivers every op, in order, in batches of at most 500', () =>
+  withWorker({}, async w => {
+    const owner = await signIn(w)
+    const sock = await openSocket(w, owner.accessToken)
+    await hello(sock)
+    for (let p = 0; p < 3; p++) {
+      push(sock, `h${p}`, Array.from({ length: 1000 }, (_, k) => setTitle(now(), `row-${k % 50}`, `t${p}-${k}`)))
+      assert.equal((await ackFor(sock, `h${p}`)).type, 'ack')
+    }
+    const fresh = await openSocket(w, owner.accessToken)
+    const ready = await hello(fresh, 0)
+    assert.equal(ready.head, 3000)
+    const frames = fresh.ofType('ops')
+    assert.equal(frames.length, 6)
+    assert.ok(frames.every(f => f.ops.length <= 500))
+    assert.deepEqual(frames.flatMap(f => f.ops.map(o => o.seq)), Array.from({ length: 3000 }, (_, i) => i + 1))
+  }))

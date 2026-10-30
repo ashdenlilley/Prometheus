@@ -205,3 +205,30 @@ test('the owner sees and writes every row, restricted ones included', () =>
     push(os, 'o3', [edit(30, 'issues', 'i2', { title: 'owner edit' })])
     assert.equal((await ackFor(os, 'o3')).type, 'ack')
   }))
+
+// OS-466 (security fix 5).
+test('a viewer pushing 1,000 forbidden ops adds one denial row (logged once per push); the log stays capped at 1000', () =>
+  withWorker({}, async w => {
+    const owner = await signIn(w)
+    await seed(w, owner)
+    const v = await join(w, 'viewer@example.test', 'viewer', [])
+    const vs = await connect(w, v.accessToken)
+    push(vs, 'many', Array.from({ length: 1000 }, (_, k) => make(100 + k, 'issues', `g${k}`, { projectId: 'p1', title: 'no' })))
+    assert.equal((await ackFor(vs, 'many')).code, 'forbidden')
+    const log = await (await call(w, '/audit/denials', { headers: auth(owner.accessToken) })).json()
+    assert.equal(log.length, 1)
+    assert.equal(log[0].row, 'g0')
+  }))
+
+test('over the size threshold, non-owner pushes get workspace_full; the owner can still push', () =>
+  withWorker({ bindings: { WORKSPACE_FULL_BYTES: '1' } }, async w => {
+    const owner = await signIn(w)
+    const os = await seed(w, owner)
+    const m = await join(w, 'member@example.test', 'member', [])
+    const ms = await connect(w, m.accessToken)
+    push(ms, 'm1', [edit(20, 'issues', 'i1', { title: 'member' }, 'm')])
+    const err = await ackFor(ms, 'm1')
+    assert.deepEqual([err.type, err.code], ['error', 'workspace_full'])
+    push(os, 'o1', [edit(21, 'issues', 'i1', { title: 'owner' })])
+    assert.equal((await ackFor(os, 'o1')).type, 'ack')
+  }))
