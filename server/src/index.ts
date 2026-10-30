@@ -36,9 +36,23 @@ const EDGE_PATHS = ['/auth/start', '/auth/poll', '/auth/verify', '/auth/refresh'
 // Display name from request input: trimmed and at most 100 characters. '' when absent.
 const nameOf = (v: unknown) => (typeof v === 'string' ? v.trim().slice(0, 100) : '')
 
+// Thrown by bodyText and answered with 413 in fetch, so no caller can mistake an oversized body for a bad one.
+class TooLarge extends Error {}
+const MAX_BODY = 16384
+
+// Body text up to MAX_BODY bytes. Chunked bodies have no Content-Length, so they are refused too.
+async function bodyText(req: Request): Promise<string> {
+  const len = req.headers.get('content-length')
+  if (len === null || !(Number(len) <= MAX_BODY)) throw new TooLarge()
+  const buf = await req.arrayBuffer()
+  if (buf.byteLength > MAX_BODY) throw new TooLarge()
+  return new TextDecoder().decode(buf)
+}
+
 async function readJson(req: Request): Promise<Record<string, unknown> | null> {
+  const text = await bodyText(req)
   try {
-    const body = await req.json()
+    const body = JSON.parse(text)
     return typeof body === 'object' && body !== null ? (body as Record<string, unknown>) : null
   } catch {
     return null
@@ -88,7 +102,7 @@ async function startSignIn(req: Request, env: Env, ctx: ExecutionContext): Promi
 async function verifyLink(req: Request, env: Env): Promise<Response> {
   if (!formOriginOk(req, env)) return badOrigin()
   // Form body, so the token never lands in a URL the browser or proxies log again.
-  const form = new URLSearchParams(await req.text())
+  const form = new URLSearchParams(await bodyText(req))
   const t = form.get('t') ?? ''
   const ok = t !== '' && t.length <= 200 && (await auth(env).verifyLink(await sha256Hex(t), await sha256Hex(form.get('code') ?? '')))
   return ok ? signedInPage() : invalidLinkPage()
@@ -235,7 +249,7 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
   }
   if (m === 'POST' && p === '/invite') {
     if (!formOriginOk(req, env)) return badOrigin()
-    const t = new URLSearchParams(await req.text()).get('t') ?? ''
+    const t = new URLSearchParams(await bodyText(req)).get('t') ?? ''
     const res = t !== '' && t.length <= 200 ? await auth(env).acceptInvite(await sha256Hex(t)) : null
     return res ? inviteAcceptedPage(res.email, env.PUBLIC_URL!) : invalidInvitePage()
   }
@@ -280,8 +294,13 @@ export default {
     if (missing) return json({ error: 'config_missing', message: `Missing setting: ${missing}` }, 500)
 
     try {
-      return await route(req, env, ctx)
+      const res = await route(req, env, ctx)
+      // Every 401 spends a bearer-fail slot for this IP, which slows token guessing.
+      if (res.status === 401 && (await throttled(env.AUTH_RL, `bearer-fail:${ipKey(req.headers.get('CF-Connecting-IP'))}`)))
+        return json({ error: 'rate_limited' }, 429, { 'Retry-After': '60' })
+      return res
     } catch (e) {
+      if (e instanceof TooLarge) return json({ error: 'too_large' }, 413)
       console.error('request failed:', e instanceof Error ? e.message : 'unknown')
       return json({ error: 'internal' }, 500)
     }

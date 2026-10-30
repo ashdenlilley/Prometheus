@@ -414,12 +414,18 @@ export class Auth extends DurableObject<Env> {
 
   // Cleans expired sign-in requests and sync tickets, old rate-limit rows, retired refresh tokens and long-expired invites.
   async alarm() {
+    this.prune()
+    await this.ctx.storage.setAlarm(Date.now() + HOUR)
+  }
+
+  // Hourly cleanup, run by alarm(). Public so tests can run it (alarm() is reserved and not callable over RPC).
+  prune() {
     const now = Date.now()
     run(this.sql, 'DELETE FROM requests WHERE expires_at < ?', now - DAY)
+    run(this.sql, 'DELETE FROM requests WHERE verified = 0 AND expires_at < ?', now)
     run(this.sql, 'DELETE FROM tickets WHERE expires_at <= ?', now)
     run(this.sql, 'DELETE FROM starts WHERE at + window_ms < ?', now)
     run(this.sql, 'DELETE FROM retired_refresh WHERE at < ?', now - 90 * DAY)
     run(this.sql, 'DELETE FROM invites WHERE expires_at < ?', now - 30 * DAY)
-    await this.ctx.storage.setAlarm(now + HOUR)
   }
 }

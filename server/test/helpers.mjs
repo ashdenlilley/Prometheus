@@ -6,7 +6,7 @@ export const JWT_SECRET = 'test-jwt-secret-not-a-real-key-0123456789abcdef'
 export const BASE = 'https://sync.test'
 const SCRIPT = new URL('../dist/worker.js', import.meta.url).pathname
 
-export async function createWorker({ bindings = {}, omit = [] } = {}) {
+export async function createWorker({ bindings = {}, omit = [], ratelimits } = {}) {
   const emails = []
   const all = {
     OWNER_EMAIL: OWNER,
@@ -29,6 +29,7 @@ export async function createWorker({ bindings = {}, omit = [] } = {}) {
       WORKSPACE: { className: 'Workspace', useSQLite: true }
     },
     bindings: all,
+    ...(ratelimits && { ratelimits }),
     unsafeInspectDurableObjects: true,
     // Records every outbound call (the email API) instead of sending it.
     outboundService: async req => {
@@ -62,6 +63,8 @@ export function call(w, path, { method = 'GET', body, form, raw, headers = {}, i
     payload = JSON.stringify(body)
   }
   if (ip) h['cf-connecting-ip'] = ip
+  // dispatchFetch sends string bodies chunked; real clients send Content-Length, which the server requires.
+  if (typeof payload === 'string' && !Object.keys(h).some(k => k.toLowerCase() === 'content-length')) h['content-length'] = String(Buffer.byteLength(payload))
   return w.mf.dispatchFetch(BASE + path, { method, headers: h, body: payload })
 }
 
