@@ -36,7 +36,9 @@ const SCHEMA = [
      projects TEXT NOT NULL DEFAULT '[]', created_at INTEGER NOT NULL, removed_at INTEGER)`,
   `CREATE TABLE IF NOT EXISTS invites (id TEXT PRIMARY KEY, token_hash TEXT NOT NULL UNIQUE, email TEXT NOT NULL, name TEXT NOT NULL,
      role TEXT NOT NULL, projects TEXT NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL,
-     accepted_at INTEGER, revoked_at INTEGER)`
+     accepted_at INTEGER, revoked_at INTEGER)`,
+  // Single-use socket tickets, stored as hashes. Deleted on redeem, or by the alarm once expired.
+  `CREATE TABLE IF NOT EXISTS tickets (hash TEXT PRIMARY KEY, device_id TEXT NOT NULL, expires_at INTEGER NOT NULL)`
 ]
 
 type Sql = SqlStorage
@@ -259,6 +261,21 @@ export class Auth extends DurableObject<Env> {
     return { userId: m.id, email: m.email, name: m.name, role: m.role as Role, projects: JSON.parse(m.projects) }
   }
 
+  // Single-use sync ticket for a device. Only its hash is stored.
+  async createTicket(deviceId: string): Promise<string> {
+    const ticket = randomId(32)
+    run(this.sql, 'INSERT INTO tickets (hash, device_id, expires_at) VALUES (?, ?, ?)', await sha256Hex(ticket), deviceId, Date.now() + Number(this.env.SYNC_TICKET_TTL_SECONDS ?? 60) * 1000)
+    return ticket
+  }
+
+  // The delete runs before any other step, so a second redeem of the same ticket finds no row.
+  async redeemTicket(hash: string): Promise<{ dev: string; member: Member } | null> {
+    const t = rows<{ device_id: string; expires_at: number }>(this.sql, 'DELETE FROM tickets WHERE hash = ? RETURNING device_id, expires_at', hash)[0]
+    if (!t || t.expires_at <= Date.now()) return null
+    const member = await this.authorize(t.device_id)
+    return member ? { dev: t.device_id, member } : null
+  }
+
   async listDevices(currentId: string, userId: string) {
     return rows<{ id: string; name: string; created_at: number; last_seen_at: number }>(
       this.sql,
@@ -395,10 +412,11 @@ export class Auth extends DurableObject<Env> {
     return rows<{ id: string }>(this.sql, 'UPDATE invites SET revoked_at = ? WHERE id = ? AND accepted_at IS NULL AND revoked_at IS NULL RETURNING id', Date.now(), id).length > 0
   }
 
-  // Cleans expired sign-in requests, old rate-limit rows, retired refresh tokens and long-expired invites.
+  // Cleans expired sign-in requests and sync tickets, old rate-limit rows, retired refresh tokens and long-expired invites.
   async alarm() {
     const now = Date.now()
     run(this.sql, 'DELETE FROM requests WHERE expires_at < ?', now - DAY)
+    run(this.sql, 'DELETE FROM tickets WHERE expires_at <= ?', now)
     run(this.sql, 'DELETE FROM starts WHERE at + window_ms < ?', now)
     run(this.sql, 'DELETE FROM retired_refresh WHERE at < ?', now - 90 * DAY)
     run(this.sql, 'DELETE FROM invites WHERE expires_at < ?', now - 30 * DAY)

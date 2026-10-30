@@ -551,19 +551,40 @@ export class CloudSync {
     return res
   }
 
+  // Subprotocol that authenticates the sync socket: a single-use ticket from POST /sync/ticket, so a logged header is useless.
+  private async socketAuth(): Promise<string> {
+    const ask = (token: string) => this.fetch(`${this.config.serverUrl}/sync/ticket`, { method: 'POST', headers: { authorization: `Bearer ${token}` } })
+    let token = await this.accessToken()
+    let res = await ask(token)
+    if (res.status === 401) {
+      // The access token may have been rejected early (clock skew, secret rotation): refresh once, then give up.
+      await this.refresh()
+      token = this.access!.token
+      res = await ask(token)
+      if (res.status === 401) {
+        await this.forget(SIGNED_OUT)
+        throw new Error(SIGNED_OUT)
+      }
+    }
+    // A server from before tickets has no /sync/ticket and takes the deprecated bearer.<token>. Remove with the server's bearer support.
+    if (res.status === 404) return `bearer.${token}`
+    if (!res.ok) throw new Error(`Socket ticket failed (HTTP ${res.status}).`)
+    return `ticket.${((await res.json()) as { ticket: string }).ticket}`
+  }
+
   private async connect() {
     if (this.stopped || !this.config.enabled || this.socket) return
-    let token: string
+    let auth: string
     try {
-      token = await this.accessToken()
+      auth = await this.socketAuth()
     } catch {
       if (this.config.enabled) this.retry()
       return
     }
-    // Another connect may have finished while the token was being refreshed.
-    if (this.socket || !this.config.enabled) return
+    // Another connect may have finished, or the client stopped, while the ticket was being fetched.
+    if (this.stopped || this.socket || !this.config.enabled) return
     const url = `${this.config.serverUrl.replace(/^http/, 'ws')}/sync`
-    const ws = new this.Socket(url, ['prometheus-sync', `bearer.${token}`])
+    const ws = new this.Socket(url, ['prometheus-sync', auth])
     this.socket = ws
     this.ready = false
     this.awaiting = false

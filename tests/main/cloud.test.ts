@@ -76,8 +76,9 @@ const track = (c: CloudSync) => {
   return c
 }
 
-function harness(handlers: Record<string, Handler>, initialData: AppData = emptyData()) {
+function harness(extra: Record<string, Handler>, initialData: AppData = emptyData()) {
   FakeSocket.all = []
+  const handlers: Record<string, Handler> = { 'POST /sync/ticket': () => json({ ticket: 'ticket-1' }), ...extra }
   const dir = mkdtempSync(join(tmpdir(), 'cloud-'))
   const creds = new Map<string, string>()
   const credentials = {
@@ -439,6 +440,41 @@ describe('CloudSync', () => {
     assert.equal(FakeSocket.all.length, 1, 'no second socket: nothing was joined')
     assert.equal(h.cloud.getStatus().needsJoin, true)
     assert.equal(h.cloud.getStatus().role, 'viewer')
+    h.cloud.stop()
+  })
+
+  test('the socket authenticates with a ticket, not the access token', async () => {
+    const h = harness(signInHandlers())
+    const s = await signedIn(h)
+    assert.deepEqual(s.protocols, ['prometheus-sync', 'ticket.ticket-1'])
+    assert.equal(h.calls.includes('POST /sync/ticket'), true)
+    h.cloud.stop()
+  })
+
+  test('a 401 on /sync/ticket refreshes the access token once, then the ticket is fetched', async () => {
+    let tickets = 0
+    let auth: string | undefined
+    const h = harness({
+      ...signInHandlers(),
+      'POST /sync/ticket': (_b, init) => {
+        tickets++
+        if (tickets === 1) return json({ error: 'unauthorized' }, 401)
+        auth = (init?.headers as Record<string, string>).authorization
+        return json({ ticket: 'ticket-2' })
+      },
+      '/auth/refresh': () => json({ refreshToken: 'refresh-2', accessToken: 'access-2', accessExpiresAt: Date.now() + 900_000 })
+    })
+    const s = await signedIn(h)
+    assert.deepEqual(s.protocols, ['prometheus-sync', 'ticket.ticket-2'])
+    assert.equal(auth, 'Bearer access-2')
+    assert.equal(h.calls.filter(c => c === 'POST /auth/refresh').length, 1)
+    h.cloud.stop()
+  })
+
+  test('a server without tickets (404) gets the deprecated bearer. protocol', async () => {
+    const h = harness({ ...signInHandlers(), 'POST /sync/ticket': () => json({ error: 'not_found' }, 404) })
+    const s = await signedIn(h)
+    assert.deepEqual(s.protocols, ['prometheus-sync', 'bearer.access-1'])
     h.cloud.stop()
   })
 
