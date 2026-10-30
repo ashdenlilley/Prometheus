@@ -581,8 +581,8 @@ export class CloudSync {
       if (this.config.enabled) this.retry()
       return
     }
-    // Another connect may have finished while the ticket was being fetched.
-    if (this.socket || !this.config.enabled) return
+    // Another connect may have finished, or the client stopped, while the ticket was being fetched.
+    if (this.stopped || this.socket || !this.config.enabled) return
     const url = `${this.config.serverUrl.replace(/^http/, 'ws')}/sync`
     const ws = new this.Socket(url, ['prometheus-sync', auth])
     this.socket = ws
