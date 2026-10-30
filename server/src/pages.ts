@@ -1,16 +1,18 @@
+import { b64url } from './crypto'
+
 // Sign-in pages. The GET page only shows a button; only the POST from that button verifies the link,
 // so email link scanners that pre-fetch URLs cannot consume it.
 const CSP = "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
 
 export const escapeHtml = (s: string) => s.replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`)
 
-function page(body: string, status = 200): Response {
+function page(body: string, status = 200, nonce?: string): Response {
   const html = `<!doctype html><meta charset="utf-8"><title>Prometheus sign-in</title><body style="font-family:system-ui;max-width:32rem;margin:4rem auto">${body}</body>`
   return new Response(html, {
     status,
     headers: {
       'content-type': 'text/html; charset=utf-8',
-      'content-security-policy': CSP,
+      'content-security-policy': nonce ? `${CSP}; script-src 'nonce-${nonce}'` : CSP,
       'x-content-type-options': 'nosniff',
       'referrer-policy': 'no-referrer',
       'cache-control': 'no-store'
@@ -22,16 +24,24 @@ function page(body: string, status = 200): Response {
 export const placeOf = (city: string | null | undefined, country: string | null | undefined) =>
   [city, country].filter(Boolean).join(', ') || 'an unknown location'
 
-export const confirmPage = (token: string, i: { deviceName: string; country: string | null; city: string | null; startedAt: number }) =>
-  page(
+export const confirmPage = (token: string, i: { deviceName: string; country: string | null; city: string | null; startedAt: number }) => {
+  // Fresh nonce per response so the one inline script is allowed without 'unsafe-inline'.
+  const nonce = b64url(crypto.getRandomValues(new Uint8Array(16)))
+  const started = new Date(i.startedAt)
+  return page(
     `<h1>Confirm sign-in</h1>` +
-      `<p>Sign in to Prometheus on ${escapeHtml(i.deviceName)} from ${escapeHtml(placeOf(i.city, i.country))}, started ${new Date(i.startedAt).toUTCString()}.</p>` +
+      `<p>Sign in to Prometheus on ${escapeHtml(i.deviceName)} from ${escapeHtml(placeOf(i.city, i.country))}, started ` +
+      `<time datetime="${started.toISOString()}">${started.toUTCString()}</time>.</p>` +
+      `<script nonce="${nonce}">for (const t of document.querySelectorAll('time[datetime]')) t.textContent = new Date(t.getAttribute('datetime')).toLocaleString()</script>` +
       `<form method="post" action="/auth/verify"><input type="hidden" name="t" value="${escapeHtml(token)}">` +
       `<label>Enter the code shown in Prometheus on the device you're signing in<br>` +
       `<input name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" required></label> ` +
       `<button type="submit">Confirm sign-in</button></form>` +
-      `<p>If you didn't just try to sign in, close this page.</p>`
+      `<p>If you didn't just try to sign in, close this page.</p>`,
+    200,
+    nonce
   )
+}
 
 export const signedInPage = () =>
   page('<h1>Signed in</h1><p>Signed in. You can close this tab and return to Prometheus.</p>')

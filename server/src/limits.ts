@@ -5,9 +5,10 @@ export async function throttled(limiter: RateLimit | undefined, key: string): Pr
 
 const LIMIT_IP = 20 // per client address per 15 min
 const LIMIT_IP_NONE = 5 // the shared 'none' bucket (no client address)
+const LIMIT_IP_WARP = 200 // the shared 'warp' bucket: many users leave through one WARP egress, so it needs a higher cap
 
 // Limit for an ipKey bucket. Requests with no client address share 'none', which is limited more tightly.
-export const ipLimit = (key: string) => (key === 'none' ? LIMIT_IP_NONE : LIMIT_IP)
+export const ipLimit = (key: string) => (key === 'none' ? LIMIT_IP_NONE : key === 'warp' ? LIMIT_IP_WARP : LIMIT_IP)
 
 // Bucket for one client address. IPv6 is bucketed per /48, since one site can hold a whole /48.
 // Cloudflare WARP (2a09:bac0::/29) shares one bucket, 'warp'. Requests with no CF-Connecting-IP share 'none'.

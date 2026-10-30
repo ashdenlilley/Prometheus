@@ -1,8 +1,32 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { BASE, OWNER, authSql, call, signIn, withWorker } from './helpers.mjs'
+import { BASE, OWNER, authSql, call, lastToken, signIn, waitFor, withWorker } from './helpers.mjs'
 
 const start = { email: OWNER, deviceName: 'Laptop' }
+
+test('the confirm page times the start with a nonce-locked script, and each load gets a new nonce', () =>
+  withWorker({}, async w => {
+    const before = w.emails.length
+    await call(w, '/auth/start', { method: 'POST', body: start })
+    await waitFor(() => w.emails.length > before)
+    const t = lastToken(w)
+    const nonces = []
+    for (let i = 0; i < 2; i++) {
+      const res = await call(w, `/auth/verify?t=${t}`)
+      assert.equal(res.status, 200)
+      const html = await res.text()
+      const time = /<time datetime="([^"]+)">/.exec(html)
+      assert.ok(time && !Number.isNaN(Date.parse(time[1])) && time[1].endsWith('Z'), html)
+      const script = /<script nonce="([^"]+)">/.exec(html)
+      assert.ok(script, html)
+      const csp = res.headers.get('content-security-policy')
+      const scriptSrc = /script-src ([^;]*)/.exec(csp)[1]
+      assert.equal(scriptSrc, `'nonce-${script[1]}'`)
+      assert.ok(!scriptSrc.includes('unsafe-inline'))
+      nonces.push(script[1])
+    }
+    assert.notEqual(nonces[0], nonces[1])
+  }))
 
 test('a JSON body over 16 KiB is refused with 413', () =>
   withWorker({}, async w => {
